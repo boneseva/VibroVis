@@ -1,0 +1,204 @@
+html, body {
+    width: 100vw;
+    height: 100vh;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
+#main-container {
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    background: #f7f9fa;
+    font-family: 'Segoe UI', Arial, sans-serif;
+}
+
+#main-content {
+    display: flex;
+    width: 100vw;
+    height: 100vh;
+}
+
+#scatter-audio-container {
+    flex: 3;
+    min-width: 0;
+    max-width: 80%;
+    padding: 1vw 1vw 1vw 1vw;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: stretch;
+    height: 100vh;
+    background: #fff;
+    box-shadow: 2px 0 8px #eee;
+}
+
+#scatter {
+    width: 100% !important;
+    height: 80vh !important;
+    border-radius: 10px;
+    /*box-shadow: 0 2px 8px #eaeaea;*/
+    background: #fff;
+}
+
+#audio-spectrogram-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    height: 30vh;
+}
+
+#spectrogram-plot-container {
+    width: 100%;
+    margin: 0 0 0 0;
+    height: 18%;
+    border-radius: 8px;
+    padding: 0 0 0 130px;
+}
+
+#spectrogram-plot {
+    width: 98.5%;
+}
+
+#audio-player {
+    width: 100%;
+    margin: 0 auto;
+}
+
+#info {
+    font-size: 1.15em;
+    margin-bottom: 1.5em;
+    margin-left: 1.5em;
+    color: #2a3f5f;
+}
+
+#filter-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    padding: 0;
+    box-shadow: -2px 0 8px #eee;
+    background: #f9f9f9;
+    max-width: 420px;
+    min-width: 320px;
+    flex: 1.2;
+    position: relative;
+}
+
+#filter-panel-container {
+    overflow-y: auto;
+    padding: 0.5em;
+    flex-grow: 1;      /* This makes it take all available vertical space */
+    max-height: none;  /* Remove max-height so flexbox can manage height */
+}
+
+#filter-title, #sampling-title, #merging-title, #advanced-options-title {
+    color: #2a3f5f;
+    font-weight: 700;
+    margin-top: 1.8em;
+    margin-bottom: 0.7em;
+    border-bottom: 1.5px solid #eaeaea;
+    padding-bottom: 0.3em;
+    letter-spacing: 0.02em;
+}
+
+details > .section-title {
+    color: #2a3f5f;
+    font-weight: 700;
+    margin-top: 1.8em;
+    margin-bottom: 0.7em;
+    border-bottom: 1.5px solid #eaeaea;
+    padding-bottom: 0.3em;
+    letter-spacing: 0.02em;
+}
+
+#histogram-title {
+    color: #2a3f5f;
+    margin-top: 0.5em;
+    margin-bottom: 0;
+    padding-bottom: 0;
+    letter-spacing: 0.02em;
+}
+
+#filter-title {
+    margin-top: 0.5em;
+}
+
+#filter-panel-container label {
+    font-weight: 500;
+    color: #3d3d3d;
+}
+
+#filter-panel-container .Select-control {
+    border-radius: 6px;
+}
+
+#filter-panel-container .Select-menu-outer {
+    border-radius: 6px;
+}
+
+#histogram-container {
+    position: relative;
+    height: 300px;
+    width: 100%;
+    border-top: 1px solid #eaeaea;
+    box-shadow: 0 -2px 8px #eee;
+    padding: 0 0 3em 0.5em;
+    z-index: 10;
+    flex-shrink: 0;
+}
+
+#cluster-histogram {
+    width: 100% !important;
+    height: 100% !important;
+    margin-bottom: 5em !important;
+}
+
+#fft-window-size-title #fft-step-size-title {
+    color: #2a3f5f;
+    font-weight: 700;
+    margin: 1.8em 1em 0.7em;
+    border-bottom: 1.5px solid #eaeaea;
+    padding-bottom: 0.3em;
+    letter-spacing: 0.02em;
+}
+
+.spectrogram-labels {
+    margin-bottom: 1em;
+    margin-right: 1em;
+    padding-left: 1em;
+}
+
+/*!* === Responsive Tweaks === *!
+@media (max-width: 1100px) {
+    #main-content {
+        flex-direction: column;
+    }
+    #scatter-audio-container, #filter-container {
+        width: 100vw;
+        max-width: 100vw;
+        min-width: 0;
+    }
+    #filter-container {
+        height: 60vh;
+        max-height: 60vh;
+    }
+    #filter-panel-container {
+        max-height: 40vh;
+    }
+    #histogram-container {
+        height: 120px;
+    }
+}*/
+
+/* === Misc === */
+::-webkit-scrollbar {
+    width: 8px;
+    /*background: #eaeaea;*/
+}
+::-webkit-scrollbar-thumb {
+    background: #c5c5c5;
+    border-radius: 4px;
+}
