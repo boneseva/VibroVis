@@ -1,0 +1,24 @@
+## zaženemo na vseh + 20 clustrov
+## optimize
+- virtualka
+- fft window size: 320, 160 step size
+## prestavi embeddinge za žabe na voz!
+- histogram za filtrirane stvari
+- histogram tudi po dnevih, ne samo po urah 
+- histogram kjer je namesto števila točk, samo ja ali ne za vsako uro
+- še histogram za dan/čas (kateri clustri se pojavljajo???)
+## datumi na dropdown ne koledar
+- temperatura dodatno na histogramu, sunrise and sunset (ali bo temperatura per wav ali per clip?)
+- info card nad histogramom
+
+
+- ## tsv z listom vseh wav in lokacijo, imena kanalov, datum, ura začetka
+wav file | datum | ura začetka | lokacija | channel | ime kanala (vibro = rastline, žabe = tip in številka mikrofona) | tip snemalnika | sunrise sunset time
+
+- labeling podatkov z modelom
+- lahko izbereš samo eno lokacijo naenkrat!! clustering se poračuna na lokacijah
+
+
+- imena clustrom in točkam
+- inference + clustering posnetkov
+- animacija časovno

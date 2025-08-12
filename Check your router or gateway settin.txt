@@ -1,0 +1,2 @@
+Check your router or gateway settings: Look into its web admin interface for any settings about maximum HTTP request size, firewall rules, or proxy features that could limit payload sizes.
+

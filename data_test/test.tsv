@@ -1,0 +1,10 @@
+wav_file	day	start_time	location	microlocation	channel	channel_name	recorder_type	sunrise	sunset
+fake_data\0108\fake.00.wav	2024-08-01	09:00:00	Lok1	Lok11	1	1	laser	05:52	20:08
+fake_data\0108\fake.01.wav	2024-08-01	09:00:00	Lok1	Lok11	2	2	laser	05:52	20:08
+fake_data\0108\fake.02.wav	2024-08-01	09:00:00	Lok1	Lok11	1	1	laser	05:52	20:08
+fake_data\0308\fake.00.wav	2024-08-03	09:00:00	Lok2	Lok21	1	1	laser	05:52	20:08
+fake_data\0308\fake.01.wav	2024-08-03	09:00:00	Lok2	Lok22	2	2	laser	05:52	20:08
+fake_data\0308\fake.02.wav	2024-08-03	09:00:00	Lok2	Lok23	2	2	laser	05:52	20:08
+fake_data\0308\fake.02.wav	2024-08-03	09:00:00	Lok2	Lok23	1	1	laser	05:52	20:08
+fake_data\0708\fake.00.wav	2024-08-07	09:00:00	Lok4	Lok41	1	1	laser	05:52	20:08
+fake_data\0708\fake.01.wav	2024-08-07	09:00:00	Lok4	Lok41	2	2	laser	05:52	20:08

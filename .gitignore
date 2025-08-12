@@ -1,2 +1,5 @@
 /data/
-/vibro/
+/data_test/
+/__pycache__/
+
+/.idea/
