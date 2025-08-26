@@ -14,7 +14,7 @@ app.title = "VibroVis"
 print(df.head())
 app.layout = create_layout(df)
 callbacks.register_callbacks(app)
-server = app.server
+# server = app.server
 
 PORT = 8050
 ADDRESS = "0.0.0.0"

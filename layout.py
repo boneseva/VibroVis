@@ -12,7 +12,47 @@ def create_layout(df):
 
             html.Div([
                 dcc.Graph(id='scatter'),
-                html.Div(id="info"),
+                html.Div(id="info", style={'marginRight': '1em'}),
+
+                html.Div([
+                    html.Div([
+                        html.Button(
+                            "Autoplay: OFF",
+                            id='autoplay-toggle-btn',
+                            n_clicks=0,
+                            style={'background-color': 'lightgray'}
+                        ),
+                    ]),
+                    dcc.RadioItems(
+                        id='color-by-radio',
+                        options=[
+                            {'label': 'Color by Cluster', 'value': 'cluster'},
+                            {'label': 'Color by Manual Label', 'value': 'label'}
+                        ],
+                        value='cluster',
+                        labelStyle={'display': 'inline-block', 'margin-right': '1em', 'marginBottom': '0.5em'}
+                    ),
+                    html.Div([
+                        dcc.Dropdown(
+                            id='existing-label-dropdown',
+                            options=[],
+                            placeholder="Select existing label",
+                            clearable=True,
+                        ),
+                        dcc.Input(
+                            id='new-label-input',
+                            type='text',
+                            placeholder="Or type new label",
+                            debounce=True,
+                        ),
+                        html.Button(
+                            "Apply Manual Label",
+                            id="apply-manual-label-btn",
+                            n_clicks=0,
+                        ),
+                    ], className="labels-row"),
+                ], id='labeling-container'),
+
                 html.Div([
                     html.Audio(id='audio-player', controls=True, autoPlay=True),
                     html.Div(
@@ -23,124 +63,137 @@ def create_layout(df):
                         id='spectrogram-plot-container'
                     ),
                     dcc.Store(id='spectrogram-cache'),
+                    dcc.Store(id='selected-point-index', data=None),
+                    dcc.Store(id='labels-store', data={}),
                 ], id='audio-spectrogram-container')
             ], id='scatter-audio-container'),
 
             html.Div([
                 html.Div([
-                    html.H4("Filters", id='filter-title'),
-                    html.Div([
-                        html.Label("Location", style={'marginTop': '1em'}),
-                        dcc.Dropdown(
-                            id='location-dropdown',
-                            options=[{'label': str(loc), 'value': loc} for loc in
-                                     sorted(df['location'].dropna().unique())],
-                            multi=False,
-                            placeholder="Select a location",
-                            value=sorted(df['location'].dropna().unique())[0]
-                        ),
-                        html.Label("Microlocation", style={'marginTop': '1em'}),
-                        dcc.Dropdown(
-                            id='microlocation-dropdown',
-                            options=[],
-                            multi=True,
-                            placeholder="Select microlocation(s)",
-                            value=[],
-                            style={'marginBottom': '1em'},
-                        ),
-                        html.Label("Model"),
-                        dcc.Dropdown(
-                            id='model-dropdown',
-                            options=[{'label': str(m), 'value': m} for m in sorted(df['model_name'].unique())],
-                            multi=False,
-                            placeholder="Select a model",
-                            value=sorted(df['model_name'].unique())[0]
-                        ),
-                        html.Label("Channels", style={'marginTop': '1em'}),
-                        dcc.Checklist(
-                            id="all-or-none-channel",
-                            options=[{"label": "Select All", "value": "All"}],
-                            value=["All"],
-                            labelStyle={"display": "inline-block"},
-                        ),
-                        dcc.Checklist(
-                            id='channel-checklist',
-                            options=[{'label': str(c), 'value': c} for c in sorted(df['channel'].unique())],
-                            value=df['channel'].unique().tolist(),
-                            labelStyle={"display": "inline-block"},
-                        ),
-                        html.Label("Number of clusters", style={'marginTop': '1em'}),
-                        dcc.Dropdown(
-                            id='num-cluster-dropdown',
-                            options=[{'label': str(c), 'value': c} for c in sorted(df['cluster_num'].unique())],
-                            multi=False,
-                            placeholder="Select number of clusters",
-                            value=sorted(df['cluster_num'].unique())[0]
-                        ),
-                        html.Label("Clusters", style={'marginTop': '1em'}),
-                        dcc.Checklist(
-                            id="all-or-none-cluster",
-                            options=[{"label": "Select All", "value": "All"}],
-                            value=["All"],
-                            labelStyle={"display": "inline-block"},
-                        ),
-                        dcc.Checklist(
-                            id='cluster-checklist',
-                            options=[{'label': str(int(c)), 'value': int(c)} for c in sorted(df['cluster_id'].unique())],
-                            value=df['cluster_id'].unique().tolist(),
-                            labelStyle={"display": "inline-block"}
-                        ),
-                        html.Label("Dates", style={'marginTop': '1em', 'marginRight': '0.5em'}),
-                        dcc.Dropdown(
-                            id='date-dropdown',
-                            options=[
-                                {'label': d, 'value': d}
-                                for d in sorted(df['day_dt'].dt.strftime('%Y-%m-%d').unique())
-                            ],
-                            multi=True,
-                            value=sorted(df['day_dt'].dt.strftime('%Y-%m-%d').unique()),
-                            placeholder="Select date(s)...",
-                            style={'marginTop': '0.5em'}
-                        ),
-                        html.Label("Hour range", style={'marginTop': '1em', 'marginRight': '0.5em'}),
-                        html.Div(
-                            dcc.RangeSlider(
-                                id='hour-slider',
-                                min=int(min_hour),
-                                max=int(max_hour)+1,
-                                value=[min_hour, max_hour],
-                                step=0.25,
-                                marks={h: f"{int(h):02d}:00" for h in range(int(min_hour), int(max_hour) + 1, 1)},
-                                tooltip={
-                                    "placement": "bottom",
-                                    "always_visible": False,
-                                    "transform": "hourMinute"
-                                },
-                            ),
-                            style={'marginTop': '0.5em'}
-                        ),
-                    ]),
-                    html.H4("Sampling", id='sampling-title'),
-                    html.Div([
-                        html.Label("Max points", style={'marginRight': '0.5em'}),
-                        dcc.Input(
-                            id='max-points',
-                            type='number',
-                            min=1,
-                            placeholder='Max points',
-                            value=10000,
-                            style={'width': '40%', 'marginRight': '1em'}
-                        ),
-                        html.Button('Resample', id='resample-btn', n_clicks=0),
-                    ]),
-                    html.H4("Merging", id='merging-title'),
-                    html.Div([
-                        dcc.Loading(
-                            id="merge-loading",
-                            type="circle",
-                            fullscreen=False,
-                            children=[
-                                dcc.Store(id='merged-cache'),
+                            html.H4("Filters", id='filter-title'),
+                            html.Div([
+                                html.Label("Location", style={'marginTop': '1em'}),
+                                dcc.Dropdown(
+                                    id='location-dropdown',
+                                    options=[{'label': str(loc), 'value': loc} for loc in
+                                             sorted(df['location'].dropna().unique())],
+                                    multi=False,
+                                    placeholder="Select a location",
+                                    value=sorted(df['location'].dropna().unique())[0]
+                                ),
+                                html.Label("Microlocation", style={'marginTop': '1em'}),
+                                dcc.Dropdown(
+                                    id='microlocation-dropdown',
+                                    options=[],
+                                    multi=True,
+                                    placeholder="Select microlocation(s)",
+                                    value=[],
+                                    style={'marginBottom': '1em'},
+                                ),
+                                html.Label("Model"),
+                                dcc.Dropdown(
+                                    id='model-dropdown',
+                                    options=[{'label': str(m), 'value': m} for m in sorted(df['model_name'].unique())],
+                                    multi=False,
+                                    placeholder="Select a model",
+                                    value=sorted(df['model_name'].unique())[0]
+                                ),
+                                html.Label("Channels", style={'marginTop': '1em'}),
+                                dcc.Checklist(
+                                    id="all-or-none-channel",
+                                    options=[{"label": "Select All", "value": "All"}],
+                                    value=["All"],
+                                    labelStyle={"display": "inline-block"},
+                                ),
+                                dcc.Checklist(
+                                    id='channel-checklist',
+                                    options=[{'label': str(c), 'value': c} for c in sorted(df['channel'].unique())],
+                                    value=df['channel'].unique().tolist(),
+                                    labelStyle={"display": "inline-block"},
+                                ),
+                                html.Label("Number of clusters", style={'marginTop': '1em'}),
+                                dcc.Dropdown(
+                                    id='num-cluster-dropdown',
+                                    options=[{'label': str(c), 'value': c} for c in sorted(df['cluster_num'].unique())],
+                                    multi=False,
+                                    placeholder="Select number of clusters",
+                                    value=sorted(df['cluster_num'].unique())[0]
+                                ),
+                                html.Label("Clusters", style={'marginTop': '1em'}),
+                                dcc.Checklist(
+                                    id="all-or-none-cluster",
+                                    options=[{"label": "Select All", "value": "All"}],
+                                    value=["All"],
+                                    labelStyle={"display": "inline-block"},
+                                ),
+                                dcc.Checklist(
+                                    id='cluster-checklist',
+                                    options=[{'label': str(int(c)), 'value': int(c)} for c in
+                                             sorted(df['cluster_id'].unique())],
+                                    value=df['cluster_id'].unique().tolist(),
+                                    labelStyle={"display": "inline-block"}
+                                ),
+                                html.Label("Labels", style={'marginTop': '1em'}),
+                                dcc.Checklist(
+                                    id='label-filter-checklist',
+                                    options=[],
+                                    value=['unlabeled', 'background'],
+                                    labelStyle={'display': 'inline-block'}
+                                ),
+                                html.Label("Dates", style={'marginTop': '1em', 'marginRight': '0.5em'}),
+                                dcc.Dropdown(
+                                    id='date-dropdown',
+                                    options=[
+                                        {'label': d, 'value': d}
+                                        for d in sorted(df['day_dt'].dt.strftime('%Y-%m-%d').unique())
+                                    ],
+                                    multi=True,
+                                    value=sorted(df['day_dt'].dt.strftime('%Y-%m-%d').unique()),
+                                    placeholder="Select date(s)...",
+                                    style={'marginTop': '0.5em'}
+                                ),
+                                html.Label("Hour range", style={'marginTop': '1em', 'marginRight': '0.5em'}),
+                                html.Div(
+                                    dcc.RangeSlider(
+                                        id='hour-slider',
+                                        min=int(min_hour),
+                                        max=int(max_hour) + 1,
+                                        value=[min_hour, max_hour],
+                                        step=0.25,
+                                        marks={h: f"{int(h):02d}:00" for h in
+                                               range(int(min_hour), int(max_hour) + 1, 1)},
+                                        tooltip={
+                                            "placement": "bottom",
+                                            "always_visible": False,
+                                            "transform": "hourMinute"
+                                        },
+                                    ),
+                                    style={'marginTop': '0.5em'}
+                                ),
+                            ]),
+                            html.H4("Sampling", id='sampling-title'),
+                            html.Div([
+                                html.Label("Max points", style={'marginRight': '0.5em'}),
+                                dcc.Input(
+                                    id='max-points',
+                                    type='number',
+                                    min=1,
+                                    placeholder='Max points',
+                                    value=10000,
+                                    style={'width': '40%', 'marginRight': '1em'}
+                                ),
+                                html.Button('Resample', id='resample-btn', n_clicks=0),
+                            ]),
+
+                    dcc.Loading(
+                        id="merge-loading",
+                        type="circle",
+                        fullscreen=False,
+                        children=[
+
+                            html.H4("Merging", id='merging-title'),
+                            html.Div([
+                                # dcc.Store(id='merged-cache'),
                                 daq.BooleanSwitch(
                                     id='merge-switch',
                                     on=False,
@@ -175,12 +228,10 @@ def create_layout(df):
                                     ],
                                     id='clip-count-threshold-container',
                                     style={}
-                                ),
-                            ],
-                            style={'position': 'relative'}
-                        )
-                    ], id='merge-section-container', style={'position': 'relative'}),
-
+                                )
+                            ], id='merge-section-container', style={'position': 'relative'})],
+                        style={'position': 'relative'}
+                    ),
                     html.Div([
                         html.Details([
                             html.Summary("Advanced Options", className='section-title'),
@@ -234,7 +285,8 @@ def create_layout(df):
                                             {'label': 'Rectangular', 'value': 'boxcar'}
                                         ],
                                         value='hann',
-                                        style={'width': '120px', 'display': 'inline-block', 'marginBottom': 10, 'justifyContent': 'flex-end'}
+                                        style={'width': '120px', 'display': 'inline-block', 'marginBottom': 10,
+                                               'justifyContent': 'flex-end'}
                                     ),
                                 ], style={'display': 'flex'}),
 
@@ -289,7 +341,8 @@ def create_layout(df):
                                             {'label': 'Cividis', 'value': 'Cividis'}
                                         ],
                                         value='Viridis',
-                                        style={'width': '120px', 'display': 'inline-block', 'marginBottom': 10, 'justifyContent': 'flex-end'}
+                                        style={'width': '120px', 'display': 'inline-block', 'marginBottom': 10,
+                                               'justifyContent': 'flex-end'}
                                     ),
                                 ], style={'display': 'flex'}),
 
@@ -302,7 +355,8 @@ def create_layout(df):
                                         max=0,
                                         step=1,
                                         value=-100,
-                                        style={'width': '120px', 'display': 'inline-block', 'marginBottom': 10, 'justifyContent': 'flex-end'}
+                                        style={'width': '120px', 'display': 'inline-block', 'marginBottom': 10,
+                                               'justifyContent': 'flex-end'}
                                     ),
                                 ], style={'display': 'flex'}),
                             ])

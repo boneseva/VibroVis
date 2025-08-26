@@ -67,6 +67,85 @@ html, body {
     margin: 0 auto;
 }
 
+#labeling-container {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5em;
+    margin-top: 0.5em;
+    margin-bottom: 0.5em;
+}
+
+.labels-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5em;
+}
+
+
+#existing-label-dropdown .Select-control,
+#existing-label-dropdown .Select,
+#existing-label-dropdown,
+.Select-control,
+.Select {
+    border: none !important;
+    box-shadow: none !important;
+}
+#existing-label-dropdown .Select-control,
+#existing-label-dropdown {
+    background: #fff !important;
+    border-radius: 6px !important;
+}
+#existing-label-dropdown .Select-control:focus,
+#existing-label-dropdown:focus {
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+/* Target dropdowns, text input, and button */
+#existing-label-dropdown,
+#new-label-input,
+#apply-manual-label-btn {
+    height: 2.7em;
+    font-size: 14px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0 10px;
+    outline: none;
+    background: #fff;
+    vertical-align: middle;
+}
+
+#existing-label-dropdown {
+    min-width: 200px;
+    max-width: 250px;
+    border: 1px solid #ccc !important; /* override Dash default */
+    box-shadow: none !important;       /* kill weird shadow */
+}
+
+#new-label-input {
+    min-width: 200px;
+    max-width: 250px;
+}
+
+#apply-manual-label-btn {
+    background: #2a3f5f;
+    color: white;
+    border: none;
+    margin-left: 0.5em;
+    margin-bottom: 0;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+#apply-manual-label-btn:hover {
+    background: #3b5780;
+}
+
 #info {
     font-size: 1.15em;
     margin-bottom: 1.5em;
@@ -169,6 +248,19 @@ details > .section-title {
     margin-bottom: 1em;
     margin-right: 1em;
     padding-left: 1em;
+}
+
+#autoplay-toggle-btn {
+    height: 2.7em;
+    font-size: 14px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0 10px;
+    outline: none;
+    background: #fff;
+    vertical-align: middle;
 }
 
 /*!* === Responsive Tweaks === *!

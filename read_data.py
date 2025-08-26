@@ -18,6 +18,7 @@ def load_positions_tsv(wav_meta, data_dir, save_path=SAVE_PATH, batch_size=BATCH
     
     last_saved_len = 0
     buffer = []
+    point_idx = 0
 
     for idx, row in tqdm(wav_meta.iterrows(), total=len(wav_meta), desc="Loading positions TSV files"):
         wav_path = row['wav_file'].replace("\\", "/")
@@ -69,6 +70,11 @@ def load_positions_tsv(wav_meta, data_dir, save_path=SAVE_PATH, batch_size=BATCH
             dff['channel_name'] = row['channel_name']
 
             dff['abs_file_name'] = mp3_wav_path
+
+            dff['manual_label'] = row['manual_label'] if 'manual_label' in dff.columns else 'unlabeled'
+            dff['row_idx'] = range(point_idx, point_idx + len(dff))
+
+            point_idx += len(dff)
 
             dff = dff.merge(row.to_frame().T, how='left', on=['wav_file', 'channel'], suffixes=('', '_meta'))
             df = pd.concat([df, dff], ignore_index=True)

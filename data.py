@@ -59,6 +59,8 @@ def load_positions_tsv(wav_meta, data_dir):
                 dff['recorder_type'] = row['recorder_type']
                 dff['channel_name'] = row['channel_name']
 
+                dff['manual_label'] = row['manual_label'] if 'manual_label' in dff.columns else 'unlabeled'
+
                 dff['abs_file_name'] = mp3_wav_path
 
                 dff = dff.merge(row.to_frame().T, how='left', on=['wav_file', 'channel'], suffixes=('', '_meta'))

@@ -21,6 +21,8 @@ import numpy as np
 import pandas as pd
 from scipy.spatial.distance import euclidean
 
+from memory_profiler import profile
+
 def merge_clips_vectorized(dff, merge_threshold):
     if dff.empty:
         return dff
@@ -34,7 +36,6 @@ def merge_clips_vectorized(dff, merge_threshold):
     dff['prev_channel'] = dff['channel'].shift(1)
     dff['prev_cluster'] = dff['cluster_id'].shift(1)
     dff['prev_clip_end'] = dff['clip_time'].shift(1) + dff['clip_duration'].shift(1)
-
 
     prev_points = dff[['x', 'y']].shift(1).to_numpy()
     curr_points = dff[['x', 'y']].to_numpy()
@@ -53,7 +54,7 @@ def merge_clips_vectorized(dff, merge_threshold):
     merge_mask = same_context & temporal_continuity & spatial_proximity
     merge_groups = (~merge_mask).cumsum()
 
-    dff['row_idx'] = np.arange(len(dff))
+    dff['row_idx_merging'] = np.arange(len(dff))
     dff['clip_end'] = dff['clip_time'] + dff['clip_duration']
     agg_dict = {
         'x': ('x', 'mean'),
@@ -67,10 +68,11 @@ def merge_clips_vectorized(dff, merge_threshold):
         'file_name': ('file_name', 'first'),
         'channel': ('channel', 'first'),
         'start_dt': ('start_dt', 'first'),
-        'row_idx_min': ('row_idx', 'min'),
-        'row_idx_max': ('row_idx', 'max'),
+        'row_idx_merging_min': ('row_idx_merging', 'min'),
+        'row_idx_merging_max': ('row_idx_merging', 'max'),
         'model_name': ('model_name', 'first'),
         'mp3_file': ('mp3_file', 'first'),
+        'row_idx': ('row_idx', list)
     }
 
     grouped = dff.groupby(merge_groups).agg(**agg_dict).reset_index(drop=True)
@@ -139,16 +141,16 @@ def register_callbacks(dash_app):
 
         buf = io.BytesIO()
         try:
-            sf.write(buf, segment, samplerate, format='WAV')
+            sf.write(buf, segment, samplerate, format='mp3')
         except Exception as e:
             print(f"Error writing audio segment: {e}")
             return flask.abort(500)
         buf.seek(0)
-        return flask.send_file(buf, mimetype="audio/wav")
+        return flask.send_file(buf, mimetype="audio/mp3")
 
     @app.callback(
-        Output('spectrogram-cache', 'data'),
-    Output('fft-warning', 'children'),
+         Output('spectrogram-cache', 'data'),
+        Output('fft-warning', 'children'),
         [Input("scatter", "clickData"),
          Input('filtered-data', 'data'),
          Input('fft-window-size', 'value'),
@@ -175,11 +177,18 @@ def register_callbacks(dash_app):
 
         dff = pd.read_json(StringIO(filtered_json), orient='split')
         point = clickData["points"][0]
-        idx = point["pointIndex"]
-        if idx >= len(dff):
-            return dash.no_update
+        row_idx = point["customdata"][1]
 
-        row = dff.iloc[idx]
+        if isinstance(row_idx, list):
+            mask = dff['row_idx'].apply(lambda x: any(r in x for r in row_idx) if isinstance(x, list) else x in row_idx)
+        else:
+            mask = dff['row_idx'].apply(lambda x: row_idx in x if isinstance(x, list) else x == row_idx)
+
+        row = dff[mask]
+        if row.empty:
+            return dash.no_update
+        row = row.iloc[0]
+
         start = float(row['clip_time'])
         end = start + float(row['clip_duration'])
         channel = int(row['channel'])
@@ -458,7 +467,6 @@ def register_callbacks(dash_app):
     @app.callback(
         [Output('scatter', 'figure'),
          Output('filtered-data', 'data'),
-         Output('merged-cache', 'data'),
          Output('clip-count-max-store', 'data')],
         [Input('model-dropdown', 'value'),
          Input('channel-checklist', 'value'),
@@ -472,14 +480,19 @@ def register_callbacks(dash_app):
          Input('merge-threshold', 'value'),
          Input('clip-count-threshold', 'value'),
          Input('location-dropdown', 'value'),
-         Input('microlocation-dropdown', 'value')],
-         [State('scatter', 'relayoutData'), State('merged-cache', 'data')]
+         Input('microlocation-dropdown', 'value'),
+         Input('selected-point-index', 'data'),
+         Input('label-filter-checklist', 'value'),
+         Input('color-by-radio', 'value')],
+        [State('labels-store', 'data')],
     )
-    def update_figure(selected_models, selected_channels, selected_num_clusters, selected_clusters, selected_dates, hour_range, max_points,
-                      n_clicks, merge_on, merge_threshold, clip_count_threshold, selected_location, selected_microlocations, relayoutData, merged_cache):
+    def update_figure(selected_models, selected_channels, selected_num_clusters, selected_clusters, selected_dates,
+                      hour_range, max_points,
+                      n_clicks, merge_on, merge_threshold, clip_count_threshold, selected_location,
+                      selected_microlocations, selected_point_index, label_filter, color_by, labels_store):
         print("Called update_figure")
         ctx = dash.callback_context
-        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered and ctx.triggered else None
+        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else None
 
         dff = read_data.df.copy()
 
@@ -488,10 +501,12 @@ def register_callbacks(dash_app):
             return empty_fig, pd.DataFrame().to_json(date_format='iso', orient='split'), None
 
         if selected_models:
-            dff = dff[dff['model_name'].isin([selected_models] if isinstance(selected_models, str) else selected_models)]
+            dff = dff[
+                dff['model_name'].isin([selected_models] if isinstance(selected_models, str) else selected_models)]
         if selected_num_clusters:
             dff = dff[
-                dff['cluster_num'].isin([selected_num_clusters] if isinstance(selected_num_clusters, int) else selected_num_clusters)]
+                dff['cluster_num'].isin(
+                    [selected_num_clusters] if isinstance(selected_num_clusters, int) else selected_num_clusters)]
         if selected_channels:
             dff = dff[dff['channel'].isin(selected_channels)]
         if selected_clusters:
@@ -507,35 +522,10 @@ def register_callbacks(dash_app):
         if selected_microlocations:
             dff = dff[dff['microlocation'].isin(selected_microlocations)]
 
-        merge_params = {
-            'merge_on': merge_on,
-            'merge_threshold': merge_threshold,
-            'selected_models': to_plain(selected_models),
-            'selected_channels': to_plain(selected_channels),
-            'selected_num_clusters': to_plain(selected_num_clusters),
-            'selected_dates': to_plain(selected_dates),
-            'hour_range': to_plain(hour_range)
-        }
-        flat_merge_params = clean_dict(merge_params)
-        cached_merge_params = merged_cache.get('merge_params') if merged_cache else None
-        flat_cached_merge_params = clean_dict(cached_merge_params) if cached_merge_params else {}
-
-        use_cached_merge = (
-                merged_cache and
-                trigger_id and merge_on and
-                trigger_id not in ['merge-switch', 'merge-threshold', 'resample-btn'] and
-                flat_cached_merge_params == flat_merge_params
-        )
-
-        if use_cached_merge:
-            dff = pd.read_json(io.StringIO(merged_cache['data']), orient='split')
-        else:
-            if merge_on and merge_threshold is not None and not dff.empty:
-                dff = merge_clips_vectorized(dff, merge_threshold)
-                merged_cache = {
-                    'data': dff.to_json(date_format='iso', orient='split'),
-                    'merge_params': flat_merge_params
-                }
+        print(f"Data points before merge: {len(dff)}")
+        if merge_on and merge_threshold is not None and not dff.empty:
+            dff = merge_clips_vectorized(dff, merge_threshold)
+            print(f"Data points after merge: {len(dff)}")
 
         if "clip_count" not in dff.columns:
             dff["clip_count"] = 1
@@ -548,12 +538,50 @@ def register_callbacks(dash_app):
             dff = dff[dff["clip_count"] >= clip_count_threshold]
 
         dff["clip_count"] = dff["clip_count"].astype(int)
-        if max_points and len(dff) > max_points:
-            dff = dff.sample(
-                n=max_points,
-                weights="clip_count",
-                random_state=42 + (n_clicks or 0)
-            ).reset_index(drop=True)
+
+        labels_filter = label_filter or ['unlabeled', 'background']
+        labels_data = labels_store or {}
+
+        dff['label'] = dff['row_idx'].astype(str).map(lambda rid: labels_data.get(rid, 'unlabeled'))
+        dff = dff[dff['label'].isin(labels_filter)]
+
+        # Define triggers for resampling
+        filter_trigger_ids = {
+            'model-dropdown',
+            'channel-checklist',
+            'num-cluster-dropdown',
+            'cluster-checklist',
+            'date-dropdown',
+            'hour-slider',
+            'max-points',
+            'clip-count-threshold',
+            'location-dropdown',
+            'microlocation-dropdown',
+            'label-filter-checklist',
+        }
+        should_resample = trigger_id in filter_trigger_ids or trigger_id == 'resample-btn'
+
+        if max_points and len(dff) > max_points and should_resample:
+            is_labeled = dff['label'] != 'unlabeled'
+            labeled_points = dff[is_labeled]
+            unlabeled_points = dff[~is_labeled]
+
+            n_labeled = len(labeled_points)
+            labeled_points_needed = min(n_labeled, max_points)
+            labeled_points = labeled_points.iloc[:labeled_points_needed]
+
+            remaining = max_points - len(labeled_points)
+            if remaining > 0 and len(unlabeled_points) > 0:
+                unlabeled_sample = unlabeled_points.sample(
+                    n=remaining,
+                    weights="clip_count",
+                    random_state=42 + (n_clicks or 0)
+                )
+                dff = pd.concat([labeled_points, unlabeled_sample], ignore_index=True)
+            else:
+                dff = labeled_points
+            dff = dff.reset_index(drop=True)
+
         base_size = 10
         scale = 5
 
@@ -563,14 +591,31 @@ def register_callbacks(dash_app):
         dff['marker_size'] = dff['clip_count'].apply(marker_size_func)
         dff['cluster_id'] = dff['cluster_id'].astype(str)
 
+        if color_by == 'label':
+            dff['color_label'] = dff['label'].astype(str)
+            unique_labels = dff['label'].unique()
+            palette = px.colors.qualitative.Safe  # or any palette
+            color_map_labels = {label: palette[i % len(palette)] for i, label in enumerate(unique_labels)}
+            color_map_labels['background'] = 'gray'  # ensure background is gray
+            custom_color_map = color_map_labels
+
+        else:
+            dff['color_label'] = dff.apply(
+                lambda row: 'background' if row['label'] == 'background' else str(row['cluster_id']), axis=1)
+            custom_color_map = color_map.copy()
+            custom_color_map['background'] = 'gray'
+
         fig = px.scatter(
-            dff, x="x", y="y",
-            color="cluster_id",
+            dff,
+            x="x",
+            y="y",
+            color="color_label",
             size="marker_size",
-            color_discrete_map=color_map,
-            hover_data=["clip_count", "file_name", "clip_time", "model_name", "channel"],
-            custom_data=["cluster_id"],
+            color_discrete_map=custom_color_map,
+            hover_data=["clip_count", "file_name", "clip_time", "model_name", "channel", "label"],
+            custom_data=["cluster_id", "row_idx"],
         )
+
         fig.update_layout(
             xaxis_title="",
             yaxis_title="",
@@ -587,20 +632,128 @@ def register_callbacks(dash_app):
         fig.update_coloraxes(showscale=False)
 
         max_clip_count = int(dff['clip_count'].max()) if not dff.empty else 1
-        print(max_clip_count)
 
-        return fig, dff.to_json(date_format='iso', orient='split'), merged_cache, max_clip_count
+        return fig, dff.to_json(date_format='iso', orient='split'), max_clip_count
+
+    @app.callback(
+        Output('label-filter-checklist', 'options'),
+        Input('labels-store', 'data')
+    )
+    def update_label_filter_options(labels_store):
+        if not labels_store:
+            return []
+
+        unique_labels = sorted(set(label.lower() for label in labels_store.values()))
+
+        options = [{'label': label.capitalize(), 'value': label} for label in unique_labels if label != 'unlabeled']
+        options.insert(0, {'label': 'Unlabeled', 'value': 'unlabeled'})
+        print("Label filter options:", options)
+
+        return options
+
+    @app.callback(
+        Output('selected-point-index', 'data'),
+        Input('scatter', 'clickData'),
+        prevent_initial_call=True
+    )
+    def store_selected_row_idx(clickData):
+        if not clickData:
+            return dash.no_update
+
+        stable_row_idx = clickData["points"][0]["customdata"][1]
+        print("clicked stable row_idx:", stable_row_idx)
+
+        if isinstance(stable_row_idx, list):
+            return [int(idx) for idx in stable_row_idx]
+
+        return int(stable_row_idx)
+
+    @app.callback(
+        Output('existing-label-dropdown', 'options'),
+        Input('labels-store', 'data')
+    )
+    def update_existing_labels(labels_store):
+        unique_labels = sorted(set(label.lower() for label in labels_store.values()))
+
+        if 'background' not in unique_labels:
+            unique_labels.append('background')
+
+        options = [{'label': label.capitalize(), 'value': label} for label in unique_labels if label != 'unlabeled']
+        print("Existing label options:", options)
+        return options
+
+    @app.callback(
+        Output('labels-store', 'data'),
+        Input('apply-manual-label-btn', 'n_clicks'),
+        State('selected-point-index', 'data'),
+        State('existing-label-dropdown', 'value'),
+        State('new-label-input', 'value'),
+        State('labels-store', 'data'),
+        prevent_initial_call=True
+    )
+    def apply_manual_label(n_clicks, selected_point_index, selected_existing_label, typed_new_label, current_labels):
+        if selected_point_index is None:
+            return dash.no_update
+
+        if not isinstance(selected_point_index, list):
+            selected_point_index = [selected_point_index]
+
+        print("Applying label to row_idx:", selected_point_index)
+
+        label_to_apply = typed_new_label.strip() if typed_new_label and typed_new_label.strip() else selected_existing_label
+        if not label_to_apply:
+            return dash.no_update
+
+        print(f"Label to apply: '{label_to_apply}'")
+
+        if current_labels is None or isinstance(current_labels, list):
+            current_labels = {}
+
+        full_df = read_data.df.copy()
+        matched_original_mask = full_df['row_idx'].apply(
+            lambda x: any(r == x for r in selected_point_index) if not isinstance(x, list) else any(
+                r in x for r in selected_point_index)
+        )
+        original_clips = full_df.loc[matched_original_mask]
+
+        if original_clips.empty:
+            return dash.no_update
+
+        all_to_label = pd.DataFrame()
+        for _, clip in original_clips.iterrows():
+            file_name = clip['file_name']
+            channel = clip['channel']
+            clip_time = clip['clip_time']
+            match_mask = (
+                    (full_df['file_name'] == file_name) &
+                    (full_df['channel'] == channel) &
+                    (full_df['clip_time'] == clip_time)
+            )
+            all_to_label = pd.concat([all_to_label, full_df.loc[match_mask]], ignore_index=True)
+
+        print(f"Matched points:")
+        print(all_to_label[['row_idx', 'file_name', 'channel', 'clip_time', 'model_name']])
+
+        label_to_apply = label_to_apply.lower()
+
+        for row_idx in all_to_label['row_idx']:
+            current_labels[str(row_idx)] = label_to_apply
+
+        print(f"Applied manual label '{label_to_apply}' to {len(all_to_label)} clips")
+
+        return current_labels
 
     @app.callback(
         Output('merge-threshold-container', 'style'),
         Output('clip-count-threshold-container', 'style'),
+        Output('clip-count-threshold', 'value'),
         Input('merge-switch', 'on')
     )
     def toggle_merge_sliders(merge_on):
         if merge_on:
-            return {'marginTop': '0.5em'}, {'marginTop': '0.5em'}
+            return {'marginTop': '0.5em'}, {'marginTop': '0.5em'}, 2
         else:
-            return {'display': 'none'}, {'display': 'none'}
+            return {'display': 'none'}, {'display': 'none'}, 1
 
     @app.callback(
         Output('cluster-histogram', 'figure'),
@@ -634,7 +787,6 @@ def register_callbacks(dash_app):
         ],
     )
     def update_clip_count_slider(max_clip_count):
-        print("max_clip_count", max_clip_count)
         if max_clip_count is None or not isinstance(max_clip_count, int):
             max_clip_count = 1
         if max_clip_count <= 10:
@@ -653,11 +805,17 @@ def register_callbacks(dash_app):
     )
     def update_microlocation_options(selected_location):
         dff = read_data.df.copy()
-        print("dff columns:", dff.columns.tolist())
         possible_micros = sorted(dff[dff['location'] == selected_location]['microlocation'].dropna().unique())
-        print("Possible microlocations:", possible_micros)
         options = [{'label': str(m), 'value': m} for m in possible_micros]
 
+        return options
+
+    @app.callback(
+        Output('cluster-checklist', 'options'),
+        Input('num-cluster-dropdown', 'value'))
+    def update_cluster_options(selected_num_clusters):
+        options = [{'label': str(c), 'value': c} for c in range(selected_num_clusters)]
+        value = [str(c) for c in range(selected_num_clusters)]
         return options
 
     @app.callback(
@@ -689,3 +847,18 @@ def register_callbacks(dash_app):
             for date in possible_dates
         ]
         return options
+
+    @app.callback(
+        [Output('audio-player', 'autoPlay'),
+         Output('autoplay-toggle-btn', 'children'),
+         Output('autoplay-toggle-btn', 'style')],
+        Input('autoplay-toggle-btn', 'n_clicks'),
+        State('audio-player', 'autoPlay')
+    )
+    def toggle_autoplay(n_clicks, current_autoplay):
+        if n_clicks is None:
+            n_clicks = 0
+        new_autoplay = not current_autoplay if current_autoplay is not None else True
+        label = "Autoplay: ON" if new_autoplay else "Autoplay: OFF"
+        style = {'background-color': '#BADCBD'} if new_autoplay else {'background-color': 'lightgray'}
+        return new_autoplay, label, style
