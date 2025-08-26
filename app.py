@@ -1,7 +1,7 @@
 from dash import Dash
 from layout import create_layout
 import read_data
-from read_data import df
+from read_data import df, initial_labels
 import callbacks
 
 app = Dash(__name__)
@@ -12,7 +12,7 @@ app.title = "VibroVis"
 #     ]
 # })
 print(df.head())
-app.layout = create_layout(df)
+app.layout = create_layout(df, initial_labels)
 callbacks.register_callbacks(app)
 # server = app.server
 

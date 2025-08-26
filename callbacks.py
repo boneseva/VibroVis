@@ -862,3 +862,29 @@ def register_callbacks(dash_app):
         label = "Autoplay: ON" if new_autoplay else "Autoplay: OFF"
         style = {'background-color': '#BADCBD'} if new_autoplay else {'background-color': 'lightgray'}
         return new_autoplay, label, style
+
+    import pathlib
+    import pandas as pd
+
+    LABEL_SAVE_PATH = pathlib.Path("data/cache/saved_labels.parquet")
+
+    @app.callback(
+        Output('save-status', 'children'),
+        Input('save-button', 'n_clicks'),
+        State('labels-store', 'data'),
+        prevent_initial_call=True
+    )
+    def save_labels(n_clicks, labels_data):
+        if not labels_data:
+            return "No labels to save."
+
+        try:
+            df = pd.DataFrame(list(labels_data.items()), columns=['row_idx', 'label'])
+            df['row_idx'] = df['row_idx'].astype(int)
+
+            # Save to fixed file path
+            df.to_parquet(LABEL_SAVE_PATH, index=False)
+
+            return f"Labels saved successfully to {LABEL_SAVE_PATH}"
+        except Exception as e:
+            return f"Error saving labels: {e}"

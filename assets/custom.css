@@ -67,6 +67,7 @@ html, body {
     margin: 0 auto;
 }
 
+
 #labeling-container {
     display: flex;
     flex-direction: row;
@@ -261,6 +262,31 @@ details > .section-title {
     outline: none;
     background: #fff;
     vertical-align: middle;
+}
+#save-button {
+    height: 2.7em;
+    font-size: 14px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    box-sizing: border-box;
+    padding: 0 10px;
+    outline: none;
+    vertical-align: middle;
+    background: #2a3f5f;
+    color: white;
+    margin-left: 0.5em;
+    margin-bottom: 0.5em;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+#save-button:hover {
+    background: #3b5780;
+}
+#save-button-container {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: right;
 }
 
 /*!* === Responsive Tweaks === *!

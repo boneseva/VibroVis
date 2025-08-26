@@ -2,17 +2,21 @@ from dash import html, dcc
 import dash_daq as daq
 
 
-def create_layout(df):
+def create_layout(df, initial_labels):
     min_hour = df['start_hour_float'].min()
     max_hour = df['start_hour_float'].max()
     return html.Div([
         html.Div([
-            # In your layout:
             html.Div(id='fft-warning', style={'color': 'red', 'marginTop': '1em'}),
 
             html.Div([
                 dcc.Graph(id='scatter'),
                 html.Div(id="info", style={'marginRight': '1em'}),
+
+                html.Div([
+                    html.Div(id='save-status', style={'marginRight': '1em'}),
+                    html.Button("Save Manual Labels", id="save-button", n_clicks=0, type='button'),
+                ], id='save-button-container'),
 
                 html.Div([
                     html.Div([
@@ -64,7 +68,7 @@ def create_layout(df):
                     ),
                     dcc.Store(id='spectrogram-cache'),
                     dcc.Store(id='selected-point-index', data=None),
-                    dcc.Store(id='labels-store', data={}),
+                    dcc.Store(id='labels-store', data=initial_labels),
                 ], id='audio-spectrogram-container')
             ], id='scatter-audio-container'),
 
@@ -136,7 +140,7 @@ def create_layout(df):
                                 html.Label("Labels", style={'marginTop': '1em'}),
                                 dcc.Checklist(
                                     id='label-filter-checklist',
-                                    options=[],
+                                    options=[{'label': 'Unlabeled', 'value': 'unlabeled'}, {'label': 'Background', 'value': 'background'}],
                                     value=['unlabeled', 'background'],
                                     labelStyle={'display': 'inline-block'}
                                 ),

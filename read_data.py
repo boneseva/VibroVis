@@ -1,3 +1,4 @@
+import pathlib
 import re
 import os
 import ast
@@ -8,6 +9,7 @@ DATA_DIR = os.path.abspath("data/mp3")
 OVERVIEW_TSV = os.path.join("data", "Rok_spring_summer.tsv")
 SAVE_PATH = "data/cache/final_data.parquet"
 BATCH_SIZE = 10000
+LABELS_SAVE_PATH = pathlib.Path("data/cache/saved_labels.parquet")
 
 # Load the overview TSV as reference
 wav_meta = pd.read_csv(OVERVIEW_TSV, sep='\t')
@@ -95,6 +97,14 @@ def load_positions_tsv(wav_meta, data_dir, save_path=SAVE_PATH, batch_size=BATCH
     ]
     df.drop(columns=columns_to_drop, inplace=True, errors='ignore')
     return df
+
+def load_saved_labels():
+    if LABELS_SAVE_PATH.exists():
+        df_labels = pd.read_parquet(LABELS_SAVE_PATH)
+        return dict(zip(df_labels['row_idx'].astype(str), df_labels['label']))
+    return {}
+
+initial_labels = load_saved_labels()
 
 if not os.path.exists(SAVE_PATH):
     print("Loading positions TSV files...")
