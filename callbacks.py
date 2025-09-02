@@ -1,15 +1,10 @@
-from dash import callback_context
-
 import time
 
 import dash
-import numpy as np
 from dash import Input, Output, State
 import plotly.express as px
-import pandas as pd
 import os
 import flask
-from scipy.spatial.distance import euclidean
 import soundfile as sf
 import io
 import plotly.io as pio
@@ -18,10 +13,9 @@ import read_data
 from read_data import DATA_DIR
 
 import numpy as np
-import pandas as pd
-from scipy.spatial.distance import euclidean
 
-from memory_profiler import profile
+from scipy.signal import spectrogram
+from io import StringIO
 
 def merge_clips_vectorized(dff, merge_threshold):
     if dff.empty:
@@ -166,12 +160,6 @@ def register_callbacks(dash_app):
         prevent_initial_call=True)
     def compute_spectrogram_data(clickData, filtered_json, fft_window_size, fft_step_size,
                                  nfft, window_type, min_freq, max_freq, num_bins, colormap, db_floor):
-        import numpy as np
-        import soundfile as sf
-        from scipy.signal import spectrogram
-        import os
-        from io import StringIO
-
         if not clickData or not filtered_json:
             return dash.no_update
 
@@ -245,17 +233,9 @@ def register_callbacks(dash_app):
         info = f"{row['file_name']} at {row['clip_time']}s (cluster {row['cluster_id']})"
 
         if np.ptp(z) <= 1:
-            warning = (
-                "⚠️ Insufficient dynamic range in the spectrogram. "
-                "Try different spectrogram parameters."
-            )
-            return dash.no_update, warning
+            return dash.no_update
         if np.isnan(z).all():
-            warning = (
-                "⚠️ All spectrogram values are NaN. "
-                "This may be due to insufficient data or wrong parameters."
-            )
-            return dash.no_update, warning
+            return dash.no_update
 
         return {
             # 'x': (t + segment_start).tolist(),

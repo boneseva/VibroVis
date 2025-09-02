@@ -81,6 +81,10 @@ def load_positions_tsv(wav_meta, data_dir, save_path=SAVE_PATH, batch_size=BATCH
             dff = dff.merge(row.to_frame().T, how='left', on=['wav_file', 'channel'], suffixes=('', '_meta'))
             df = pd.concat([df, dff], ignore_index=True)
 
+            if 'day' in df.columns:
+                df.drop(columns=['day','start_time'], inplace=True)
+
+
             if len(df) - last_saved_len >= batch_size:
                 df.to_parquet(save_path)
                 last_saved_len = len(df)
