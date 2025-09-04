@@ -1,3 +1,4 @@
+import pathlib
 import re
 import os
 import ast
@@ -7,92 +8,107 @@ from tqdm import tqdm
 DATA_DIR = os.path.abspath("data/mp3")
 OVERVIEW_TSV = os.path.join("data", "Rok_spring_summer.tsv")
 SAVE_PATH = "data/cache/final_data.parquet"
-BATCH_SIZE = 10000
+LABELS_SAVE_PATH = pathlib.Path("data/cache/saved_labels.parquet")
 
 # Load the overview TSV as reference
 wav_meta = pd.read_csv(OVERVIEW_TSV, sep='\t')
 wav_meta['wav_file'] = wav_meta['wav_file'].apply(os.path.normpath)
 
-def load_positions_tsv(wav_meta, data_dir, save_path=SAVE_PATH, batch_size=BATCH_SIZE):
-    df = pd.DataFrame()
-    
-    last_saved_len = 0
-    buffer = []
 
-    for idx, row in tqdm(wav_meta.iterrows(), total=len(wav_meta), desc="Loading positions TSV files"):
+def load_positions_tsv_optimized(wav_meta, data_dir, save_path=SAVE_PATH):
+    """
+    Optimized data loading function.
+    - Gathers all file paths first.
+    - Reads all files into a list of DataFrames.
+    - Concatenates them all at once.
+    - Performs transformations in a vectorized manner on the full DataFrame.
+    """
+    all_files_to_process = []
+
+    # 1. Collect all file paths and their associated metadata first
+    print("Collecting file paths...")
+    for idx, row in wav_meta.iterrows():
         wav_path = row['wav_file'].replace("\\", "/")
-        channel = row['channel']
-        mp3_wav_path = wav_path.replace('.wav', f'_ch{channel}.mp3')
-      #  mp3_wav_path = "mp3/" + mp3_wav_path
         positions_dir = os.path.join(os.path.dirname(wav_path), 'positions')
         base_name = os.path.splitext(os.path.basename(wav_path))[0]
-        try:
-            position_files = os.listdir(os.path.join(DATA_DIR, positions_dir))
-        except FileNotFoundError:
+
+        full_positions_dir = os.path.join(data_dir, positions_dir)
+        if not os.path.exists(full_positions_dir):
             continue
+
         pattern = re.compile(rf'^{re.escape(base_name)}.*\.tsv$')
+        for file in os.listdir(full_positions_dir):
+            if pattern.match(file):
+                tsv_path = os.path.join(full_positions_dir, file)
+                all_files_to_process.append({'path': tsv_path, 'meta': row.to_dict(), 'file_name': file})
 
-        for file in position_files:
-            if not pattern.match(file):
-                continue
-            tsv_path = os.path.join(DATA_DIR, positions_dir, file)
-            if not os.path.isfile(tsv_path):
-                continue
+    if not all_files_to_process:
+        print("No position files found.")
+        return pd.DataFrame()
 
-            dff = pd.read_csv(tsv_path, sep='\t')
-            dff['day_dt'] = pd.to_datetime(row['day'], format="%Y-%m-%d", errors='raise')
-            dff[['x', 'y']] = dff['embedding'].apply(lambda s: pd.Series(ast.literal_eval(s)))
-            dff['start_dt'] = pd.to_datetime(row['start_time'], format='%H:%M:%S', errors='raise')
-            dff['time_of_day'] = dff['start_dt'] + pd.to_timedelta(dff['clip_time'], unit='s')
-            dff['start_hour_float'] = (
-                dff['time_of_day'].dt.hour +
-                dff['time_of_day'].dt.minute / 60 +
-                dff['time_of_day'].dt.second / 3600
-            )
+    # 2. Read all TSV files into a list of DataFrames
+    df_list = []
+    print(f"Reading {len(all_files_to_process)} TSV files...")
+    for file_info in tqdm(all_files_to_process, desc="Reading TSV files"):
+        dff = pd.read_csv(file_info['path'], sep='\t')
 
-            dff['wav_file'] = row['wav_file']
-            dff['mp3_file'] = os.path.normpath(mp3_wav_path)
-            dff['channel'] = channel
+        # Add metadata from the overview file to each row
+        for key, value in file_info['meta'].items():
+            dff[key] = value
 
-            c = file.split('.')[-3].split('_')[-1]
-            try:
-                dff['cluster_num'] = int(c)
-            except (ValueError, TypeError):
-                dff['cluster_num'] = 10
+        # Add cluster number from the filename
+        c = file_info['file_name'].split('.')[-3].split('_')[-1]
+        dff['cluster_num'] = int(c) if c.isnumeric() else 10
 
-            dff['cluster_id'] = dff['cluster_id'].astype(int)
-            dff['sunrise'] = row['sunrise']
-            dff['sunset'] = row['sunset']
-            dff['location'] = row['location']
-            dff['microlocation'] = row['microlocation']
-            dff['recorder_type'] = row['recorder_type']
-            dff['channel_name'] = row['channel_name']
+        df_list.append(dff)
 
-            dff['abs_file_name'] = mp3_wav_path
+    # 3. Concatenate everything at once
+    print("Concatenating DataFrames...")
+    df = pd.concat(df_list, ignore_index=True)
 
-            dff = dff.merge(row.to_frame().T, how='left', on=['wav_file', 'channel'], suffixes=('', '_meta'))
-            df = pd.concat([df, dff], ignore_index=True)
+    # 4. Perform all transformations in a vectorized way on the full DataFrame
+    print("Performing vectorized transformations...")
+    df['day_dt'] = pd.to_datetime(df['day'], format="%Y-%m-%d")
+    df['start_dt'] = pd.to_datetime(df['start_time'], format='%H:%M:%S')
 
-            if len(df) - last_saved_len >= batch_size:
-                df.to_parquet(save_path)
-                last_saved_len = len(df)
-                print(f"Wrote {len(df)} rows to {save_path}")
+    # Optimized embedding parsing
+    temp_df = df['embedding'].str.strip('[]').str.split(', ', expand=True)
+    df['x'] = pd.to_numeric(temp_df[0], errors='coerce')
+    df['y'] = pd.to_numeric(temp_df[1], errors='coerce')
 
-    if len(df) > last_saved_len:
-        df.to_parquet(save_path)
+    df['time_of_day'] = df['start_dt'] + pd.to_timedelta(df['clip_time'], unit='s')
+    df['start_hour_float'] = (
+            df['time_of_day'].dt.hour +
+            df['time_of_day'].dt.minute / 60 +
+            df['time_of_day'].dt.second / 3600
+    )
+    df['day_str'] = df['day_dt'].dt.strftime('%Y-%m-%d')
 
-    # Remove unused columns as before
+    base_name = df['wav_file'].str.removesuffix('.wav')
+    df['mp3_file'] = base_name + '_ch' + df['channel'].astype(str) + '.mp3'
+    df['mp3_file'] = df['mp3_file'].apply(os.path.normpath)
+
+    df['abs_file_name'] = df['mp3_file']
+    df['cluster_id'] = df['cluster_id'].astype(int)
+    df['row_idx'] = range(len(df))
+
+    # Clean up columns
     columns_to_drop = [
-        'day', 'start_time', 'num_clusters', 'embedding', 'day_meta', 'start_time_meta',
-        'location_meta', 'microlocation_meta', 'channel_meta', 'channel_name_meta',
-        'recorder_type_meta', 'sunrise_meta', 'sunset_meta'
+        'day', 'start_time', 'num_clusters', 'embedding'
     ]
-    df.drop(columns=columns_to_drop, inplace=True, errors='ignore')
+    df.drop(columns=[col for col in columns_to_drop if col in df.columns], inplace=True, errors='ignore')
+
+    # Save the processed data
+    df.to_parquet(save_path)
+    print(f"Wrote {len(df)} rows to {save_path}")
+
     return df
 
+# Main data loading logic
 if not os.path.exists(SAVE_PATH):
-    print("Loading positions TSV files...")
-    df = load_positions_tsv(wav_meta, DATA_DIR, save_path=SAVE_PATH, batch_size=BATCH_SIZE)
+    print("Cache not found. Loading positions TSV files with optimized function...")
+    # Make sure to call the optimized function here
+    df = load_positions_tsv_optimized(wav_meta, DATA_DIR, save_path=SAVE_PATH)
 else:
     df = pd.read_parquet(SAVE_PATH)
     print(f"Loaded cached data with {len(df)} rows.")
