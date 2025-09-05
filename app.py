@@ -2,14 +2,14 @@
 from dash import Dash, html
 from layout import create_layout
 import read_data
-from read_data import df
+#from read_data import df
 import callbacks
 
 app = Dash(__name__)
 app.title = "VibroVis"
 
-# Revert to the standard layout using the create_layout function
-app.layout = create_layout(df)
+initial_df = read_data.get_initial_data_for_layout()
+app.layout = create_layout(initial_df)
 
 callbacks.register_callbacks(app)
 

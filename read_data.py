@@ -104,11 +104,49 @@ def load_positions_tsv_optimized(wav_meta, data_dir, save_path=SAVE_PATH):
 
     return df
 
-# Main data loading logic
-if not os.path.exists(SAVE_PATH):
-    print("Cache not found. Loading positions TSV files with optimized function...")
-    # Make sure to call the optimized function here
-    df = load_positions_tsv_optimized(wav_meta, DATA_DIR, save_path=SAVE_PATH)
-else:
-    df = pd.read_parquet(SAVE_PATH)
-    print(f"Loaded cached data with {len(df)} rows.")
+# In read_data.py
+
+import os
+import pandas as pd
+
+DATA_DIR = os.path.abspath("data/mp3")
+OVERVIEW_TSV = os.path.join("data", "Rok_spring_summer.tsv")
+SAVE_PATH = "data/cache/final_data.parquet"
+# Note: The global 'df' object is now gone.
+
+def get_initial_data_for_layout():
+    """
+    Loads only the columns necessary to build the initial UI layout.
+    This is much more memory-efficient than loading the entire dataset.
+    """
+    if not os.path.exists(SAVE_PATH):
+        # If cache doesn't exist, return an empty structure
+        print("Cache not found. Please generate it first.")
+        return pd.DataFrame({
+            'location': [], 'model_name': [], 'channel': [],
+            'cluster_num': [], 'cluster_id': [], 'day_dt': [],
+            'start_hour_float': []
+        })
+
+    # Read only the specific columns needed for the filters and sliders
+    cols_to_load = [
+        'location', 'model_name', 'channel', 'cluster_num',
+        'cluster_id', 'day_dt', 'start_hour_float'
+    ]
+    try:
+        initial_df = pd.read_parquet(SAVE_PATH, columns=cols_to_load)
+        print(f"Loaded initial columns for layout, using ~{initial_df.memory_usage(deep=True).sum() / 1e6:.2f} MB")
+        return initial_df
+    except Exception as e:
+        print(f"Error reading initial data from Parquet file: {e}")
+        # Return an empty df on error to prevent app crash
+        return pd.DataFrame({col: [] for col in cols_to_load})
+
+# # Main data loading logic
+# if not os.path.exists(SAVE_PATH):
+#     print("Cache not found. Loading positions TSV files with optimized function...")
+#     # Make sure to call the optimized function here
+#     df = load_positions_tsv_optimized(wav_meta, DATA_DIR, save_path=SAVE_PATH)
+# else:
+#     df = pd.read_parquet(SAVE_PATH)
+#     print(f"Loaded cached data with {len(df)} rows.")

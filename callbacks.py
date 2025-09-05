@@ -199,6 +199,81 @@ def register_callbacks(dash_app):
         return [opt["value"] for opt in options] if all_selected else []
 
 
+    # @app.callback(
+    #     [Output('scatter', 'figure'),
+    #      Output('filtered-data', 'data'),
+    #      Output('clip-count-max-store', 'data')],
+    #     [Input('model-dropdown', 'value'),
+    #      Input('channel-checklist', 'value'),
+    #      Input('num-cluster-dropdown', 'value'),
+    #      Input('cluster-checklist', 'value'),
+    #      Input('date-dropdown', 'value'),
+    #      Input('hour-slider', 'value'),
+    #      Input('max-points', 'value'),
+    #      Input('resample-btn', 'n_clicks'),
+    #      Input('merge-switch', 'on'),
+    #      Input('merge-threshold', 'value'),
+    #      Input('clip-count-threshold', 'value'),
+    #      Input('location-dropdown', 'value'),
+    #      Input('microlocation-dropdown', 'value')])
+    # def update_figure(selected_model, selected_channels, selected_num_clusters, selected_clusters, selected_dates,
+    #                   hour_range, max_points, n_clicks, merge_on, merge_threshold, clip_count_threshold,
+    #                   selected_location, selected_microlocations):
+    #
+    #     dff = read_data.df
+    #
+    #     query_parts = []
+    #     if selected_model: query_parts.append(f"model_name == '{selected_model}'")
+    #     if selected_num_clusters: query_parts.append(f"cluster_num == {selected_num_clusters}")
+    #     if selected_channels: query_parts.append(f"channel in {selected_channels}")
+    #     if selected_clusters: query_parts.append(f"cluster_id in {selected_clusters}")
+    #     if selected_location: query_parts.append(f"location == '{selected_location}'")
+    #     if selected_microlocations: query_parts.append(f"microlocation in {selected_microlocations}")
+    #     if selected_dates:
+    #         query_parts.append(f"day_str in {selected_dates}")
+    #     if hour_range: query_parts.append(f"{hour_range[0]} <= start_hour_float <= {hour_range[1]}")
+    #
+    #     if query_parts:
+    #         dff = dff.query(" & ".join(query_parts), engine='python').copy()
+    #
+    #     if merge_on and not dff.empty:
+    #         dff = merge_clips_vectorized(dff.copy(), merge_threshold)
+    #
+    #     if "clip_count" not in dff.columns: dff["clip_count"] = 1
+    #     if clip_count_threshold and clip_count_threshold > 1:
+    #         dff = dff[dff["clip_count"] >= int(clip_count_threshold)]
+    #
+    #     if max_points and len(dff) > max_points:
+    #         dff = dff.sample(n=max_points, random_state=42)
+    #
+    #     # --- FIX 2: Create a stable ID for the current view ---
+    #     dff = dff.reset_index(drop=True)
+    #     dff['unique_id'] = dff.index
+    #
+    #     dff['marker_size'] = 10 + 5 * dff['clip_count']
+    #     dff['cluster_id'] = dff['cluster_id'].astype(str)
+    #
+    #     fig = px.scatter(
+    #         dff, x="x", y="y", color="cluster_id", size="marker_size", color_discrete_map=color_map,
+    #         hover_data=["clip_count", "file_name", "clip_time", "channel"],
+    #         # --- FIX 3: Use the new unique_id in the plot's data ---
+    #         custom_data=["cluster_id", "unique_id"]
+    #     )
+    #     fig.update_layout(
+    #         showlegend=False,
+    #         margin=dict(l=5, r=5, t=5, b=5),
+    #         paper_bgcolor='rgba(0,0,0,0)',
+    #         plot_bgcolor='rgba(0,0,0,0)'
+    #     )
+    #     fig.update_xaxes(visible=False)
+    #     fig.update_yaxes(visible=False)
+    #
+    #     max_clip_count = int(dff['clip_count'].max()) if not dff.empty else 1
+    #     cache_key = str(uuid.uuid4())
+    #     server_cache[cache_key] = dff
+    #
+    #     return fig, cache_key, max_clip_count
+
     @app.callback(
         [Output('scatter', 'figure'),
          Output('filtered-data', 'data'),
@@ -220,45 +295,106 @@ def register_callbacks(dash_app):
                       hour_range, max_points, n_clicks, merge_on, merge_threshold, clip_count_threshold,
                       selected_location, selected_microlocations):
 
-        dff = read_data.df
+        # --- LAZY LOADING LOGIC ---
 
-        query_parts = []
-        if selected_model: query_parts.append(f"model_name == '{selected_model}'")
-        if selected_num_clusters: query_parts.append(f"cluster_num == {selected_num_clusters}")
-        if selected_channels: query_parts.append(f"channel in {selected_channels}")
-        if selected_clusters: query_parts.append(f"cluster_id in {selected_clusters}")
-        if selected_location: query_parts.append(f"location == '{selected_location}'")
-        if selected_microlocations: query_parts.append(f"microlocation in {selected_microlocations}")
+        # 1. Build a filter list for pyarrow. This is a list of tuples.
+        filters = []
+        if selected_location:
+            filters.append(('location', '==', selected_location))
+        if selected_model:
+            filters.append(('model_name', '==', selected_model))
+        if selected_num_clusters:
+            # Ensure the value is an integer for the query
+            filters.append(('cluster_num', '==', int(selected_num_clusters)))
+        if selected_microlocations:
+            filters.append(('microlocation', 'in', selected_microlocations))
+        if selected_channels:
+            filters.append(('channel', 'in', selected_channels))
+        if selected_clusters:
+            filters.append(('cluster_id', 'in', selected_clusters))
         if selected_dates:
-            query_parts.append(f"day_str in {selected_dates}")
-        if hour_range: query_parts.append(f"{hour_range[0]} <= start_hour_float <= {hour_range[1]}")
+            filters.append(('day_str', 'in', selected_dates))
+        if hour_range:
+            filters.append(('start_hour_float', '>=', hour_range[0]))
+            filters.append(('start_hour_float', '<=', hour_range[1]))
 
-        if query_parts:
-            dff = dff.query(" & ".join(query_parts), engine='python').copy()
+        # If no primary filters (like location or model) are selected, don't load anything.
+        # This prevents accidentally loading the entire massive dataset.
+        if not selected_location and not selected_model:
+            fig = go.Figure()
+            fig.update_layout(
+                annotations=[{
+                    "text": "Select a location or model to begin.",
+                    "xref": "paper", "yref": "paper",
+                    "showarrow": False, "font": {"size": 16}
+                }],
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)'
+            )
+            fig.update_xaxes(visible=False)
+            fig.update_yaxes(visible=False)
+            return fig, None, 1
 
+        # 2. Read only the required data from the Parquet file using the built filters.
+        try:
+            dff = pd.read_parquet(read_data.SAVE_PATH, filters=filters)
+        except Exception as e:
+            print(f"Could not read from Parquet with filters: {e}")
+            # Return an empty figure to avoid crashing the app
+            return go.Figure(), None, 1
+
+        # If the filters result in no data, return an empty figure.
+        if dff.empty:
+            fig = go.Figure()
+            fig.update_layout(
+                annotations=[{
+                    "text": "No data found for the selected filters.",
+                    "xref": "paper", "yref": "paper",
+                    "showarrow": False, "font": {"size": 16}
+                }],
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)'
+            )
+            fig.update_xaxes(visible=False)
+            fig.update_yaxes(visible=False)
+            return fig, None, 1
+
+        # --- POST-LOADING PROCESSING ---
+
+        # Perform merging if the switch is on
         if merge_on and not dff.empty:
             dff = merge_clips_vectorized(dff.copy(), merge_threshold)
 
-        if "clip_count" not in dff.columns: dff["clip_count"] = 1
+        # Ensure clip_count exists and filter by it
+        if "clip_count" not in dff.columns:
+            dff["clip_count"] = 1
         if clip_count_threshold and clip_count_threshold > 1:
             dff = dff[dff["clip_count"] >= int(clip_count_threshold)]
 
+        # Sub-sample the data if it exceeds the max_points limit
         if max_points and len(dff) > max_points:
             dff = dff.sample(n=max_points, random_state=42)
 
-        # --- FIX 2: Create a stable ID for the current view ---
+        # If all data was filtered out, return an empty figure
+        if dff.empty:
+            return go.Figure(), None, 1
+
+        # --- FIGURE CREATION ---
+
+        # Create a stable unique ID for interactivity
         dff = dff.reset_index(drop=True)
         dff['unique_id'] = dff.index
 
+        # Prepare data for plotting
         dff['marker_size'] = 10 + 5 * dff['clip_count']
         dff['cluster_id'] = dff['cluster_id'].astype(str)
 
         fig = px.scatter(
             dff, x="x", y="y", color="cluster_id", size="marker_size", color_discrete_map=color_map,
             hover_data=["clip_count", "file_name", "clip_time", "channel"],
-            # --- FIX 3: Use the new unique_id in the plot's data ---
             custom_data=["cluster_id", "unique_id"]
         )
+
         fig.update_layout(
             showlegend=False,
             margin=dict(l=5, r=5, t=5, b=5),
@@ -268,7 +404,11 @@ def register_callbacks(dash_app):
         fig.update_xaxes(visible=False)
         fig.update_yaxes(visible=False)
 
+        # --- CACHING AND FINAL RETURN ---
+
         max_clip_count = int(dff['clip_count'].max()) if not dff.empty else 1
+
+        # Cache the filtered dataframe for other callbacks to use
         cache_key = str(uuid.uuid4())
         server_cache[cache_key] = dff
 
