@@ -9,6 +9,7 @@ def load_audio_segment(mp3_file_relative_path, clip_time, clip_duration, channel
     """
     Loads a specific audio segment from an MP3 file with padding.
     """
+    mp3_file_relative_path = mp3_file_relative_path.replace("\\", "/")
     full_path = os.path.join(read_data.DATA_DIR, mp3_file_relative_path)
     if not os.path.exists(full_path):
         print(f"Warning: Audio file not found at {full_path}")

@@ -130,7 +130,7 @@ def get_initial_data_for_layout():
 
     # Read only the specific columns needed for the filters and sliders
     cols_to_load = [
-        'location', 'model_name', 'channel', 'cluster_num',
+        'location', 'microlocation', 'model_name', 'channel', 'cluster_num', 
         'cluster_id', 'day_dt', 'start_hour_float'
     ]
     try:

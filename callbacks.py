@@ -17,6 +17,12 @@ from collections import Counter
 import read_data
 import utils
 
+initial_df = pd.DataFrame()
+
+def set_initial_data(df):
+    global initial_df
+    initial_df = df
+    
 server_cache = {}
 
 
@@ -62,6 +68,7 @@ def merge_clips_vectorized(dff, merge_threshold):
         'file_name': ('file_name', 'first'),
         'channel': ('channel', 'first'),
         'start_dt': ('start_dt', 'first'),
+        'time_of_day': ('time_of_day', 'first'),
         'model_name': ('model_name', 'first'),
         'mp3_file': ('mp3_file', 'first'),
         'row_idx': ('row_idx', list)
@@ -80,7 +87,8 @@ def register_callbacks(dash_app):
 
     cluster_ids = range(20)
     cluster_colors = ['#4E79A7', '#F28E2B', '#E15759', '#76B7B2', '#EDC948', '#B07AA1', '#FF9DA7', '#A6A377', '#F2C894',
-                      '#BADCBD']
+                      '#BADCBD', '#59A14F', '#9C755F', '#BAB0AC', '#D37295', '#A0CBE8',
+    '#FFBE7D', '#9CD17D', '#D4B7A9', '#D9D9D9', '#FABFD2']
     color_map = {str(cid): cluster_colors[i % len(cluster_colors)] for i, cid in enumerate(cluster_ids)}
 
     @app.server.route("/audio_segment_normalized/<path:filename>/<int:channel>/<float:start>/<float:end>")
@@ -134,7 +142,11 @@ def register_callbacks(dash_app):
         # --- FIX 1: Use the stable unique_id for lookups ---
         unique_id = point["customdata"][1]
         # Find the correct row using the unique_id as the index
-        row = dff.loc[unique_id]
+        # row = dff.loc[unique_id]
+        
+        #row = dff[dff['row_idx'] == unique_id].iloc[0]
+        plot_id = point["customdata"][2]
+        row = dff.loc[plot_id]
 
         segment, samplerate = utils.load_audio_segment(
             mp3_file_relative_path=row['mp3_file'],
@@ -310,10 +322,10 @@ def register_callbacks(dash_app):
             filters.append(('microlocation', 'in', selected_microlocations))
         if selected_channels:
             filters.append(('channel', 'in', selected_channels))
-        if selected_clusters:
-            filters.append(('cluster_id', 'in', selected_clusters))
-        if selected_dates:
-            filters.append(('day_str', 'in', selected_dates))
+     #   if selected_clusters:
+      #      filters.append(('cluster_id', 'in', selected_clusters))
+   #     if selected_dates:
+    #        filters.append(('day_str', 'in', selected_dates))
         if hour_range:
             filters.append(('start_hour_float', '>=', hour_range[0]))
             filters.append(('start_hour_float', '<=', hour_range[1]))
@@ -335,14 +347,28 @@ def register_callbacks(dash_app):
             fig.update_yaxes(visible=False)
             return fig, None, 1
 
+        cols_to_load = [
+            'x', 'y', 'location', 'model_name', 'cluster_num', 'channel',
+            'cluster_id', 'day_dt', 'start_hour_float', 'file_name',
+            'clip_time', 'clip_duration', 'start_dt', 'mp3_file',
+            'time_of_day', 'microlocation', 'row_idx'
+        ]
+
         # 2. Read only the required data from the Parquet file using the built filters.
         try:
-            dff = pd.read_parquet(read_data.SAVE_PATH, filters=filters)
+            dff = pd.read_parquet(read_data.SAVE_PATH, filters=filters, columns=cols_to_load)
         except Exception as e:
             print(f"Could not read from Parquet with filters: {e}")
             # Return an empty figure to avoid crashing the app
             return go.Figure(), None, 1
 
+        if selected_dates:
+            # This formats the 'day_dt' timestamp column to a 'YYYY-MM-DD' string and then filters.
+            dff = dff[dff['day_dt'].dt.strftime('%Y-%m-%d').isin(selected_dates)]
+
+        if selected_clusters:
+            dff = dff[dff['cluster_id'].astype(int).isin(selected_clusters)]
+        
         # If the filters result in no data, return an empty figure.
         if dff.empty:
             fig = go.Figure()
@@ -379,20 +405,21 @@ def register_callbacks(dash_app):
         if dff.empty:
             return go.Figure(), None, 1
 
-        # --- FIGURE CREATION ---
-
-        # Create a stable unique ID for interactivity
         dff = dff.reset_index(drop=True)
-        dff['unique_id'] = dff.index
-
+        dff['plot_id'] = dff.index
+        
         # Prepare data for plotting
-        dff['marker_size'] = 10 + 5 * dff['clip_count']
+        if merge_on:
+            dff['marker_size'] = 15 + 10 * np.log1p(dff['clip_count'] - 1)
+        else:
+            dff['marker_size'] = 15
+        
         dff['cluster_id'] = dff['cluster_id'].astype(str)
 
         fig = px.scatter(
             dff, x="x", y="y", color="cluster_id", size="marker_size", color_discrete_map=color_map,
             hover_data=["clip_count", "file_name", "clip_time", "channel"],
-            custom_data=["cluster_id", "unique_id"]
+            custom_data=["cluster_id", "row_idx", "plot_id"]
         )
 
         fig.update_layout(
@@ -509,7 +536,8 @@ def register_callbacks(dash_app):
         Input('location-dropdown', 'value'))
     def update_microlocation_options(selected_location):
         if not selected_location: return []
-        dff = read_data.df
+        # dff = read_data.df
+        dff = initial_df
         micros = sorted(dff[dff['location'] == selected_location]['microlocation'].dropna().unique())
         return [{'label': m, 'value': m} for m in micros]
 
@@ -526,7 +554,8 @@ def register_callbacks(dash_app):
          Input('microlocation-dropdown', 'value')])
     def update_date_options(location, microlocations):
         if not location: return []
-        dff = read_data.df
+        # dff = read_data.df
+        dff = initial_df
         mask = (dff['location'] == location)
         if microlocations:
             mask &= dff['microlocation'].isin(microlocations)
