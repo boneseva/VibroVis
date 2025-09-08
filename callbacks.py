@@ -385,7 +385,9 @@ def register_callbacks(dash_app):
             fig.update_yaxes(visible=False)
             return fig, None, 1
 
-        # --- POST-LOADING PROCESSING ---
+        for col in ['file_name', 'mp3_file', 'model_name', 'location', 'microlocation']:
+            if col in dff.columns:
+                dff[col] = dff[col].astype('category')
 
         # Perform merging if the switch is on
         if merge_on and not dff.empty:
