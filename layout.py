@@ -310,4 +310,5 @@ def create_layout(df):
         dcc.Store(id='spectrogram-cache'),
         dcc.Store(id='clip-count-max-store'),
         dcc.Store(id='histogram-cache'),
+        dcc.Store(id='model-data-ready-signal'),
     ], id='main-container')

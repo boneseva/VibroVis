@@ -9,6 +9,7 @@ DATA_DIR = os.path.abspath("data/mp3")
 OVERVIEW_TSV = os.path.join("data", "Rok_spring_summer.tsv")
 SAVE_PATH = "data/cache/final_data.parquet"
 LABELS_SAVE_PATH = pathlib.Path("data/cache/saved_labels.parquet")
+# PREPROCESSED_SAVE_PATH = "data/cache/preprocessed_data.parquet"
 
 # Load the overview TSV as reference
 wav_meta = pd.read_csv(OVERVIEW_TSV, sep='\t')
