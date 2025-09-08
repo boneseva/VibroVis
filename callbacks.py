@@ -252,6 +252,9 @@ def register_callbacks(dash_app):
 
         dff['cluster_id'] = dff['cluster_id'].astype(str)
 
+        cache_key = str(uuid.uuid4())
+        dff['cache_key'] = cache_key
+
         fig = px.scatter(
             dff, x="x", y="y", color="cluster_id", size="marker_size", color_discrete_map=color_map,
             hover_data=["clip_count", "file_name", "clip_time", "channel"],
@@ -269,7 +272,6 @@ def register_callbacks(dash_app):
 
         max_clip_count = int(dff['clip_count'].max()) if not dff.empty else 1
 
-        cache_key = str(uuid.uuid4())
         server_cache[cache_key] = dff
 
         return fig, cache_key, max_clip_count
