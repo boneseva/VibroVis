@@ -16,9 +16,9 @@ app.layout = create_layout(initial_df)
 callbacks.register_callbacks(app)
 server = app.server
 
-#PORT = 8050
-#ADDRESS = "0.0.0.0"
+PORT = 8050
+ADDRESS = "0.0.0.0"
 
 if __name__ == "__main__":
-    # app.run(port=PORT, host=ADDRESS)
-    app.run_server(debug=True)
+    app.run(port=PORT, host=ADDRESS)
+    # app.run_server(debug=True)

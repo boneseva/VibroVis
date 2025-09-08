@@ -125,9 +125,65 @@ html, body {
 .app-button.autoplay-on { background-color: #BADCBD; }
 .app-button.autoplay-on:hover { background-color: #a9cba1; }
 .spectrogram-row {
-    display: grid; grid-template-columns: 1fr 1fr;
-    align-items: center; gap: 1rem; margin-bottom: 0.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px; /* Adds some space between rows */
 }
-.slider-container { grid-column: 1 / -1; }
+
+/* ADD these new rules to control the size of the inputs */
+.spectrogram-row > *:nth-child(2) {
+    flex-grow: 1; /* Allows the control to fill available space */
+    margin: 0 10px; /* Adds a small gap around the control */
+}
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-thumb { background: #c5c5c5; border-radius: 4px; }
+
+.label-with-info {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.tooltip-container {
+    position: relative;
+    display: inline-block;
+}
+
+.info-icon {
+    cursor: help;
+}
+
+.tooltip-text {
+    visibility: hidden;
+    width: 220px;
+    background-color: #333;
+    color: #fff;
+    text-align: center;
+    border-radius: 6px;
+    padding: 8px;
+    position: absolute;
+    z-index: 1;
+    top: 50%;
+    right: 125%;
+    transform: translateY(-50%);
+    opacity: 0;
+    transition: opacity 0.3s;
+    white-space: normal;
+}
+
+.tooltip-container:hover .tooltip-text {
+    visibility: visible;
+    opacity: 1;
+}
+
+.tooltip-text::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 100%;
+    margin-top: -5px;
+    border-width: 5px;
+    border-style: solid;
+    border-color: transparent transparent transparent #333;
+}
