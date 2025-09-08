@@ -1,15 +1,16 @@
+import io
+import os
 import time
+import uuid
+
 import dash
-from dash import Input, Output, State
+import flask
+import numpy as np
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import os
-import flask
 import soundfile as sf
-import io
-import pandas as pd
-import numpy as np
-import uuid
+from dash import Input, Output, State
 
 import read_data
 import utils
@@ -154,7 +155,8 @@ def register_callbacks(dash_app):
     @app.callback(
         [Output('scatter', 'figure'),
          Output('filtered-data', 'data'),
-         Output('clip-count-max-store', 'data')],
+         Output('clip-count-max-store', 'data'),
+         Output('loading-signal', 'data')],
         [Input('model-data-ready-signal', 'data'),
          Input('channel-checklist', 'value'),
          Input('num-cluster-dropdown', 'value'),
@@ -175,6 +177,10 @@ def register_callbacks(dash_app):
 
         dff = MODEL_DATA_CACHE.get('df')
 
+        print(f"Start of update_figure. Total rows in cache: {len(dff)}")
+
+        loading_status = {'is_loading': True}
+
         if dff is None or dff.empty:
             fig = go.Figure()
             fig.update_layout(
@@ -193,12 +199,17 @@ def register_callbacks(dash_app):
 
         if selected_location:
             dff_filtered = dff_filtered[dff_filtered['location'] == selected_location]
+            print(f"Rows after location filter '{selected_location}': {len(dff_filtered)}")
+
         if selected_microlocations:
             dff_filtered = dff_filtered[dff_filtered['microlocation'].isin(selected_microlocations)]
+
         if selected_num_clusters:
             dff_filtered = dff_filtered[dff_filtered['cluster_num'] == int(selected_num_clusters)]
+
         if selected_channels:
             dff_filtered = dff_filtered[dff_filtered['channel'].isin(selected_channels)]
+
         if selected_clusters:
             dff_filtered = dff_filtered[dff_filtered['cluster_id'].isin(selected_clusters)]
 
@@ -258,7 +269,7 @@ def register_callbacks(dash_app):
         fig = px.scatter(
             dff, x="x", y="y", color="cluster_id", size="marker_size", color_discrete_map=color_map,
             hover_data=["clip_count", "file_name", "clip_time", "channel"],
-            custom_data=["cluster_id", "row_idx", "plot_id"]
+            custom_data=["cluster_id", "row_idx", "plot_id", "cache_key"]
         )
 
         fig.update_layout(
@@ -274,11 +285,14 @@ def register_callbacks(dash_app):
 
         server_cache[cache_key] = dff
 
-        return fig, cache_key, max_clip_count
+        loading_status = {'is_loading': False}
+
+        return fig, cache_key, max_clip_count, loading_status
 
     @app.callback(
         Output('spectrogram-cache', 'data'),
         Output('fft-warning', 'children'),
+        Output('loading-signal', 'data'),
         [Input("scatter", "clickData"),
          Input('filtered-data', 'data'),
          Input('frequency-scale', 'value'),
@@ -297,9 +311,17 @@ def register_callbacks(dash_app):
         if not clickData or not filtered_data_cache_key:
             return dash.no_update, ""
 
+        loading_status = {'is_loading': True}
+
         dff = server_cache.get(filtered_data_cache_key)
         if dff is None:
             return dash.no_update, "Error: Filtered data not found in cache."
+
+        # --- Specific pre-computation checks for common user errors ---
+        warning_message = ""
+        if max_freq <= min_freq:
+            warning_message = "Warning: Maximum frequency must be greater than minimum frequency."
+            return dash.no_update, warning_message
 
         point = clickData["points"][0]
         plot_id = point["customdata"][2]
@@ -323,12 +345,18 @@ def register_callbacks(dash_app):
         if Sxx_db.size == 0:
             return dash.no_update, "Warning: Spectrogram computation failed."
 
+        if np.all(Sxx_db <= db_floor + 1e-6):  # Add a small tolerance for float precision
+            warning_message = "Warning: The audio segment is silent, or your frequency and decibel floor settings are too restrictive."
+            return dash.no_update, warning_message
+
         start_time = float(row['clip_time'])
         audio_path = f"/audio_segment_normalized/{row['mp3_file']}/{int(row['channel'])}/{start_time}/{start_time + float(row['clip_duration'])}"
         info = f"{row['file_name']} at {start_time:.2f}s (cluster {row['cluster_id']})"
 
+        loading_status = {'is_loading': False}
+
         return {'x': t.tolist(), 'y': f.tolist(), 'z': Sxx_db.tolist(), 'audio_path': audio_path, 'info': info,
-                '_rev': time.time_ns(), 'colormap': colormap}, ""
+                '_rev': time.time_ns(), 'colormap': colormap}, "", loading_status
 
     @app.callback(
         [Output("info", "children", allow_duplicate=True),
@@ -513,3 +541,12 @@ def register_callbacks(dash_app):
             return 'filters-collapsed', '<'
         else:
             return 'filters-expanded', '>'
+
+    @app.callback(
+        Output('main-container', 'style'),  # You can target any element, 'main-container' is a good choice
+        Input('loading-signal', 'data')
+    )
+    def update_cursor_style(data):
+        if data and data.get('is_loading'):
+            return {'cursor': 'wait'}
+        return {'cursor': 'default'}
