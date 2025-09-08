@@ -144,7 +144,15 @@ def create_layout(df):
                               style={'width': '80px', 'marginRight': '1em'}),
                     html.Button('Resample', id='resample-btn', n_clicks=0, className='app-button'),
 
-                    html.H4("Merging", id='merging-title'),
+                    html.Div([
+                            html.H4("Merging", id='merging-title'),
+                            html.Div(className="tooltip-container", children=[
+                                html.Span(" ⓘ", className="info-icon"),
+                                html.Span(
+                                    "Merges consecutive clips that are in the same cluster and close enough in the space into one point.",
+                                    className="tooltip-text")
+                            ])
+                        ], className="label-with-info"),
                     daq.BooleanSwitch(id='merge-switch', on=False, label='Merge consecutive clips',
                                       labelPosition='left'),
 
@@ -169,7 +177,7 @@ def create_layout(df):
                             html.Div(className="tooltip-container", children=[
                                 html.Span(" ⓘ", className="info-icon"),
                                 html.Span(
-                                    "Only show merged events that contain at least this many individual clips.",
+                                    "Only show merged points that contain at least this many individual clips.",
                                     className="tooltip-text")
                             ])
                         ], className="label-with-info"),

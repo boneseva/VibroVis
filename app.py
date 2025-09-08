@@ -20,5 +20,5 @@ PORT = 8050
 ADDRESS = "0.0.0.0"
 
 if __name__ == "__main__":
-    app.run(port=PORT, host=ADDRESS)
-    # app.run_server(debug=True)
+    # app.run(port=PORT, host=ADDRESS)
+    app.run_server(debug=True)
