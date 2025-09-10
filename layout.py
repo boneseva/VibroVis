@@ -167,7 +167,7 @@ def create_layout(df):
                             ])
                         ], className="label-with-info"),
                         dcc.Slider(id='merge-threshold', min=0, max=100,
-                                   step=1, value=10,
+                                   step=1, value=1,
                                    marks={i: str(i) for i in range(0, 101, 20)})
                     ]),
 
@@ -317,6 +317,7 @@ def create_layout(df):
         dcc.Store(id='filtered-data'),
         dcc.Store(id='spectrogram-cache'),
         dcc.Store(id='clip-count-max-store'),
+        dcc.Store(id='merge-max-store'),
         dcc.Store(id='histogram-cache'),
         dcc.Store(id='model-data-ready-signal'),
     ], id='main-container')

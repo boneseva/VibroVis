@@ -154,7 +154,8 @@ def register_callbacks(dash_app):
     @app.callback(
         [Output('scatter', 'figure'),
          Output('filtered-data', 'data'),
-         Output('clip-count-max-store', 'data')],
+         Output('clip-count-max-store', 'data'),
+         Output('merge-max-store', 'data')],
         [Input('model-data-ready-signal', 'data'),
          Input('channel-checklist', 'value'),
          Input('num-cluster-dropdown', 'value'),
@@ -189,7 +190,7 @@ def register_callbacks(dash_app):
             )
             fig.update_xaxes(visible=False)
             fig.update_yaxes(visible=False)
-            return fig, None, 1
+            return fig, None, 1, 100
 
         dff_filtered = dff.copy()
 
@@ -228,7 +229,7 @@ def register_callbacks(dash_app):
             )
             fig.update_xaxes(visible=False)
             fig.update_yaxes(visible=False)
-            return fig, None, 1
+            return fig, None, 1, 100
 
         if merge_on and not dff.empty:
             dff = merge_clips_vectorized(dff.copy(), merge_threshold)
@@ -253,12 +254,18 @@ def register_callbacks(dash_app):
                 dff = dff_shuffled.iloc[:1]
 
         if dff.empty:
-            return go.Figure(), None, 1
+            return go.Figure(), None, 1, 100
+
+        min_value_x = dff['x'].min()
+        max_value_x = dff['x'].max()
+        min_value_y = dff['y'].min()
+        max_value_y = dff['y'].max()
+        max_distance = int(np.sqrt((max_value_x - min_value_x) ** 2 + (max_value_y - min_value_y) ** 2))
 
         dff = dff.reset_index(drop=True)
         dff['plot_id'] = dff.index
 
-        dff['marker_size'] = 15 + 5 * np.sqrt(dff['clip_count'] - 1)
+        dff['marker_size'] = 15 + 15 * np.sqrt(dff['clip_count'] - 1)
 
         dff['cluster_id'] = dff['cluster_id'].astype(str)
 
@@ -270,6 +277,7 @@ def register_callbacks(dash_app):
             hover_data=["clip_count", "file_name", "clip_time", "channel"],
             custom_data=["cluster_id", "row_idx", "plot_id"]
         )
+        fig.update_traces(marker={'sizeref': 1, 'sizemode': 'diameter'})
 
         fig.update_layout(
             showlegend=False,
@@ -284,7 +292,7 @@ def register_callbacks(dash_app):
 
         server_cache[cache_key] = dff
 
-        return fig, cache_key, max_clip_count
+        return fig, cache_key, max_clip_count, max_distance
 
     @app.callback(
         Output('spectrogram-cache', 'data'),
@@ -384,7 +392,7 @@ def register_callbacks(dash_app):
         Input('merge-switch', 'on'))
     def toggle_merge_sliders(merge_on):
         style = {'display': 'block'} if merge_on else {'display': 'none'}
-        return style, style, 2 if merge_on else 1
+        return style, style, 1 if merge_on else 1
 
     @app.callback(
         Output('cluster-histogram', 'figure'),
@@ -458,6 +466,18 @@ def register_callbacks(dash_app):
         Input('clip-count-max-store', 'data'))
     def update_clip_count_slider(max_clip_count):
         max_val = max_clip_count or 1
+        marks = {i: str(i) for i in range(1, max_val + 1, max(1, max_val // 10))}
+        if max_val > 1:
+            marks[1] = '1'
+            marks[max_val] = str(max_val)
+        return max_val, marks
+
+    @app.callback(
+        [Output('merge-threshold', 'max'),
+         Output('merge-threshold', 'marks')],
+        Input('merge-max-store', 'data'))
+    def update_merge_slider(max_merge):
+        max_val = max_merge or 1
         marks = {i: str(i) for i in range(1, max_val + 1, max(1, max_val // 10))}
         if max_val > 1:
             marks[1] = '1'
