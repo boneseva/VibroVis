@@ -106,7 +106,7 @@ html, body {
     box-shadow: 0 1px 4px rgba(0,0,0,0.1);
 }
 .panel-toggle-button:hover { background-color: #f0f0f0; }
-#filter-title, #sampling-title, #merging-title, .section-title {
+#filter-title, #model-filter-title, #sampling-title, #merging-title, .section-title {
     color: #2a3f5f; font-weight: 700; margin-top: 1.5rem;
     padding-bottom: 0.5rem; border-bottom: 1px solid #ddd;
 }

@@ -34,160 +34,176 @@ def create_layout(df):
             # --- RIGHT PANEL (Filters) ---
             html.Div([
                 html.Div([
-                    html.H4("Filters", id='filter-title'),
-
-                    html.Div([
-                        html.Label("Location"),
-                        html.Div(className="tooltip-container", children=[
-                            html.Span(" ⓘ", className="info-icon"),
-                            html.Span("Filter data by the primary recording location.", className="tooltip-text")
-                        ])
-                    ], className="label-with-info", style={'marginTop': '1em'}),
-                    dcc.Dropdown(id='location-dropdown', options=[{'label': str(loc), 'value': loc} for loc in
-                                                                  sorted(df['location'].dropna().unique())],
-                                 value=sorted(df['location'].dropna().unique())[0] if df[
-                                                                                          'location'].nunique() > 0 else None),
-
-                    html.Div([
-                        html.Label("Microlocation"),
-                        html.Div(className="tooltip-container", children=[
-                            html.Span(" ⓘ", className="info-icon"),
-                            html.Span("Filter by specific sub-locations or microphone positions.",
-                                      className="tooltip-text")
-                        ])
-                    ], className="label-with-info", style={'marginTop': '1em'}),
-                    dcc.Dropdown(id='microlocation-dropdown', options=[], multi=True, value=[]),
-
-                    html.Div([
-                        html.Label("Model"),
-                        html.Div(className="tooltip-container", children=[
-                            html.Span(" ⓘ", className="info-icon"),
-                            html.Span("Select the machine learning model used for detection.", className="tooltip-text")
-                        ])
-                    ], className="label-with-info", style={'marginTop': '1em'}),
-                    dcc.Dropdown(id='model-dropdown',
-                                 options=[{'label': str(m), 'value': m} for m in sorted(df['model_name'].unique())],
-                                 value=sorted(df['model_name'].unique())[0]),
-
-                    html.Div([
-                        html.Label("Channels"),
-                        html.Div(className="tooltip-container", children=[
-                            html.Span(" ⓘ", className="info-icon"),
-                            html.Span("Select which audio channels to display.", className="tooltip-text")
-                        ])
-                    ], className="label-with-info", style={'marginTop': '1em'}),
-                    dcc.Checklist(id="all-or-none-channel", options=[{"label": "Select All", "value": "All"}],
-                                  value=["All"], labelStyle={"display": "inline-block"}),
-                    dcc.Checklist(id='channel-checklist',
-                                  options=[{'label': str(c), 'value': c} for c in sorted(df['channel'].unique())],
-                                  value=df['channel'].unique().tolist(), labelStyle={"display": "inline-block"}),
-
-                    html.Div([
-                        html.Label("Number of clusters"),
-                        html.Div(className="tooltip-container", children=[
-                            html.Span(" ⓘ", className="info-icon"),
-                            html.Span("Choose the clustering model (e.g., k=10 or k=20 clusters).",
-                                      className="tooltip-text")
-                        ])
-                    ], className="label-with-info", style={'marginTop': '1em'}),
-                    dcc.Dropdown(id='num-cluster-dropdown',
-                                 options=[{'label': str(c), 'value': c} for c in sorted(df['cluster_num'].unique())],
-                                 value=sorted(df['cluster_num'].unique())[0]),
-
-                    html.Div([
-                        html.Label("Clusters"),
-                        html.Div(className="tooltip-container", children=[
-                            html.Span(" ⓘ", className="info-icon"),
-                            html.Span("Select specific clusters to display from the chosen model.",
-                                      className="tooltip-text")
-                        ])
-                    ], className="label-with-info", style={'marginTop': '1em'}),
-                    dcc.Checklist(id="all-or-none-cluster", options=[{"label": "Select All", "value": "All"}],
-                                  value=["All"], labelStyle={"display": "inline-block"}),
-                    dcc.Checklist(id='cluster-checklist', options=[{'label': str(int(c)), 'value': int(c)} for c in
-                                                                   sorted(df['cluster_id'].unique())],
-                                  value=df['cluster_id'].unique().tolist(), labelStyle={"display": "inline-block"}),
-
-                    html.Div([
-                        html.Label("Dates"),
-                        html.Div(className="tooltip-container", children=[
-                            html.Span(" ⓘ", className="info-icon"),
-                            html.Span("Filter the data by specific recording dates.", className="tooltip-text")
-                        ])
-                    ], className="label-with-info", style={'marginTop': '1em'}),
-                    dcc.Dropdown(id='date-dropdown', options=[{'label': d, 'value': d} for d in
-                                                              sorted(df['day_dt'].dt.strftime('%Y-%m-%d').unique())],
-                                 multi=True, value=sorted(df['day_dt'].dt.strftime('%Y-%m-%d').unique())),
-
-                    html.Div([
-                        html.Label("Hour range"),
-                        html.Div(className="tooltip-container", children=[
-                            html.Span(" ⓘ", className="info-icon"),
-                            html.Span("Filter by the time of day.", className="tooltip-text")
-                        ])
-                    ], className="label-with-info", style={'marginTop': '1em'}),
-                    dcc.RangeSlider(id='hour-slider', min=int(min_hour), max=int(max_hour) + 1,
-                                    value=[min_hour, max_hour], step=0.25,
-                                    marks={h: f"{int(h):02d}:00" for h in range(int(min_hour), int(max_hour) + 2, 2)}),
-
-                    html.H4("Sampling", id='sampling-title'),
-                    html.Div([
-                        html.Label("Max points"),
-                        html.Div(className="tooltip-container", children=[
-                            html.Span(" ⓘ", className="info-icon"),
-                            html.Span(
-                                "Limits the number of points displayed on the scatter plot to improve performance.",
-                                className="tooltip-text")
-                        ])
-                    ], className="label-with-info"),
-                    dcc.Input(id='max-points', type='number', min=1, value=10000,
-                              style={'width': '80px', 'marginRight': '1em'}),
-                    html.Button('Resample', id='resample-btn', n_clicks=0, className='app-button'),
-
-                    html.Div([
-                            html.H4("Merging", id='merging-title'),
-                            html.Div(className="tooltip-container", children=[
-                                html.Span(" ⓘ", className="info-icon"),
-                                html.Span(
-                                    "Merges consecutive clips that are in the same cluster and close enough in the space into one point.",
-                                    className="tooltip-text")
-                            ])
-                        ], className="label-with-info"),
-                    daq.BooleanSwitch(id='merge-switch', on=False, label='Merge consecutive clips',
-                                      labelPosition='left'),
-
-                    html.Div(id='merge-threshold-container', children=[
+                    # html.H4("Recordings", id='filter-title'),
+                    html.Details([
+                    html.Summary("Recordings", className='section-title'),
+                    html.Div(id='recordings-filter-content', children=[
                         html.Div([
-                            html.Label("Merge threshold"),
+                            html.Label("Location"),
                             html.Div(className="tooltip-container", children=[
                                 html.Span(" ⓘ", className="info-icon"),
-                                html.Span(
-                                    "Controls how close clips must be to be merged. Higher values = more merging.",
-                                    className="tooltip-text")
+                                html.Span("Filter data by the primary recording location.", className="tooltip-text")
                             ])
-                        ], className="label-with-info"),
-                        dcc.Slider(id='merge-threshold', min=0, max=100,
-                                   step=1, value=1,
-                                   marks={i: str(i) for i in range(0, 101, 20)})
-                    ]),
+                        ], className="label-with-info", style={'marginTop': '1em'}),
+                        dcc.Dropdown(id='location-dropdown', options=[{'label': str(loc), 'value': loc} for loc in
+                                                                      sorted(df['location'].dropna().unique())],
+                                     value=sorted(df['location'].dropna().unique())[0] if df[
+                                                                                              'location'].nunique() > 0 else None),
 
-                    html.Div(id='clip-count-threshold-container', children=[
                         html.Div([
-                            html.Label("Clip count threshold"),
+                            html.Label("Microlocation"),
                             html.Div(className="tooltip-container", children=[
                                 html.Span(" ⓘ", className="info-icon"),
-                                html.Span(
-                                    "Only show merged points that contain at least this many individual clips.",
-                                    className="tooltip-text")
+                                html.Span("Filter by specific sub-locations or microphone positions.",
+                                          className="tooltip-text")
                             ])
-                        ], className="label-with-info"),
-                        dcc.Slider(id='clip-count-threshold', min=1,
-                                   max=1, step=1, value=1,
-                                   marks={i: str(i) for i in range(1, 11)})
-                    ]),
+                        ], className="label-with-info", style={'marginTop': '1em'}),
+                        dcc.Dropdown(id='microlocation-dropdown', options=[], multi=True, value=[]),
+
+
+                        html.Div([
+                            html.Label("Channels"),
+                            html.Div(className="tooltip-container", children=[
+                                html.Span(" ⓘ", className="info-icon"),
+                                html.Span("Select which audio channels to display.", className="tooltip-text")
+                            ])
+                        ], className="label-with-info", style={'marginTop': '1em'}),
+                        dcc.Checklist(id="all-or-none-channel", options=[{"label": "Select All", "value": "All"}],
+                                      value=["All"], labelStyle={"display": "inline-block"}),
+                        dcc.Checklist(id='channel-checklist',
+                                      options=[{'label': str(c), 'value': c} for c in sorted(df['channel'].unique())],
+                                      value=df['channel'].unique().tolist(), labelStyle={"display": "inline-block"}),
+
+                        html.Div([
+                            html.Label("Dates"),
+                            html.Div(className="tooltip-container", children=[
+                                html.Span(" ⓘ", className="info-icon"),
+                                html.Span("Filter the data by specific recording dates.", className="tooltip-text")
+                            ])
+                        ], className="label-with-info", style={'marginTop': '1em'}),
+                        dcc.Dropdown(id='date-dropdown', options=[{'label': d, 'value': d} for d in
+                                                                  sorted(df['day_dt'].dt.strftime('%Y-%m-%d').unique())],
+                                     multi=True, value=sorted(df['day_dt'].dt.strftime('%Y-%m-%d').unique())),
+
+                        html.Div([
+                            html.Label("Hour range"),
+                            html.Div(className="tooltip-container", children=[
+                                html.Span(" ⓘ", className="info-icon"),
+                                html.Span("Filter by the time of day.", className="tooltip-text")
+                            ])
+                        ], className="label-with-info", style={'marginTop': '1em'}),
+                        dcc.RangeSlider(id='hour-slider', min=int(min_hour), max=int(max_hour) + 1,
+                                        value=[min_hour, max_hour], step=0.25,
+                                        marks={h: f"{int(h):02d}:00" for h in range(int(min_hour), int(max_hour) + 2, 2)}),
+                    ])
+                    ], open=True),
 
                     html.Details([
-                        html.Summary("Advanced Options", className='section-title'),
+                    html.Summary("Model", className='section-title'),
+                    # html.H4("Model", id='model-filter-title'),
+                    html.Div(id='model-filter-content', children=[
+                        html.Div([
+                            html.Label("Model"),
+                            html.Div(className="tooltip-container", children=[
+                                html.Span(" ⓘ", className="info-icon"),
+                                html.Span("Select the machine learning model used for detection.", className="tooltip-text")
+                            ])
+                        ], className="label-with-info", style={'marginTop': '1em'}),
+                        dcc.Dropdown(id='model-dropdown',
+                                     options=[{'label': str(m), 'value': m} for m in sorted(df['model_name'].unique())],
+                                     value=sorted(df['model_name'].unique())[0]),
+
+                        html.Div([
+                            html.Label("Number of clusters"),
+                            html.Div(className="tooltip-container", children=[
+                                html.Span(" ⓘ", className="info-icon"),
+                                html.Span("Choose the clustering model (e.g., k=10 or k=20 clusters).",
+                                          className="tooltip-text")
+                            ])
+                        ], className="label-with-info", style={'marginTop': '1em'}),
+                        dcc.Dropdown(id='num-cluster-dropdown',
+                                     options=[{'label': str(c), 'value': c} for c in sorted(df['cluster_num'].unique())],
+                                     value=sorted(df['cluster_num'].unique())[0]),
+
+                        html.Div([
+                            html.Label("Clusters"),
+                            html.Div(className="tooltip-container", children=[
+                                html.Span(" ⓘ", className="info-icon"),
+                                html.Span("Select specific clusters to display from the chosen model.",
+                                          className="tooltip-text")
+                            ])
+                        ], className="label-with-info", style={'marginTop': '1em'}),
+                        dcc.Checklist(id="all-or-none-cluster", options=[{"label": "Select All", "value": "All"}],
+                                      value=["All"], labelStyle={"display": "inline-block"}),
+                        dcc.Checklist(id='cluster-checklist', options=[{'label': str(int(c)), 'value': int(c)} for c in
+                                                                       sorted(df['cluster_id'].unique())],
+                                      value=df['cluster_id'].unique().tolist(), labelStyle={"display": "inline-block"}),
+                    ])
+                    ], open=True),
+
+
+
+                    # html.H4("Sampling and Merging", id='sampling-title'),
+                    html.Details([
+                    html.Summary("Sampling and Merging", className='section-title'),
+                        html.Div(id='sampling-merging-content', children=[
+                            html.Div([
+                                html.Label("Max points"),
+                                html.Div(className="tooltip-container", children=[
+                                    html.Span(" ⓘ", className="info-icon"),
+                                    html.Span(
+                                        "Limits the number of points displayed on the scatter plot to improve performance.",
+                                        className="tooltip-text")
+                                ])
+                            ], className="label-with-info"),
+                            dcc.Input(id='max-points', type='number', min=1, value=10000,
+                                      style={'width': '80px', 'marginRight': '1em'}),
+                            html.Button('Resample', id='resample-btn', n_clicks=0, className='app-button'),
+
+                            html.Div([
+                                    html.Label("Merge consecutive clips"),
+                                    html.Div(className="tooltip-container", children=[
+                                        html.Span(" ⓘ", className="info-icon"),
+                                        html.Span(
+                                            "Merges consecutive clips that are in the same cluster and close enough in the space into one point.",
+                                            className="tooltip-text")
+                                    ])
+                                ], className="label-with-info", style={'marginTop': '1em'}),
+                            daq.BooleanSwitch(id='merge-switch', on=False, label='', labelPosition='top'),
+
+                            html.Div(id='merge-threshold-container', children=[
+                                html.Div([
+                                    html.Label("Merge threshold"),
+                                    html.Div(className="tooltip-container", children=[
+                                        html.Span(" ⓘ", className="info-icon"),
+                                        html.Span(
+                                            "Controls how close clips must be to be merged. Higher values = more merging.",
+                                            className="tooltip-text")
+                                    ])
+                                ], className="label-with-info"),
+                                dcc.Slider(id='merge-threshold', min=0, max=100,
+                                           step=1, value=1,
+                                           marks={i: str(i) for i in range(0, 101, 20)})
+                            ]),
+
+                            html.Div(id='clip-count-threshold-container', children=[
+                                html.Div([
+                                    html.Label("Clip count threshold"),
+                                    html.Div(className="tooltip-container", children=[
+                                        html.Span(" ⓘ", className="info-icon"),
+                                        html.Span(
+                                            "Only show merged points that contain at least this many individual clips.",
+                                            className="tooltip-text")
+                                    ])
+                                ], className="label-with-info"),
+                                dcc.Slider(id='clip-count-threshold', min=1,
+                                           max=1, step=1, value=1,
+                                           marks={i: str(i) for i in range(1, 11)})
+                            ])])
+                    ], open=True),
+
+                    html.Details([
+                        html.Summary("Spectrogram Settings", className='section-title'),
                         html.Div(id='advanced-options-content', children=[
 
                             html.Div([
