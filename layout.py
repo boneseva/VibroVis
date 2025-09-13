@@ -8,8 +8,11 @@ def create_layout(df):
     max_hour = df['start_hour_float'].max() if not df['start_hour_float'].empty else 24
 
     return html.Div([
+        
         html.Div([
             html.Div([
+                
+                
                 html.Button(">", id="toggle-filters-btn", n_clicks=0, className="panel-toggle-button"),
                 dcc.Graph(id='scatter'),
                 html.Div(id='fft-warning', style={'color': 'red', 'margin': '0.1em'}),
@@ -33,6 +36,16 @@ def create_layout(df):
 
             # --- RIGHT PANEL (Filters) ---
             html.Div([
+                html.Div([
+                    html.A(
+                        "ℹ️",
+                        href="https://docs.google.com/document/d/e/2PACX-1vSxvnYGbOE4oblvbkKrpfleLwe92h3irOA3eVr757FLZAfHqwbSBH6hcNKTqfj64_gvWBcZzeWjs8DC/pub", 
+                        target="_blank",  # new tab
+                        className="guide-title",
+                        title="Help & Documentation",
+                    )
+                ], className="guide-div"),
+                
                 html.Div([
                     # html.H4("Recordings", id='filter-title'),
                     html.Details([
@@ -299,7 +312,7 @@ def create_layout(df):
                             ], className='spectrogram-row'),
 
                             html.Div([
-                                html.Label("DB Floor"),
+                                html.Label("dB Floor"),
                                 dcc.Input(id='db-floor', type='number', value=-100),
                                 html.Div(className="tooltip-container", children=[
                                     html.Span(" ⓘ", className="info-icon"),
