@@ -137,6 +137,8 @@ def register_callbacks(dash_app):
                         filters=[('model_name', '==', selected_model)],
                         columns=cols_to_load
                     )
+                    # Ensure the index is unique and consistent for sampling
+                    model_df = model_df.reset_index(drop=True)
                     MODEL_DATA_CACHE['df'] = model_df
                     print(f"Cached {len(model_df)} rows.")
                 except Exception as e:
@@ -149,7 +151,8 @@ def register_callbacks(dash_app):
         [Output('scatter', 'figure'),
          Output('filtered-data', 'data'),
          Output('clip-count-max-store', 'data'),
-         Output('merge-max-store', 'data')],
+         Output('merge-max-store', 'data'),
+         Output('sampled-indices-store', 'data')],
         [Input('model-data-ready-signal', 'data'),
          Input('channel-checklist', 'value'),
          Input('num-cluster-dropdown', 'value'),
@@ -163,11 +166,12 @@ def register_callbacks(dash_app):
          Input('clip-count-threshold', 'value'),
          Input('location-dropdown', 'value'),
          Input('microlocation-dropdown', 'value')],
-        [State('scatter', 'figure')]
+        [State('scatter', 'figure'),
+         State('sampled-indices-store', 'data')]
     )
     def update_figure(model_ready_signal, selected_channels, selected_num_clusters, selected_clusters, selected_dates,
                       hour_range, max_points, n_clicks, merge_on, merge_threshold, clip_count_threshold,
-                      selected_location, selected_microlocations, current_figure_state):
+                      selected_location, selected_microlocations, current_figure_state, stored_indices):
 
         dff = MODEL_DATA_CACHE.get('df')
         ctx = callback_context
@@ -185,7 +189,7 @@ def register_callbacks(dash_app):
             )
             fig.update_xaxes(visible=False)
             fig.update_yaxes(visible=False)
-            return fig, None, 1, 100
+            return fig, None, 1, 100, []
 
         x_range, y_range = None, None
         is_filter_change = triggered_id not in ['model-data-ready-signal', 'initial_load']
@@ -214,9 +218,44 @@ def register_callbacks(dash_app):
             dff_filtered = dff_filtered[dff_filtered['day_dt'].isin(selected_datetimes)]
         if hour_range:
             dff_filtered = dff_filtered[(dff_filtered['start_hour_float'] >= hour_range[0]) & (
-                        dff_filtered['start_hour_float'] <= hour_range[1])]
+                    dff_filtered['start_hour_float'] <= hour_range[1])]
 
-        dff = dff_filtered
+        dff_after_filters = dff_filtered
+
+        if merge_on and not dff_after_filters.empty:
+            dff_after_filters = merge_clips_vectorized(dff_after_filters.copy(), merge_threshold)
+
+        if "clip_count" not in dff_after_filters.columns:
+            dff_after_filters["clip_count"] = 1
+        if clip_count_threshold and clip_count_threshold > 1:
+            dff_after_filters = dff_after_filters[dff_after_filters["clip_count"] >= int(clip_count_threshold)]
+
+        # --- START: NEW "STICKY" SAMPLING LOGIC ---
+        dff_to_plot = dff_after_filters
+        new_indices_to_store = dash.no_update
+        force_new_sample = triggered_id in ['model-data-ready-signal', 'resample-btn', 'num-cluster-dropdown']
+
+        if max_points and dff_after_filters['clip_count'].sum() > max_points:
+            if force_new_sample or not stored_indices:
+                # Generate a completely new sample
+                random_state = n_clicks if triggered_id == 'resample-btn' else 42
+                dff_shuffled = dff_after_filters.sample(frac=1, random_state=random_state)
+                cumulative_clips = dff_shuffled['clip_count'].cumsum()
+                cutoff_index = np.searchsorted(cumulative_clips.values, max_points, side='right')
+                dff_to_plot = dff_shuffled.iloc[:cutoff_index]
+                if dff_to_plot.empty and not dff_shuffled.empty:
+                    dff_to_plot = dff_shuffled.iloc[:1]
+                new_indices_to_store = dff_to_plot.index.tolist()
+            else:
+                # Apply the existing sample to the newly filtered data
+                valid_indices = dff_after_filters.index.intersection(stored_indices)
+                dff_to_plot = dff_after_filters.loc[valid_indices]
+        else:
+            # Data is small enough, no sampling needed. Clear stored indices.
+            new_indices_to_store = []
+
+        dff = dff_to_plot
+        # --- END: NEW "STICKY" SAMPLING LOGIC ---
 
         if dff.empty:
             fig = go.Figure()
@@ -234,27 +273,7 @@ def register_callbacks(dash_app):
             else:
                 fig.update_xaxes(visible=False)
                 fig.update_yaxes(visible=False)
-            return fig, None, 1, 100
-
-        if merge_on and not dff.empty:
-            dff = merge_clips_vectorized(dff.copy(), merge_threshold)
-
-        if "clip_count" not in dff.columns:
-            dff["clip_count"] = 1
-        if clip_count_threshold and clip_count_threshold > 1:
-            dff = dff[dff["clip_count"] >= int(clip_count_threshold)]
-
-        if max_points and dff['clip_count'].sum() > max_points:
-            random_state = n_clicks if triggered_id == 'resample-btn' else 42
-            dff_shuffled = dff.sample(frac=1, random_state=random_state)
-            cumulative_clips = dff_shuffled['clip_count'].cumsum()
-            cutoff_index = np.searchsorted(cumulative_clips.values, max_points, side='right')
-            dff = dff_shuffled.iloc[:cutoff_index]
-            if dff.empty and not dff_shuffled.empty:
-                dff = dff_shuffled.iloc[:1]
-
-        if dff.empty:
-            return go.Figure(), None, 1, 100
+            return fig, None, 1, 100, new_indices_to_store
 
         min_value_x, max_value_x = dff['x'].min(), dff['x'].max()
         min_value_y, max_value_y = dff['y'].min(), dff['y'].max()
@@ -288,7 +307,7 @@ def register_callbacks(dash_app):
 
         max_clip_count = int(dff['clip_count'].max()) if not dff.empty else 1
         server_cache[cache_key] = dff
-        return fig, cache_key, max_clip_count, max_distance
+        return fig, cache_key, max_clip_count, max_distance, new_indices_to_store
 
     @app.callback(
         Output('spectrogram-cache', 'data'),

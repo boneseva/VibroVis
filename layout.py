@@ -349,5 +349,5 @@ def create_layout(df):
         dcc.Store(id='merge-max-store'),
         dcc.Store(id='histogram-cache'),
         dcc.Store(id='model-data-ready-signal'),
-        dcc.Store(id='uirevision-store'),
+        dcc.Store(id='sampled-indices-store'),
     ], id='main-container')
