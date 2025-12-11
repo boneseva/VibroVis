@@ -1,13 +1,19 @@
+# Updated utils.py
+# (This file now has a memory-efficient audio loader)
+
 import soundfile as sf
 import numpy as np
 import os
 from scipy.signal import spectrogram
 import read_data  # Import read_data to access DATA_DIR
+import librosa  # Make sure librosa is imported
 
 
+# --- *** NEW, MEMORY-EFFICIENT FUNCTION *** ---
 def load_audio_segment(mp3_file_relative_path, clip_time, clip_duration, channel=0, padding_s=1.0):
     """
-    Loads a specific audio segment from an MP3 file with padding.
+    Loads a specific audio segment from a file *without* loading the
+    entire file into memory.
     """
     mp3_file_relative_path = mp3_file_relative_path.replace("\\", "/")
     full_path = os.path.join(read_data.DATA_DIR, mp3_file_relative_path)
@@ -16,39 +22,42 @@ def load_audio_segment(mp3_file_relative_path, clip_time, clip_duration, channel
         return None, None
 
     try:
-        data, samplerate = sf.read(full_path)
+        # 1. Get file info without loading data
+        info = sf.info(full_path)
+        samplerate = info.samplerate
+        total_frames = info.frames
+        num_channels = info.channels
 
-        # Handle mono vs multi-channel
-        if data.ndim > 1:
-            if channel < data.shape[1]:
-                channel_data = data[:, channel]
-            else:  # Fallback to first channel if specified channel is out of bounds
-                channel_data = data[:, 0]
-        else:
-            channel_data = data
-
-        # Calculate start and end samples with padding
+        # 2. Calculate start and end samples with padding
         start_sample = int(max(0, (clip_time - padding_s)) * samplerate)
-        end_sample = int(min(len(channel_data), (clip_time + clip_duration + padding_s) * samplerate))
+        end_sample = int(min(total_frames, (clip_time + clip_duration + padding_s) * samplerate))
 
-        segment = channel_data[start_sample:end_sample]
-        return segment, samplerate
+        # 3. Read *only* the required segment from disk
+        # We read as float32 for consistency with librosa
+        segment, _ = sf.read(full_path, start=start_sample, stop=end_sample, dtype='float32')
+
+        # 4. Handle mono vs multi-channel *after* loading the small segment
+        if segment.ndim > 1:
+            if channel < num_channels:
+                channel_data = segment[:, channel]
+            else:  # Fallback to first channel
+                channel_data = segment[:, 0]
+        else:
+            channel_data = segment
+
+        return channel_data, samplerate
 
     except Exception as e:
         print(f"Error loading audio segment from {full_path}: {e}")
         return None, None
-
-
-# In utils.py
-import librosa
-from scipy.signal import spectrogram
-import numpy as np
+# --- *** END OF NEW FUNCTION *** ---
 
 
 def compute_spectrogram(segment, samplerate, scale='log', fft_window_size=1024, window_overlap=0.5,
                         window_type='hann', min_freq=50, max_freq=5000, num_bins=256, db_floor=-100, **kwargs):
     """
     Computes the spectrogram with selectable frequency scales (Linear, Log, Mel).
+    (This function is unchanged)
     """
     if segment is None or len(segment) == 0:
         return np.array([]), np.array([]), np.array([])
