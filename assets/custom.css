@@ -117,6 +117,8 @@ html, body {
     align-items: center; margin-bottom: 0.5rem;
 }
 #histogram-title { margin: 0; color: #2a3f5f; font-size: 1.1em; }
+.input-field { width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 5px; }
+
 .app-button {
     padding: 6px 14px; border: 1px solid #ccc; border-radius: 5px;
     background: #f0f0f0; cursor: pointer;
