@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Layer_9" data-name="Layer 9" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2924.34 889.43">
+  <defs>
+    <style>
+      .cls-1, .cls-2 {
+        fill: #6e830a;
+      }
+
+      .cls-3, .cls-4 {
+        font-family: Oswald-Light, Oswald;
+        font-variation-settings: 'wght' 300;
+        font-weight: 300;
+      }
+
+      .cls-2 {
+        font-size: 698.02px;
+      }
+
+      .cls-4 {
+        letter-spacing: -.02em;
+      }
+
+      .cls-5 {
+        font-family: Oswald-Bold, Oswald;
+        font-variation-settings: 'wght' 700;
+        font-weight: 700;
+      }
+
+      .cls-6 {
+        fill: none;
+        stroke: #fff;
+        stroke-linecap: round;
+        stroke-miterlimit: 10;
+        stroke-width: 50px;
+      }
+    </style>
+  </defs>
+  <g>
+    <path class="cls-1" d="M738.75,120.17c210.06,200.71,176.39,546.83-70.43,700.68-196.13,122.26-452.67,68.54-585.66-118.08C-57.77,505.7-15.23,228.13,179.55,85.11c170.73-125.36,406.29-111.04,559.19,35.06Z"/>
+    <g>
+      <line class="cls-6" x1="120.51" y1="422.54" x2="120.51" y2="501.41"/>
+      <line class="cls-6" x1="199.65" y1="459.69" x2="199.65" y2="583.97"/>
+      <g>
+        <line class="cls-6" x1="279.97" y1="174.48" x2="279.97" y2="307.72"/>
+        <line class="cls-6" x1="279.97" y1="375.8" x2="279.97" y2="660.22"/>
+      </g>
+      <line class="cls-6" x1="360.3" y1="184.6" x2="360.3" y2="655.44"/>
+      <line class="cls-6" x1="439.43" y1="141.75" x2="439.43" y2="614.38"/>
+      <line class="cls-6" x1="164.74" y1="663.74" x2="212.54" y2="663.74"/>
+      <line class="cls-6" x1="518.57" y1="184.6" x2="518.57" y2="655.44"/>
+      <line class="cls-6" x1="677.43" y1="459.69" x2="677.43" y2="583.97"/>
+      <line class="cls-6" x1="756.56" y1="422.54" x2="756.56" y2="501.41"/>
+      <line class="cls-6" x1="665.75" y1="663.74" x2="713.56" y2="663.74"/>
+      <g>
+        <line class="cls-6" x1="598" y1="174.48" x2="598" y2="307.72"/>
+        <line class="cls-6" x1="598" y1="375.8" x2="598" y2="660.22"/>
+      </g>
+    </g>
+  </g>
+  <text class="cls-2" transform="translate(907.08 759.1)"><tspan class="cls-4" x="0" y="0">R</tspan><tspan class="cls-3" x="346.22" y="0">ana</tspan><tspan class="cls-5" x="1169.18" y="0">Vis</tspan></text>
+</svg>

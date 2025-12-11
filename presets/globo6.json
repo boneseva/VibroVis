@@ -1,0 +1,46 @@
+{
+    "location": "Globo\u010daj",
+    "microlocation": [],
+    "recorder": [],
+    "channels": [
+        1
+    ],
+    "model": "perchv2",
+    "num_clusters": 10,
+    "max_points": 10000,
+    "merge_switch": false,
+    "merge_threshold": 1,
+    "clip_count_threshold": 1,
+    "spectrogram": {
+        "scale": "mel",
+        "size": 4096,
+        "overlap": 0.9,
+        "bins": 512,
+        "min": 50,
+        "max": 5000,
+        "cmap": "Viridis",
+        "db": -100
+    },
+    "cluster_colors": {
+        "0": "#4E79A7",
+        "1": "#F28E2B",
+        "2": "#E15759",
+        "3": "#76B7B2",
+        "4": "#EDC948",
+        "5": "#B07AA1",
+        "6": "#FF9DA7",
+        "7": "#A6A377",
+        "8": "#F2C894",
+        "9": "#BADCBD"
+    },
+    "cluster_names": {},
+    "dates": [
+        "2025-04-17",
+        "2025-04-18",
+        "2025-04-20"
+    ],
+    "hours": [
+        13.5,
+        24
+    ]
+}

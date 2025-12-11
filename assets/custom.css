@@ -27,6 +27,8 @@ html, body {
     box-shadow: 2px 0 8px #eee;
     position: relative;
     padding: 1rem;
+    overflow: hidden; /* Prevent content from overflowing */
+    height: 100vh; /* Ensure it takes full height */
 }
 
 #filter-container {
@@ -62,6 +64,205 @@ html, body {
     height: 100% !important;
 }
 
+#table-view-container {
+    flex: 1;
+    min-height: 100%;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+#data-table-wrapper {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+}
+
+#data-table {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+#data-table .dash-spreadsheet-container {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+#data-table .dash-spreadsheet-inner {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+/* Override dash-table's max-height restriction */
+#data-table .dash-spreadsheet.dash-freeze-top,
+#data-table .dash-spreadsheet.dash-virtualized {
+    max-height: 60vh !important;
+}
+
+/* Ensure table body is visible */
+#data-table .dt-table-container__row {
+    display: table-row !important;
+    visibility: visible !important;
+    height: auto !important;
+}
+
+#data-table .cell-table {
+    display: table !important;
+    visibility: visible !important;
+    width: 100% !important;
+    height: auto !important;
+}
+
+#data-table tbody {
+    display: table-row-group !important;
+    visibility: visible !important;
+}
+
+#data-table .dash-table-container {
+    display: block !important;
+    visibility: visible !important;
+    height: auto !important;
+}
+
+/* Ensure table cells are visible and properly aligned */
+#data-table .dash-cell {
+    display: table-cell !important;
+    visibility: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 3px 8px !important;
+    vertical-align: middle !important;
+}
+
+/* Ensure header and body cells have matching widths */
+#data-table .dash-header-cell,
+#data-table .dash-cell {
+    width: auto !important;
+    box-sizing: border-box !important;
+}
+
+/* Fix header alignment with scrollbar */
+/* The header is outside the scrollable container, so we need to account for scrollbar width */
+/* Use scrollbar-gutter on the inner container (modern browsers) */
+#data-table .dash-spreadsheet-inner {
+    scrollbar-gutter: stable;
+}
+
+/* Target the header container specifically - Dash DataTable structure */
+/* The header is in a separate container above the scrollable body */
+#data-table .dash-spreadsheet-container > .dash-table-container:not(.dash-spreadsheet-inner) {
+    width: calc(100% - 17px) !important;
+    box-sizing: border-box;
+    padding-right: 0 !important;
+}
+
+/* Alternative: Target the header row directly */
+#data-table .dash-header {
+    width: calc(100% - 17px) !important;
+    box-sizing: border-box;
+}
+
+/* Ensure header cells align properly */
+#data-table .dash-header-cell {
+    box-sizing: border-box;
+}
+
+/* Fix table layout to ensure proper column alignment */
+#data-table .dash-spreadsheet-container {
+    table-layout: auto !important;
+}
+
+#data-table .dash-spreadsheet {
+    width: 100% !important;
+    border-collapse: collapse !important;
+}
+
+/* Ensure pagination controls are visible */
+#data-table .dash-table-toolbar,
+#data-table .previous-next-container {
+    flex-shrink: 0;
+    visibility: visible !important;
+    display: block !important;
+}
+
+/* Hide the selection column completely - use play button instead */
+#data-table .dash-cell.dash-select-cell {
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    visibility: hidden !important;
+}
+
+#data-table .dash-select-header {
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    visibility: hidden !important;
+}
+
+#data-table .dash-select-cell input[type="radio"] {
+    display: none !important;
+}
+
+/* Style play button column */
+#data-table .dash-cell[data-dash-column="play_button"] {
+    font-size: 16px;
+    font-weight: bold;
+    color: #0074d9;
+    cursor: pointer;
+    user-select: none;
+}
+
+#data-table .dash-cell[data-dash-column="play_button"]:hover {
+    color: #0056b3;
+    background-color: rgba(0, 116, 217, 0.1);
+}
+
+/* Style table rows to look clickable and highlight when selected */
+#data-table tr {
+    cursor: pointer;
+    transition: background-color 0.2s ease, border 0.2s ease;
+}
+
+#data-table tr:hover {
+    background-color: rgba(0, 116, 217, 0.1) !important;
+}
+
+#data-table tr.dash-row-selected {
+    background-color: rgba(0, 116, 217, 0.3) !important;
+    border: 2px solid rgba(0, 116, 217, 0.5) !important;
+    font-weight: bold;
+}
+
+/* Loading state styles */
+#filter-container.loading {
+    filter: blur(3px);
+    pointer-events: none;
+    opacity: 0.6;
+    transition: filter 0.3s ease, opacity 0.3s ease;
+}
+
+
+
+#main-view-container {
+    flex-grow: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+}
+
 .info-autoplay-row {
     display: flex;
     justify-content: space-between;
@@ -74,6 +275,9 @@ html, body {
     flex-shrink: 0; /* This content has a fixed height */
     height: 260px;
     margin-bottom: 1em; /* The margin you requested */
+    overflow: hidden; /* Prevent content from overflowing */
+    min-height: 260px; /* Ensure minimum height */
+    max-height: 260px; /* Ensure maximum height */
 }
 
 /* --- Right Panel Content --- */
@@ -117,6 +321,8 @@ html, body {
     align-items: center; margin-bottom: 0.5rem;
 }
 #histogram-title { margin: 0; color: #2a3f5f; font-size: 1.1em; }
+.input-field { width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 5px; }
+
 .app-button {
     padding: 6px 14px; border: 1px solid #ccc; border-radius: 5px;
     background: #f0f0f0; cursor: pointer;
@@ -130,6 +336,13 @@ html, body {
     align-items: center;
     margin-bottom: 15px; /* Adds some space between rows */
 }
+
+/* Table view styles */
+
+#data-table {
+    height: 100%;
+}
+
 
 /* ADD these new rules to control the size of the inputs */
 .spectrogram-row > *:nth-child(2) {

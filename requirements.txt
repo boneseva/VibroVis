@@ -1,5 +1,6 @@
 dash_daq
 plotly
+dash_table
 
 pandas
 numpy
@@ -13,3 +14,7 @@ soundfile
 tqdm
 
 gunicorn
+
+# Testing dependencies
+pytest>=7.4.0
+playwright>=1.40.0
