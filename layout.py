@@ -217,31 +217,6 @@ def create_layout(df):
             ], id='scatter-audio-container'),
 
             html.Div([
-                
-                html.Div([
-                    html.Img(src="/assets/logo.svg", alt="VibroVis Logo",
-                             style={'height': '80px', 'marginRight': '10px'}),
-                    html.A(
-                        "ℹ️",
-                        href="https://docs.google.com/document/d/e/2PACX-1vSxvnYGbOE4oblvbkKrpfleLwe92h3irOA3eVr757FLZAfHqwbSBH6hcNKTqfj64_gvWBcZzeWjs8DC/pub",
-                        target="_blank",
-                        title="Help & Documentation",
-                        style={
-                            'marginLeft': 'auto',
-                            'fontSize': '1.3em',
-                            'textDecoration': 'none',
-                            'lineHeight': '36px',
-                            'cursor': 'pointer'
-                        }
-                    )
-                ], style={
-                    'display': 'flex',
-                    'alignItems': 'center',
-                    'padding': '10px 0',
-                    'marginBottom': '10px',
-                    'borderBottom': '2px solid #e0e0e0'
-                }),
-                
                 html.Div([
                     html.Div([
                         # 1. Preset Dropdown (Takes up most space)
@@ -261,6 +236,20 @@ def create_layout(df):
                             style={'marginLeft': '5px', 'padding': '2px 10px', 'height': '36px'}
                         ),
 
+                        # 3. The "i" Icon (Moved here)
+                        html.A(
+                            "ℹ️",
+                            href="https://docs.google.com/document/d/e/2PACX-1vSxvnYGbOE4oblvbkKrpfleLwe92h3irOA3eVr757FLZAfHqwbSBH6hcNKTqfj64_gvWBcZzeWjs8DC/pub",
+                            target="_blank",
+                            title="Help & Documentation",
+                            style={
+                                'marginLeft': '8px',
+                                'fontSize': '1.3em',
+                                'textDecoration': 'none',
+                                'lineHeight': '36px',
+                                'cursor': 'pointer'
+                            }
+                        )
                     ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '5px'}),
 
                     html.Details([
@@ -487,7 +476,20 @@ def create_layout(df):
                                 dcc.Slider(id='clip-count-threshold', min=1,
                                            max=1, step=1, value=1,
                                            marks={i: str(i) for i in range(1, 11)})
-                            ])])
+                            ]),
+
+                            html.Div([
+                                html.Label("Export filtered data"),
+                                html.Div(className="tooltip-container", children=[
+                                    html.Span(" ⓘ", className="info-icon"),
+                                    html.Span(
+                                        "Export all currently filtered data (not sampled) to CSV. Data will be merged/concatenated.",
+                                        className="tooltip-text")
+                                ])
+                            ], className="label-with-info", style={'marginTop': '1em'}),
+                            html.Button('Export to CSV', id='export-csv-btn', n_clicks=0, className='app-button', style={'width': '80%'}),
+                            dcc.Download(id="download-csv")
+                            ])
                     ], open=True),
 
                     html.Details([
