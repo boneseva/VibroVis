@@ -536,7 +536,7 @@ def create_layout(df):
 
                             html.Div([
                                 html.Label("Frequency Bins"),
-                                dcc.Input(id='num-bins', type='number', value=512,
+                                dcc.Input(id='num-bins', type='number', value=128,
                             className='input-field'),
                                 html.Div(className="tooltip-container", children=[
                                     html.Span(" ⓘ", className="info-icon"),

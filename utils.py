@@ -113,5 +113,9 @@ def compute_spectrogram(segment, samplerate, scale='log', fft_window_size=1024, 
         Sxx_db = 10 * np.log10(Sxx + 1e-10)
         f_out = f
 
+    # Normalize to 0 dB max (matches librosa behavior for Mel)
+    if Sxx_db.size > 0:
+        Sxx_db -= np.max(Sxx_db)
+
     Sxx_db = np.maximum(Sxx_db, db_floor)
     return f_out, t, Sxx_db
