@@ -11,17 +11,23 @@ from .callbacks_constants import MODEL_DATA_CACHE, initial_df, CLUSTER_COLORS
 
 def register_cluster_callbacks(app):
     
+
+
     @app.callback(
         Output('cluster-list-container', 'children'),
         [Input('num-cluster-dropdown', 'value'),
          Input('model-data-ready-signal', 'data'),
-         Input('preset-cluster-selection', 'data')],
+         Input('preset-cluster-selection', 'data'),
+         Input('cluster-stats-store', 'data')],
         [State('cluster-color-store', 'data'),
          State('cluster-name-store', 'data'),
-         State('last-preset-load-time', 'data')]
+         State('last-preset-load-time', 'data'),
+         State({'type': 'cluster-checkbox', 'index': ALL}, 'value'),
+         State({'type': 'cluster-checkbox', 'index': ALL}, 'id')]
     )
-    def render_cluster_controls(num_clusters, model_ready, preset_selected_ids, current_colors, current_names,
-                                last_preset_time):
+    def render_cluster_controls(num_clusters, model_ready, preset_selected_ids, cluster_stats,
+                                current_colors, current_names, last_preset_time, 
+                                current_checkbox_values, current_checkbox_ids):
         dff = MODEL_DATA_CACHE.get('df')
         if dff is None or dff.empty: dff = initial_df
         if not num_clusters or dff.empty: return []
@@ -38,9 +44,31 @@ def register_cluster_callbacks(app):
         children = []
 
         is_preset_active = last_preset_time and (time.time() - last_preset_time < 6.0)
-
         effective_preset_ids = preset_selected_ids if is_preset_active else None
+        
+        ctx = dash.callback_context
+        triggered_ids = [t['prop_id'] for t in ctx.triggered] if ctx.triggered else []
+        
+        # Reset selection if K changes or Model changes
+        is_reset_trigger = any('num-cluster-dropdown' in t_id for t_id in triggered_ids) or \
+                           any('model-data-ready-signal' in t_id for t_id in triggered_ids)
 
+        # Map previous selection state
+        previously_selected = set()
+        should_preserve = (not is_preset_active) and (not is_reset_trigger) and current_checkbox_values and current_checkbox_ids
+        
+        if should_preserve:
+            for val, id_dict in zip(current_checkbox_values, current_checkbox_ids):
+                if val and 'on' in val:
+                    previously_selected.add(int(id_dict['index']))
+                    
+        # If this is a fresh load (no previous selection state and no preset), default to all selected
+        first_load = (not current_checkbox_values)
+
+        total_clips = 0
+        if cluster_stats and 'total' in cluster_stats:
+            total_clips = cluster_stats['total']
+        
         for c in clusters:
             c_int = int(c)
             c_str = str(c_int)
@@ -50,8 +78,20 @@ def register_cluster_callbacks(app):
             name_val = current_names[c_str] if current_names and c_str in current_names else c_str
 
             is_checked = True
-            if effective_preset_ids is not None:
-                is_checked = c_int in effective_preset_ids
+            if is_preset_active:
+                 if effective_preset_ids is not None:
+                    is_checked = c_int in effective_preset_ids
+            elif should_preserve:
+                is_checked = c_int in previously_selected
+            
+            # Formatting percent
+            percent_str = ""
+            if cluster_stats and c_str in cluster_stats and total_clips > 0:
+                count = cluster_stats[c_str]
+                pct = (count / total_clips) * 100
+                percent_str = f" ({pct:.1f}%)"
+            elif cluster_stats:
+                percent_str = " (0.0%)"
 
             row = html.Div([
                 dcc.Checklist(
@@ -65,7 +105,7 @@ def register_cluster_callbacks(app):
                     type='color',
                     value=color_val,
                     style={'width': '20px', 'height': '20px', 'padding': '0', 'border': 'none', 'cursor': 'pointer',
-                           'marginLeft': '5px', 'backgroundColor': 'transparent'}
+                           'marginLeft': '5px', 'backgroundColor': 'transparent', 'flexShrink': 0}
                 ),
                 dcc.Input(
                     id={'type': 'cluster-name-input', 'index': c_int},
@@ -73,11 +113,16 @@ def register_cluster_callbacks(app):
                     value=name_val,
                     debounce=True,
                     placeholder=c_str,
-                    style={'width': '60px', 'border': 'none', 'backgroundColor': 'transparent', 'fontSize': '0.85em',
-                           'color': '#333', 'marginLeft': '5px', 'textOverflow': 'ellipsis'}
+                    style={'width': '30px', 'border': 'none', 'backgroundColor': 'transparent', 'fontSize': '0.85em',
+                           'color': '#333', 'marginLeft': '3px', 'objectFit': 'contain', 'textAlign': 'right'}
+                ),
+                html.Span(
+                    percent_str,
+                    style={'fontSize': '0.8em', 'color': '#666', 'marginLeft': '2px', 'whiteSpace': 'pre'}
                 )
             ], style={'display': 'flex', 'alignItems': 'center', 'backgroundColor': '#f0f0f0', 'borderRadius': '5px',
-                      'padding': '2px 8px', 'border': '1px solid #ccc', 'whiteSpace': 'nowrap'})
+                      'padding': '2px 8px', 'border': '1px solid #ccc', 'whiteSpace': 'nowrap',
+                      'width': 'calc(50% - 4px)', 'boxSizing': 'border-box', 'overflow': 'hidden'})
 
             children.append(row)
 

@@ -6,7 +6,7 @@ import pandas as pd
 from tqdm import tqdm
 
 DATA_DIR = os.path.abspath("data/mp3")
-OVERVIEW_TSV = os.path.join("data", "zabe.tsv")
+OVERVIEW_TSV = os.path.join("data", "Rok_spring_summer.tsv")
 SAVE_PATH = "data/cache/final_data.parquet"
 LABELS_SAVE_PATH = pathlib.Path("data/cache/saved_labels.parquet")
 # PREPROCESSED_SAVE_PATH = "data/cache/preprocessed_data.parquet"

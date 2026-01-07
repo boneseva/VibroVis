@@ -712,5 +712,6 @@ def create_layout(df):
         dcc.Store(id='cluster-name-store', data={}),
         dcc.Store(id='preset-last-action'),
         dcc.Store(id='preset-cluster-selection'),
+        dcc.Store(id='cluster-stats-store'),
         dcc.Store(id='last-preset-load-time', data=0),
     ], id='main-container')

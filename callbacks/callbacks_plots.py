@@ -27,7 +27,8 @@ def register_plot_callbacks(app):
          Output('merge-max-store', 'data'),
          Output('sampled-indices-store', 'data'),
          Output('anim-ranges-store', 'data'),
-         Output('sampling-info-display', 'children')],
+         Output('sampling-info-display', 'children'),
+         Output('cluster-stats-store', 'data')],
         [Input('model-data-ready-signal', 'data'),
          Input('channel-checklist', 'value'),
          Input('num-cluster-dropdown', 'value'),
@@ -88,7 +89,7 @@ def register_plot_callbacks(app):
                 )
                 fig.update_xaxes(visible=False);
                 fig.update_yaxes(visible=False)
-                return fig, None, 1, 100, [], None, ""
+                return fig, None, 1, 100, [], None, "", {}
 
         if dff_raw is None:
             fig = go.Figure()
@@ -99,7 +100,7 @@ def register_plot_callbacks(app):
             )
             fig.update_xaxes(visible=False);
             fig.update_yaxes(visible=False)
-            return fig, None, 1, 100, [], None, ""
+            return fig, None, 1, 100, [], None, "", {}
 
         is_preset_active = last_preset_time and (time.time() - last_preset_time < 6.0)
         should_force_defaults = is_fresh_load and not is_preset_active
@@ -215,6 +216,18 @@ def register_plot_callbacks(app):
         dff_sampled = dff_macro
         new_indices_to_store = dash.no_update
 
+        # Calculate cluster stats for percentages
+        cluster_stats = {}
+        if not dff_macro.empty:
+            total_filtered_clips = dff_macro['clip_count'].sum()
+            stats_series = dff_macro.groupby('cluster_id')['clip_count'].sum()
+            cluster_stats = stats_series.to_dict()
+            # Convert keys to string to ensure JSON compatibility and matching
+            cluster_stats = {str(k): int(v) for k, v in cluster_stats.items()}
+            cluster_stats['total'] = int(total_filtered_clips)
+        else:
+            cluster_stats = {'total': 0}
+
         should_resample = is_fresh_load or is_resample_click or is_k_change or not stored_indices
 
         if not should_resample:
@@ -292,7 +305,7 @@ def register_plot_callbacks(app):
             else:
                 fig.update_xaxes(visible=False);
                 fig.update_yaxes(visible=False)
-            return fig, None, 1, max_distance, new_indices_to_store, None, ""
+            return fig, None, 1, max_distance, new_indices_to_store, None, "", cluster_stats
 
         t_last = checkpoint('sampling') or t_last
         dff = dff_sampled.reset_index(drop=True).copy()
@@ -377,7 +390,7 @@ def register_plot_callbacks(app):
             print(timing_str)
 
         return fig, dff['cache_key'].iloc[
-            0], max_clip_count, max_distance, new_indices_to_store, ranges_data, sampling_text
+            0], max_clip_count, max_distance, new_indices_to_store, ranges_data, sampling_text, cluster_stats
 
     @app.callback(
         Output('spectrogram-raw-data-store', 'data'),
