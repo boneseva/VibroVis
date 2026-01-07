@@ -513,7 +513,7 @@ def create_layout(df):
                                 dcc.Dropdown(id='fft-window-size',
                                              options=[{'label': str(s), 'value': s} for s in
                                                       [256, 512, 1024, 2048, 4096]],
-                                             value=4096),
+                                             value=1024),
                                 html.Div(className="tooltip-container", children=[
                                     html.Span(" ⓘ", className="info-icon"),
                                     html.Span(
@@ -524,7 +524,7 @@ def create_layout(df):
 
                             html.Div([
                                 html.Label("Window Overlap"),
-                                dcc.Slider(id='window-overlap', min=0, max=0.9, step=0.05, value=0.9,
+                                dcc.Slider(id='window-overlap', min=0, max=0.9, step=0.05, value=0.5,
                                            marks={i / 10: f'{int(i * 10)}%' for i in range(0, 10, 2)}),
                                 html.Div(className="tooltip-container", children=[
                                     html.Span(" ⓘ", className="info-icon"),

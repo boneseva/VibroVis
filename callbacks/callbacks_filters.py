@@ -215,3 +215,17 @@ def register_filter_callbacks(app):
 
         return options, num_clusters[0] if num_clusters else None
 
+
+    @app.callback(
+        Output('num-bins', 'value', allow_duplicate=True),
+        Input('fft-window-size', 'value'),
+        prevent_initial_call=True
+    )
+    def update_num_bins_from_window_size(window_size):
+        if not window_size:
+            return dash.no_update
+        try:
+            val = int(window_size)
+            return max(1, val // 8)
+        except:
+            return dash.no_update
