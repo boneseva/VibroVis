@@ -67,7 +67,7 @@ def merge_clips_vectorized(dff, merge_threshold):
 
     agg_dict = {
         'x': ('x', 'mean'), 'y': ('y', 'mean'),
-        'clip_time': ('clip_time', 'first'), 'clip_end': ('clip_end', 'last'),
+        'clip_time': ('clip_time', 'first'), 'clip_end': ('clip_end', 'max'),
         'recorder_type': ('recorder_type', 'first'), 'clip_count': ('clip_count', 'sum'),
         'cluster_id': ('cluster_id', 'first'), 'file_name': ('file_name', 'first'),
         'channel': ('channel', 'first'), 'start_dt': ('start_dt', 'first'),
@@ -282,12 +282,18 @@ def register_data_callbacks(app):
             prev_cluster = None
             prev_end = None
             
+            # Ensure clip_duration is present
+            if 'clip_duration' not in dff_filtered.columns:
+                dff_filtered['clip_duration'] = 5.0
+            else:
+                 dff_filtered['clip_duration'] = pd.to_numeric(dff_filtered['clip_duration'], errors='coerce').fillna(5.0)
+
             for idx, row in dff_filtered.iterrows():
                 file_name = row['file_name']
                 channel = row['channel']
                 cluster_id = row['cluster_id']
                 clip_time = row['clip_time']
-                clip_duration = row.get('clip_duration', 0)
+                clip_duration = row.get('clip_duration', 5.0)
                 clip_end = clip_time + clip_duration
                 
                 can_merge = (
@@ -300,19 +306,22 @@ def register_data_callbacks(app):
                 
                 if not can_merge:
                     current_group += 1
+                    prev_end = clip_end
+                else:
+                    # Extend the merge window to the maximum end time seen so far
+                    prev_end = max(prev_end, clip_end)
                 
                 merge_groups.append(current_group)
                 prev_file = file_name
                 prev_channel = channel
                 prev_cluster = cluster_id
-                prev_end = clip_end
             
             dff_filtered['merge_group'] = merge_groups
             dff_filtered['clip_end'] = dff_filtered['clip_time'] + dff_filtered['clip_duration']
             
             agg_dict = {
                 'clip_time': ('clip_time', 'first'),
-                'clip_end': ('clip_end', 'last'),
+                'clip_end': ('clip_end', 'max'),
                 'file_name': ('file_name', 'first'),
                 'channel': ('channel', 'first'),
                 'cluster_id': ('cluster_id', 'first'),

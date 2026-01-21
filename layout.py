@@ -465,7 +465,8 @@ def create_layout(df):
                                 id='merge-switch',
                                 on=False,
                                 label='',
-                                labelPosition='top'
+                                labelPosition='top',
+                                persistence=False
                             ),
 
                             html.Div(id='merge-threshold-container', children=[
@@ -687,7 +688,8 @@ def create_layout(df):
                                     id='anim-enabled-switch',
                                     on=False,
                                     label='',
-                                    labelPosition='top'
+                                    labelPosition='top',
+                                    persistence=False
                                 )
                             ], className="label-with-info", style={'marginBottom': '15px'}),
 

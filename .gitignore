@@ -4,3 +4,8 @@
 /__pycache__/
 *.pyc
 .idea/
+/tests/
+/logo/
+/prepare_data/
+/.cursor/
+/data_multimon/
