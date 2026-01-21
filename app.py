@@ -58,7 +58,7 @@ app.layout = create_layout(initial_df)
 register_callbacks(app)
 server = app.server
 
-PORT = 8050
+PORT = 8080
 ADDRESS = "0.0.0.0"
 
 if __name__ == "__main__":

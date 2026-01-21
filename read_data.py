@@ -5,11 +5,9 @@ import ast
 import pandas as pd
 from tqdm import tqdm
 
-DATA_DIR = os.path.abspath("data_test/mp3")
-OVERVIEW_TSV = os.path.join("data_test", "Rok_spring_summer.tsv")
-SAVE_PATH = "data_test/cache/final_data.parquet"
-LABELS_SAVE_PATH = pathlib.Path("data_test/cache/saved_labels.parquet")
-# PREPROCESSED_SAVE_PATH = "data/cache/preprocessed_data.parquet"
+DATA_DIR = os.path.abspath("data/mp3")
+OVERVIEW_TSV = os.path.join("data", "Rok_spring_summer.tsv")
+SAVE_PATH = "data/cache/final_data.parquet"
 
 # Load the overview TSV as reference
 wav_meta = pd.read_csv(OVERVIEW_TSV, sep='\t')
@@ -107,11 +105,6 @@ def load_positions_tsv_optimized(wav_meta, data_dir, save_path=SAVE_PATH):
 
 import os
 import pandas as pd
-
-DATA_DIR = os.path.abspath("data_test/mp3")
-OVERVIEW_TSV = os.path.join("data_test", "Rok_spring_summer.tsv")
-SAVE_PATH = "data_test/cache/final_data.parquet"
-# Note: The global 'df' object is now gone.
 
 def get_initial_data_for_layout():
     """
