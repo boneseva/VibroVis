@@ -376,11 +376,9 @@ def register_plot_callbacks(app):
                         cutoff_idx = np.searchsorted(cumulative_counts, max_points, side='right')
                         final_indices = shuffled_indices[:cutoff_idx]
                     
+                # Fallback: ensure at least one point if macro not empty
                 if len(final_indices) == 0 and len(dff_macro) > 0: 
-                     # Fallback: ensure at least one point if macro not empty
                      final_indices = dff_macro.index[:1]
-
-                if final_indices.size == 0 and len(dff_macro) > 0: final_indices = shuffled_indices[:1]
                 
                 dff_sampled = dff_macro.loc[final_indices]
                 # CRITICAL: Sort by row_idx to ensure consistent order regardless of sampling method
