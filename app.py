@@ -4,7 +4,7 @@ import read_data
 from callbacks import set_initial_data, register_callbacks
 
 app = Dash(__name__)
-app.title = "RanaVis"
+app.title = "VibroVis"
 
 app.index_string = '''
 <!DOCTYPE html>

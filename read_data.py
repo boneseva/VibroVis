@@ -5,10 +5,10 @@ import ast
 import pandas as pd
 from tqdm import tqdm
 
-DATA_DIR = os.path.abspath("data/mp3")
-OVERVIEW_TSV = os.path.join("data", "Rok_spring_summer.tsv")
-SAVE_PATH = "data/cache/final_data.parquet"
-LABELS_SAVE_PATH = pathlib.Path("data/cache/saved_labels.parquet")
+DATA_DIR = os.path.abspath("data_test/mp3")
+OVERVIEW_TSV = os.path.join("data_test", "Rok_spring_summer.tsv")
+SAVE_PATH = "data_test/cache/final_data.parquet"
+LABELS_SAVE_PATH = pathlib.Path("data_test/cache/saved_labels.parquet")
 # PREPROCESSED_SAVE_PATH = "data/cache/preprocessed_data.parquet"
 
 # Load the overview TSV as reference
@@ -27,7 +27,7 @@ def load_positions_tsv_optimized(wav_meta, data_dir, save_path=SAVE_PATH):
     all_files_to_process = []
 
     # 1. Collect all file paths and their associated metadata first
-    print("Collecting file paths...")
+    # 1. Collect all file paths and their associated metadata first
     for idx, row in wav_meta.iterrows():
         wav_path = row['wav_file'].replace("\\", "/")
         positions_dir = os.path.join(os.path.dirname(wav_path), 'positions')
@@ -44,12 +44,11 @@ def load_positions_tsv_optimized(wav_meta, data_dir, save_path=SAVE_PATH):
                 all_files_to_process.append({'path': tsv_path, 'meta': row.to_dict(), 'file_name': file})
 
     if not all_files_to_process:
-        print("No position files found.")
+        # No position files found.
         return pd.DataFrame()
 
     # 2. Read all TSV files into a list of DataFrames
     df_list = []
-    print(f"Reading {len(all_files_to_process)} TSV files...")
     for file_info in tqdm(all_files_to_process, desc="Reading TSV files"):
         dff = pd.read_csv(file_info['path'], sep='\t')
 
@@ -64,11 +63,11 @@ def load_positions_tsv_optimized(wav_meta, data_dir, save_path=SAVE_PATH):
         df_list.append(dff)
 
     # 3. Concatenate everything at once
-    print("Concatenating DataFrames...")
+    # 3. Concatenate everything at once
     df = pd.concat(df_list, ignore_index=True)
 
     # 4. Perform all transformations in a vectorized way on the full DataFrame
-    print("Performing vectorized transformations...")
+    # 4. Perform all transformations in a vectorized way on the full DataFrame
     df['day_dt'] = pd.to_datetime(df['day'], format="%Y-%m-%d")
     df['start_dt'] = pd.to_datetime(df['start_time'], format='%H:%M:%S')
 
@@ -101,7 +100,6 @@ def load_positions_tsv_optimized(wav_meta, data_dir, save_path=SAVE_PATH):
 
     # Save the processed data
     df.to_parquet(save_path)
-    print(f"Wrote {len(df)} rows to {save_path}")
 
     return df
 
@@ -110,9 +108,9 @@ def load_positions_tsv_optimized(wav_meta, data_dir, save_path=SAVE_PATH):
 import os
 import pandas as pd
 
-DATA_DIR = os.path.abspath("data/mp3")
-OVERVIEW_TSV = os.path.join("data", "Rok_spring_summer.tsv")
-SAVE_PATH = "data/cache/final_data.parquet"
+DATA_DIR = os.path.abspath("data_test/mp3")
+OVERVIEW_TSV = os.path.join("data_test", "Rok_spring_summer.tsv")
+SAVE_PATH = "data_test/cache/final_data.parquet"
 # Note: The global 'df' object is now gone.
 
 def get_initial_data_for_layout():
@@ -122,7 +120,6 @@ def get_initial_data_for_layout():
     """
     if not os.path.exists(SAVE_PATH):
         # If cache doesn't exist, return an empty structure
-        print("Cache not found. Please generate it first.")
         return pd.DataFrame({
             'location': [], 'model_name': [], 'channel': [],
             'cluster_num': [], 'cluster_id': [], 'day_dt': [],
@@ -136,14 +133,13 @@ def get_initial_data_for_layout():
     ]
     try:
         initial_df = pd.read_parquet(SAVE_PATH, columns=cols_to_load)
-        print(f"Loaded initial columns for layout, using ~{initial_df.memory_usage(deep=True).sum() / 1e6:.2f} MB")
         return initial_df
     except Exception as e:
-        print(f"Error reading initial data from Parquet file: {e}")
+        # Error reading initial data from Parquet file: {e}
         # Return an empty df on error to prevent app crash
         return pd.DataFrame({col: [] for col in cols_to_load})
 
-# # Main data loading logic
+# # # Main data loading logic
 # if not os.path.exists(SAVE_PATH):
 #     print("Cache not found. Loading positions TSV files with optimized function...")
 #     # Make sure to call the optimized function here

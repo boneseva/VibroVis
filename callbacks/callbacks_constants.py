@@ -8,6 +8,7 @@ initial_df = pd.DataFrame()
 MODEL_DATA_CACHE = {'df': None}
 MERGED_DATA_CACHE = {'df': None, 'key': None}
 server_cache = {}
+MANUAL_LABELS_CACHE = {}
 
 # Cluster color palette
 CLUSTER_COLORS = ['#4E79A7', '#F28E2B', '#E15759', '#76B7B2', '#EDC948', '#B07AA1', '#FF9DA7', '#A6A377', '#F2C894',
@@ -19,4 +20,3 @@ def set_initial_data(df):
     """Set the initial dataframe."""
     global initial_df
     initial_df = df
-

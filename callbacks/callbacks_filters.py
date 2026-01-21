@@ -7,7 +7,8 @@ from dash import Input, Output, State, ALL
 import pandas as pd
 import numpy as np
 
-from .callbacks_constants import MODEL_DATA_CACHE, initial_df
+from . import callbacks_constants
+from .callbacks_constants import MODEL_DATA_CACHE
 
 
 def register_filter_callbacks(app):
@@ -31,13 +32,25 @@ def register_filter_callbacks(app):
         return max_val, marks
 
     @app.callback(
-        [Output('merge-threshold', 'max'), Output('merge-threshold', 'marks')],
-        Input('merge-max-store', 'data'))
-    def update_merge_slider(max_merge):
+        [Output('merge-threshold', 'max'),
+         Output('merge-threshold', 'marks'),
+         Output('merge-threshold', 'value', allow_duplicate=True)],
+        Input('merge-max-store', 'data'),
+        State('merge-threshold', 'value'),
+        prevent_initial_call=True)
+    def update_merge_slider(max_merge, current_val):
         max_val = max_merge or 1
-        marks = {i: str(i) for i in range(1, max_val + 1, max(1, max_val // 10))}
-        if max_val > 1: marks[1] = '1'; marks[max_val] = str(max_val)
-        return max_val, marks
+        marks = {i: str(i) for i in range(0, max_val + 1, max(1, max_val // 10))}
+        if max_val > 0: marks[0] = '0'; marks[max_val] = str(max_val)
+        
+        # Preserve current value if within range
+        if current_val is not None and current_val <= max_val:
+            return max_val, marks, dash.no_update
+            
+        # Default to 2.5% of max value, at least 1
+        default_val = max(1, int(max_val * 0.025))
+        
+        return max_val, marks, default_val
 
     @app.callback(
         [Output('microlocation-dropdown', 'options', allow_duplicate=True),
@@ -178,6 +191,7 @@ def register_filter_callbacks(app):
         if not selected_location:
             return [], None
 
+        initial_df = callbacks_constants.initial_df
         dff_loc = initial_df[initial_df['location'] == selected_location]
         models = sorted(dff_loc['model_name'].dropna().unique())
         options = [{'label': m, 'value': m} for m in models]
@@ -199,6 +213,7 @@ def register_filter_callbacks(app):
         if not selected_location or not selected_model:
             return [], None
 
+        initial_df = callbacks_constants.initial_df
         dff_model = initial_df[
             (initial_df['location'] == selected_location) &
             (initial_df['model_name'] == selected_model)
