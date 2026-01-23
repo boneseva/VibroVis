@@ -8,21 +8,21 @@ import math
 import hashlib
 from collections import Counter
 import dash
-from dash import Input, Output, State, callback_context, ALL, html
+from dash import Input, Output, State, callback_context, ALL, html, no_update, clientside_callback
 import plotly.express as px
-import plotly.graph_objects as go
 import pandas as pd
-import numpy as np
 import uuid
 
 import utils
-from utils import apply_manual_labels_efficiently
-from .callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, server_cache, initial_df, CLUSTER_COLORS, MANUAL_LABELS_CACHE
+import utils
+from .callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, server_cache, initial_df, CLUSTER_COLORS, MANUAL_LABELS_CACHE, apply_manual_labels_efficiently
 
 # Performance profiling
 ENABLE_PROFILING = False
 from .callbacks_data import merge_clips_vectorized
 
+import numpy as np
+import plotly.graph_objects as go
 
 
 def get_label_for_clip(file_basename, channel, start_time, duration):
@@ -86,7 +86,14 @@ def register_plot_callbacks(app):
          State({'type': 'cluster-checkbox', 'index': ALL}, 'id')],
         prevent_initial_call=True
     )
-    def update_figure(model_ready_signal, selected_channels, selected_num_clusters,
+    def update_figure(*args):
+        try:
+            return _update_figure_impl(*args)
+        except Exception:
+            traceback.print_exc()
+            return (no_update,) * 9
+
+    def _update_figure_impl(model_ready_signal, selected_channels, selected_num_clusters,
                       cluster_checkbox_values, cluster_colors_data,
                       selected_dates, hour_range, max_points, merge_on, merge_threshold,
                       clip_count_threshold,
@@ -210,6 +217,26 @@ def register_plot_callbacks(app):
 
         if selected_channels:
             mask &= dff_base['channel'].isin(selected_channels)
+
+        if selected_dates:
+            if 'day_dt_str' in dff_base.columns:
+                mask &= dff_base['day_dt_str'].isin(selected_dates)
+            else:
+                 try:
+                    valid_dates_in_data = set(pd.to_datetime(dff_base['day_dt']).dt.strftime('%Y-%m-%d'))
+                    relevant_dates = [d for d in selected_dates if d in valid_dates_in_data]
+                    if relevant_dates:
+                         # Ensure we match the data type in day_dt
+                         # If day_dt is datetime64, we need comparable timestamps
+                         # Usually day_dt provided by read_data is normalized to midnight
+                         selected_datetimes = pd.to_datetime(relevant_dates)
+                         mask &= dff_base['day_dt'].isin(selected_datetimes)
+                 except:
+                    pass
+
+        if hour_range:
+             if 'start_hour_float' in dff_base.columns:
+                 mask &= (dff_base['start_hour_float'] >= hour_range[0]) & (dff_base['start_hour_float'] <= hour_range[1])
             
         t_last = checkpoint('mask_creation') or t_last
         dff_filtered = dff_base[mask].copy()
@@ -608,7 +635,7 @@ def register_plot_callbacks(app):
         
         label_name = 'Label' if is_manual_mode else 'Cluster'
         
-        fig.add_trace(go.Scatter(
+        fig.add_trace(go.Scattergl(
             x=dff['x'], 
             y=dff['y'],
             mode='markers',
@@ -660,8 +687,105 @@ def register_plot_callbacks(app):
         return fig, dff['cache_key'].iloc[
             0], max_clip_count, max_distance, new_indices_to_store, ranges_data, sampling_text, cluster_stats, None
 
+    # @app.callback(
+    #     Output('spectrogram-raw-data-store', 'data'),
+    #     Output('fft-warning', 'children'),
+    #     [Input("scatter", "clickData"),
+    #      Input('filtered-data', 'data'),
+    #      Input('frequency-scale', 'value'),
+    #      Input('fft-window-size', 'value'),
+    #      Input('window-overlap', 'value'),
+    #      Input('window-type', 'value'),
+    #      Input('min-freq', 'value'),
+    #      Input('max-freq', 'value'),
+    #      Input('num-bins', 'value')],
+    #     prevent_initial_call=True)
+    # def compute_spectrogram_data(clickData, filtered_data_cache_key,
+    #                              frequency_scale, fft_window_size, window_overlap,
+    #                              window_type, min_freq, max_freq, num_bins):
+    #
+    #     print("\n--- SPECTROGRAM CALLBACK TRIGGERED ---")
+    #     try:
+    #         if not clickData:
+    #             print("Abort: No clickData")
+    #             return dash.no_update, ""
+    #
+    #         if not filtered_data_cache_key:
+    #             print("Abort: No filtered_data_cache_key")
+    #             return dash.no_update, ""
+    #
+    #         dff = server_cache.get(filtered_data_cache_key)
+    #         if dff is None:
+    #             print("Abort: Filtered data not found in cache")
+    #             return dash.no_update, "Error: Filtered data not found in cache."
+    #
+    #         try:
+    #             point = clickData["points"][0]
+    #             plot_id = point["customdata"][2]
+    #             print(f"Clicked Point ID: {plot_id}")
+    #         except Exception as e:
+    #             print(f"Abort: Error parsing clickData: {e}")
+    #             return dash.no_update, f"Error parsing clickData: {e}"
+    #
+    #         try:
+    #             row = dff.loc[plot_id]
+    #             print(f"Found row for {plot_id}: {row['mp3_file']}")
+    #         except KeyError:
+    #             print(f"Abort: Plot ID {plot_id} not found in dataframe")
+    #             return dash.no_update, "Error: Clicked point not found. Please re-filter."
+    #
+    #         print(f"Attempting to load audio: {row['mp3_file']}")
+    #         segment, samplerate = utils.load_audio_segment(
+    #             mp3_file_relative_path=row['mp3_file'],
+    #             clip_time=float(row['clip_time']),
+    #             clip_duration=float(row['clip_duration']),
+    #             channel=int(row['channel']),
+    #             padding_s=0.5
+    #         )
+    #
+    #         if segment is None:
+    #             print(f"Error: Segment is None for {row['mp3_file']}")
+    #             # CONTEXT: Return empty data to ensure the chain continues and UI updates (clears spinner)
+    #             return {'x': [], 'y': [], 'z': [], 'info': 'Error: Audio load failed', 'audio_path': '', '_rev': time.time_ns()}, "Error: Could not load audio segment."
+    #
+    #         print(f"Audio loaded. Shape: {segment.shape if segment is not None else 'None'}, SR: {samplerate}")
+    #         if segment is not None:
+    #              print(f"Audio stats: Min={np.min(segment)}, Max={np.max(segment)}, Mean={np.mean(segment)}, HasNaN={np.isnan(segment).any()}")
+    #
+    #         print(f"Calling compute_spectrogram with: scale={frequency_scale}, win={fft_window_size}, overlap={window_overlap}")
+    #
+    #         f, t, Sxx_db = utils.compute_spectrogram(
+    #             segment=segment, samplerate=samplerate, scale=frequency_scale,
+    #             fft_window_size=fft_window_size, window_overlap=window_overlap,
+    #             window_type=window_type, min_freq=min_freq, max_freq=max_freq,
+    #             num_bins=num_bins,
+    #             db_floor=-120
+    #         )
+    #
+    #         if Sxx_db.size == 0:
+    #             print("Error: Sxx_db size is 0")
+    #             return {'x': [], 'y': [], 'z': [], 'info': 'Error: Spectrogram empty', 'audio_path': '', '_rev': time.time_ns()}, "Warning: Spectrogram computation failed."
+    #
+    #         print(f"Spectrogram computed. Shape: {Sxx_db.shape}")
+    #         # print(f"Spectrogram shape: {Sxx_db.shape}, Time bins: {len(t)}, Freq bins: {len(f)}")
+    #         # print(f"Audio Path: {row['mp3_file']} ({float(row['clip_duration']):.2f}s)")
+    #
+    #         start_time = float(row['clip_time'])
+    #         audio_path = f"/audio_segment_normalized/{row['mp3_file']}/{int(row['channel'])}/{start_time}/{start_time + float(row['clip_duration'])}"
+    #         info = f"{row['file_name']} at {start_time:.2f}s (cluster {row['cluster_id']})"
+    #
+    #         print("--- RETURNING SUCCESS ---")
+    #         return {'x': t.tolist(), 'y': f.tolist(), 'z': Sxx_db.tolist(), 'audio_path': audio_path, 'info': info,
+    #                 '_rev': time.time_ns()}, ""
+    #
+    #     except Exception as e:
+    #         print("CRITICAL ERROR IN COMPUTE_SPECTROGRAM_DATA:")
+    #         traceback.print_exc()
+    #         return {'x': [], 'y': [], 'z': [], 'info': f'Error: {e}', 'audio_path': '', '_rev': time.time_ns()}, f"Critical Error: {e}"
+
     @app.callback(
         Output('spectrogram-raw-data-store', 'data'),
+        Output('spectrogram-plot', 'figure'),
         Output('fft-warning', 'children'),
         [Input("scatter", "clickData"),
          Input('filtered-data', 'data'),
@@ -671,124 +795,176 @@ def register_plot_callbacks(app):
          Input('window-type', 'value'),
          Input('min-freq', 'value'),
          Input('max-freq', 'value'),
-         Input('num-bins', 'value')],
+         Input('num-bins', 'value'),
+         # Added these inputs to fix the "Looks Different" issue:
+         Input('colormap', 'value'),
+         Input('db-floor', 'value')], 
         prevent_initial_call=True)
     def compute_spectrogram_data(clickData, filtered_data_cache_key,
                                  frequency_scale, fft_window_size, window_overlap,
-                                 window_type, min_freq, max_freq, num_bins):
+                                 window_type, min_freq, max_freq, num_bins,
+                                 colormap, db_floor): # Added arguments
 
-        print("\n--- SPECTROGRAM CALLBACK TRIGGERED ---")
+        # 1. Validation
+        if not clickData:
+            return no_update, no_update, ""
+        
+        # Initialize empty figure for error states
+        empty_fig = go.Figure()
+        empty_fig.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            xaxis={'visible': False},
+            yaxis={'visible': False}
+        )
+
+        if not filtered_data_cache_key:
+             return no_update, no_update, ""
+
+        dff = server_cache.get(filtered_data_cache_key)
+        if dff is None:
+             return no_update, no_update, "Error: Filtered data not found in cache."
+
         try:
-            if not clickData:
-                print("Abort: No clickData")
-                return dash.no_update, ""
-            
-            if not filtered_data_cache_key:
-                print("Abort: No filtered_data_cache_key")
-                return dash.no_update, ""
-
-            dff = server_cache.get(filtered_data_cache_key)
-            if dff is None:
-                print("Abort: Filtered data not found in cache")
-                return dash.no_update, "Error: Filtered data not found in cache."
-
-            try:
-                point = clickData["points"][0]
-                plot_id = point["customdata"][2]
-                print(f"Clicked Point ID: {plot_id}")
-            except Exception as e:
-                print(f"Abort: Error parsing clickData: {e}")
-                return dash.no_update, f"Error parsing clickData: {e}"
-
-            try:
-                row = dff.loc[plot_id]
-                print(f"Found row for {plot_id}: {row['mp3_file']}")
-            except KeyError:
-                print(f"Abort: Plot ID {plot_id} not found in dataframe")
-                return dash.no_update, "Error: Clicked point not found. Please re-filter."
-
-            print(f"Attempting to load audio: {row['mp3_file']}")
-            segment, samplerate = utils.load_audio_segment(
-                mp3_file_relative_path=row['mp3_file'],
-                clip_time=float(row['clip_time']),
-                clip_duration=float(row['clip_duration']),
-                channel=int(row['channel']),
-                padding_s=0.5
-            )
-
-            if segment is None:
-                print(f"Error: Segment is None for {row['mp3_file']}")
-                # CONTEXT: Return empty data to ensure the chain continues and UI updates (clears spinner)
-                return {'x': [], 'y': [], 'z': [], 'info': 'Error: Audio load failed', 'audio_path': '', '_rev': time.time_ns()}, "Error: Could not load audio segment."
-
-            print(f"Audio loaded. Shape: {segment.shape if segment is not None else 'None'}, SR: {samplerate}")
-            if segment is not None:
-                 print(f"Audio stats: Min={np.min(segment)}, Max={np.max(segment)}, Mean={np.mean(segment)}, HasNaN={np.isnan(segment).any()}")
-
-            print(f"Calling compute_spectrogram with: scale={frequency_scale}, win={fft_window_size}, overlap={window_overlap}")
-
-            f, t, Sxx_db = utils.compute_spectrogram(
-                segment=segment, samplerate=samplerate, scale=frequency_scale,
-                fft_window_size=fft_window_size, window_overlap=window_overlap,
-                window_type=window_type, min_freq=min_freq, max_freq=max_freq,
-                num_bins=num_bins,
-                db_floor=-120
-            )
-
-            if Sxx_db.size == 0:
-                print("Error: Sxx_db size is 0")
-                return {'x': [], 'y': [], 'z': [], 'info': 'Error: Spectrogram empty', 'audio_path': '', '_rev': time.time_ns()}, "Warning: Spectrogram computation failed."
-                
-            print(f"Spectrogram computed. Shape: {Sxx_db.shape}")
-            # print(f"Spectrogram shape: {Sxx_db.shape}, Time bins: {len(t)}, Freq bins: {len(f)}")
-            # print(f"Audio Path: {row['mp3_file']} ({float(row['clip_duration']):.2f}s)")
-
-            start_time = float(row['clip_time'])
-            audio_path = f"/audio_segment_normalized/{row['mp3_file']}/{int(row['channel'])}/{start_time}/{start_time + float(row['clip_duration'])}"
-            info = f"{row['file_name']} at {start_time:.2f}s (cluster {row['cluster_id']})"
-
-            print("--- RETURNING SUCCESS ---")
-            return {'x': t.tolist(), 'y': f.tolist(), 'z': Sxx_db.tolist(), 'audio_path': audio_path, 'info': info,
-                    '_rev': time.time_ns()}, ""
-
+            point = clickData["points"][0]
+            # Depending on your data, plot_id might be point['customdata'][2] or point['id']
+            # Preserving your logic:
+            plot_id = point["customdata"][2]
         except Exception as e:
-            print("CRITICAL ERROR IN COMPUTE_SPECTROGRAM_DATA:")
-            traceback.print_exc()
-            return {'x': [], 'y': [], 'z': [], 'info': f'Error: {e}', 'audio_path': '', '_rev': time.time_ns()}, f"Critical Error: {e}"
+            return no_update, no_update, f"Error parsing clickData: {e}"
 
+        try:
+             row = dff.loc[plot_id]
+        except KeyError:
+             return no_update, no_update, "Error: Clicked point not found. Please re-filter."
 
+        
+        # 2. Compute (Standard)
+        segment, samplerate = utils.load_audio_segment(
+            mp3_file_relative_path=row['mp3_file'],
+            clip_time=float(row['clip_time']),
+            # Ensure duration exists or default to 5.0
+            clip_duration=float(row.get('clip_duration', 5.0)), 
+            channel=int(row['channel']),
+            padding_s=0.5
+        )
 
-    @app.callback(
-        [Output("info", "children", allow_duplicate=True),
-         Output("audio-player", "src", allow_duplicate=True),
-         Output("spectrogram-plot", "figure"),
-         Output('spectrogram-plot-container', 'key')],
-        [Input('spectrogram-raw-data-store', 'data'),
-         Input('colormap', 'value'),
-         Input('db-floor', 'value')],
-        prevent_initial_call=True)
-    def update_spectrogram_plot_from_cache(data, colormap, db_floor):
-        if not data:
-            data = {'x': [], 'y': [], 'z': [], 'info': 'No data', 'audio_path': '', '_rev': time.time_ns()}
+        if segment is None:
+             err_data = {'x': [], 'y': [], 'z': [], 'info': 'Error: Audio load failed', 'audio_path': '', '_rev': time.time_ns()}
+             return err_data, empty_fig, "Error: Could not load audio segment."
 
-        z_data = np.array(data['z'])
-        if z_data.size > 0:
-            z_data[z_data < db_floor] = db_floor
+        f, t, Sxx_db = utils.compute_spectrogram(
+            segment=segment, samplerate=samplerate, scale=frequency_scale,
+            fft_window_size=fft_window_size, window_overlap=window_overlap,
+            window_type=window_type, min_freq=min_freq, max_freq=max_freq,
+            num_bins=num_bins,
+            db_floor=-120 # Compute raw first
+        )
 
+        if Sxx_db.size == 0:
+            return {'x': [], 'y': [], 'z': [], 'info': 'Error', 'audio_path': '', '_rev': time.time_ns()}, go.Figure(), "Warning: Empty Spectrogram"
+
+        # 3. APPLY DB FLOOR (Fixes the "Washed Out" look)
+        # This restores the black/solid background for quiet areas
+        floor_val = float(db_floor) if db_floor is not None else -80.0
+        Sxx_db[Sxx_db < floor_val] = floor_val
+
+        # 4. ROUNDING (Keeps it fast)
+        Sxx_db = np.round(Sxx_db, 2)
+        f = np.round(f, 1)
+        t = np.round(t, 3)
+
+        # 5. Build Figure (With correct Colormap)
         fig = go.Figure(data=go.Heatmap(
-            x=data['x'], y=data['y'], z=z_data.tolist(),
-            colorscale=colormap,
-            zmin=db_floor,
-            zmax=np.max(z_data) if z_data.size > 0 else 0,
-            colorbar=dict(title='dB')
+            z=Sxx_db, x=t, y=f,
+            colorscale=colormap if colormap else 'Viridis', # Use selected colormap
+            showscale=False,
+            zmin=floor_val,     # Lock the scale floor
+            zmax=np.max(Sxx_db) # Let max float
         ))
 
         fig.update_layout(
-            xaxis=dict(title="Time (s)"),
-            yaxis=dict(title="Frequency (Hz)", type='log'),
-            margin=dict(l=40, r=10, t=20, b=80), uirevision=data['_rev']
+            margin=dict(l=40, r=10, t=10, b=30),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            xaxis=dict(title="Time (s)", showgrid=False),
+            yaxis=dict(title="Freq (Hz)", showgrid=False, type='log' if frequency_scale == 'log' else 'linear'),
+            dragmode='zoom' # Better interaction than pan
         )
-        return data['info'], data['audio_path'], fig, str(data['_rev'])
+
+        # 6. Prepare Store Data
+        start_time = float(row['clip_time'])
+        audio_path = f"/audio_segment_normalized/{row['mp3_file']}/{int(row['channel'])}/{start_time}/{start_time + float(row.get('clip_duration', 5.0))}"
+        info = f"{row['file_name']} at {start_time:.2f}s (cluster {row['cluster_id']})"
+
+        store_data = {
+            'x': t.tolist(), 
+            'y': f.tolist(), 
+            'z': Sxx_db.tolist(), 
+            'audio_path': audio_path, 
+            'info': info,
+            '_rev': time.time_ns()
+        }
+
+        return store_data, fig, ""
+
+    # @app.callback(
+    #     [Output("info", "children", allow_duplicate=True),
+    #      Output("audio-player", "src", allow_duplicate=True),
+    #      Output("spectrogram-plot", "figure"),
+    #      Output('spectrogram-plot-container', 'key')],
+    #     [Input('spectrogram-raw-data-store', 'data'),
+    #      Input('colormap', 'value'),
+    #      Input('db-floor', 'value')],
+    #     prevent_initial_call=True)
+    # def update_spectrogram_plot_from_cache(data, colormap, db_floor):
+    #     if not data:
+    #         data = {'x': [], 'y': [], 'z': [], 'info': 'No data', 'audio_path': '', '_rev': time.time_ns()}
+    #
+    #     z_data = np.array(data['z'])
+    #     if z_data.size > 0:
+    #         z_data[z_data < db_floor] = db_floor
+    #
+    #     fig = go.Figure(data=go.Heatmap(
+    #         x=data['x'], y=data['y'], z=z_data.tolist(),
+    #         colorscale=colormap,
+    #         zmin=db_floor,
+    #         zmax=np.max(z_data) if z_data.size > 0 else 0,
+    #         colorbar=dict(title='dB')
+    #     ))
+    #
+    #     fig.update_layout(
+    #         xaxis=dict(title="Time (s)"),
+    #         yaxis=dict(title="Frequency (Hz)", type='log'),
+    #         margin=dict(l=40, r=10, t=20, b=80), uirevision=data['_rev']
+    #     )
+    #     return data['info'], data['audio_path'], fig, str(data['_rev'])
+
+    app.clientside_callback(
+        """
+        function(data) {
+            // This runs entirely in the browser. 
+            // We get the data, pick the strings we need, and update the audio player.
+            // No heavy network upload happens!
+            
+            if (!data) {
+                return ["", "", ""];
+            }
+            
+            // Extract just the light-weight strings
+            var audio_src = data.audio_path || "";
+            var key = data._rev || "";
+            var info = data.info || "";
+            
+            return [audio_src, key, info];
+        }
+        """,
+        [Output("audio-player", "src", allow_duplicate=True),
+         Output('spectrogram-plot-container', 'key'),
+         Output('info', 'children', allow_duplicate=True)],
+        Input('spectrogram-raw-data-store', 'data'),
+        prevent_initial_call=True
+    )
 
     @app.callback(
         Output('cluster-histogram', 'figure'),
