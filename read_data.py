@@ -5,12 +5,29 @@ import ast
 import pandas as pd
 from tqdm import tqdm
 
-# Allow configuration via environment variable, default to 'data'
-BASE_DATA_DIR = os.getenv('DATA_DIR', 'data')
+BASE_DATA_DIR = "data"
+
 DATA_DIR = os.path.abspath(os.path.join(BASE_DATA_DIR, "mp3"))
 OVERVIEW_TSV = os.path.join(BASE_DATA_DIR, "Rok_spring_summer.tsv")
 SAVE_PATH = os.path.join(BASE_DATA_DIR, "cache", "final_data.parquet")
 LABELS_SAVE_PATH = pathlib.Path(os.path.join(BASE_DATA_DIR, "cache", "saved_labels.parquet"))
+
+# DEBUG: DIAGNOSE DATA PATHS
+print("--- DEBUG: DATA PATH DIAGNOSTICS ---")
+print(f"CWD: {os.getcwd()}")
+print(f"BASE_DATA_DIR: {BASE_DATA_DIR} (Absolute: {os.path.abspath(BASE_DATA_DIR)})")
+print(f"DATA_DIR: {DATA_DIR}")
+
+if os.path.exists(BASE_DATA_DIR):
+    print(f"✅ BASE_DATA_DIR exists. Contents: {os.listdir(BASE_DATA_DIR)}")
+else:
+    print(f"❌ BASE_DATA_DIR does NOT exist!")
+
+if os.path.exists(DATA_DIR):
+    print(f"✅ DATA_DIR exists. Contents (first 5): {os.listdir(DATA_DIR)[:5]}")
+else:
+    print(f"❌ DATA_DIR does NOT exist!")
+print("------------------------------------")
 
 # Load the overview TSV as reference (if it exists, to avoid import-time crash)
 if os.path.exists(OVERVIEW_TSV):
