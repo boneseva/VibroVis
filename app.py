@@ -8,6 +8,8 @@ from callbacks import set_initial_data, register_callbacks
 app = Dash(__name__)
 app.title = "VibroVis"
 server = app.server
+server.secret_key = 'vibrovis-secure-key-change-this-in-env'
+server.config['WTF_CSRF_ENABLED'] = False
 
 app.index_string = '''
 <!DOCTYPE html>
@@ -51,6 +53,6 @@ if __name__ == "__main__":
         display_host = ADDRESS
         
     print(f"Dash is running on http://{display_host}:{display_port}/")
-    print("WARNING: This is a PRODUCTION configuration. Debug mode is OFF.")
     
-    app.run(port=PORT, host=ADDRESS, debug=False, use_reloader=False, dev_tools_ui=False)
+   # app.run(port=PORT, host=ADDRESS, debug=False, use_reloader=False, dev_tools_ui=False)
+    app.run(port=PORT, host=ADDRESS, debug=True, use_reloader=True, dev_tools_ui=True)
