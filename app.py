@@ -1,4 +1,6 @@
 from dash import Dash, html
+from werkzeug.middleware.profiler import ProfilerMiddleware
+
 from layout import create_layout
 import read_data
 from callbacks import set_initial_data, register_callbacks
@@ -56,10 +58,18 @@ set_initial_data(initial_df)
 app.layout = create_layout(initial_df)
 
 register_callbacks(app)
-server = app.server
-
-PORT = 8050
-ADDRESS = "0.0.0.0"
 
 if __name__ == "__main__":
-    app.run(port=PORT, host=ADDRESS)
+    # server = app.server
+    #
+    # PORT = 8050
+    # ADDRESS = "0.0.0.0"
+    #
+    # app.run(port=PORT, host=ADDRESS, debug=True, use_reloader=False, dev_tools_ui=True)
+
+    app.server.wsgi_app = ProfilerMiddleware(
+        app.server.wsgi_app,
+        sort_by=['cumtime']
+    )
+
+    app.run(port=8050, host="0.0.0.0", debug=False, threaded=False)
