@@ -1,6 +1,9 @@
 # Use a stable Debian-based Python image
 FROM python:3.11-slim-bookworm
 
+# Ensure output logs are sent directly to terminal
+ENV PYTHONUNBUFFERED=1
+
 # Set the working directory inside the container
 WORKDIR /app
 

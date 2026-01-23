@@ -1,4 +1,6 @@
 from dash import Dash, html
+from werkzeug.middleware.proxy_fix import ProxyFix
+
 from layout import create_layout
 import read_data
 from callbacks import set_initial_data, register_callbacks
@@ -8,6 +10,9 @@ app.title = "VibroVis"
 server = app.server
 server.secret_key = 'vibrovis-secure-key-change-this-in-env'
 server.config['WTF_CSRF_ENABLED'] = False
+
+# Apply ProxyFix to handle HTTPS headers correctly
+server.wsgi_app = ProxyFix(server.wsgi_app, x_proto=1, x_host=1)
 
 app.index_string = '''
 <!DOCTYPE html>
