@@ -140,7 +140,7 @@ def register_plot_callbacks(app):
                 )
                 fig.update_xaxes(visible=False);
                 fig.update_yaxes(visible=False)
-                return fig, None, 1, 100, [], None, "", {}
+                return fig, None, 1, 100, [], None, "", {}, None
 
         if dff_raw is None:
             fig = go.Figure()
@@ -151,7 +151,7 @@ def register_plot_callbacks(app):
             )
             fig.update_xaxes(visible=False);
             fig.update_yaxes(visible=False)
-            return fig, None, 1, 100, [], None, "", {}
+            return fig, None, 1, 100, [], None, "", {}, None
 
         is_preset_active = last_preset_time and (time.time() - last_preset_time < 6.0)
         should_force_defaults = is_fresh_load and not is_preset_active
@@ -514,7 +514,7 @@ def register_plot_callbacks(app):
             else:
                 fig.update_xaxes(visible=False);
                 fig.update_yaxes(visible=False)
-            return fig, None, 1, max_distance, new_indices_to_store, None, "", cluster_stats
+            return fig, None, 1, max_distance, new_indices_to_store, None, "", cluster_stats, None
 
         t_last = checkpoint('sampling') or t_last
         dff = dff_sampled.reset_index(drop=True).copy()

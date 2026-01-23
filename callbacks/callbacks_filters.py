@@ -113,7 +113,7 @@ def register_filter_callbacks(app):
     def update_channel_options_and_values(model_ready, select_all, current_channels):
         dff = MODEL_DATA_CACHE.get('df')
         if dff is None or dff.empty:
-            dff = initial_df
+            dff = callbacks_constants.initial_df
 
         if dff.empty:
             return [], []
