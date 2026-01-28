@@ -211,7 +211,7 @@ def create_layout(df):
                 html.Div([
                     html.Audio(id='audio-player', controls=True, autoPlay=False),
                     html.Div(
-                        dcc.Graph(id='spectrogram-plot', config={'displayModeBar': False}),
+                        dcc.Graph(id='spectrogram-plot', config={'displayModeBar': False}, style={'height': '100%'}),
                         id='spectrogram-plot-container'
                     ),
                 ], id='audio-spectrogram-container')

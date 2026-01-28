@@ -1,0 +1,12 @@
+Traceback (most recent call last):
+  File "c:\Users\evabo\Documents\Repos\VibroVis\debug_spectrogram.py", line 11, in <module>
+    import utils
+  File "c:\Users\evabo\Documents\Repos\VibroVis\utils.py", line 12, in <module>
+    from callbacks.callbacks_constants import MANUAL_LABELS_CACHE
+  File "c:\Users\evabo\Documents\Repos\VibroVis\callbacks\__init__.py", line 5, in <module>
+    from .callbacks import register_callbacks
+  File "c:\Users\evabo\Documents\Repos\VibroVis\callbacks\callbacks.py", line 6, in <module>
+    from .callbacks_plots import register_plot_callbacks
+  File "c:\Users\evabo\Documents\Repos\VibroVis\callbacks\callbacks_plots.py", line 17, in <module>
+    from utils import apply_manual_labels_efficiently
+ImportError: cannot import name 'apply_manual_labels_efficiently' from partially initialized module 'utils' (most likely due to a circular import) (c:\Users\evabo\Documents\Repos\VibroVis\utils.py)
