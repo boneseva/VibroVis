@@ -1,5 +1,6 @@
 /* === Global & Main Layout === */
-html, body {
+html,
+body {
     width: 100vw;
     height: 100vh;
     margin: 0;
@@ -8,7 +9,10 @@ html, body {
     font-family: 'Segoe UI', Arial, sans-serif;
     box-sizing: border-box;
 }
-*, *:before, *:after {
+
+*,
+*:before,
+*:after {
     box-sizing: inherit;
 }
 
@@ -19,10 +23,13 @@ html, body {
 /* === HORIZONTAL LAYOUT (Main Panels) === */
 
 #scatter-audio-container {
-    flex: 1; /* Allows this panel to grow and shrink */
-    min-width: 0; /* Prevents flex items from overflowing */
+    flex: 1;
+    /* Allows this panel to grow and shrink */
+    min-width: 0;
+    /* Prevents flex items from overflowing */
     display: flex;
-    flex-direction: column; /* This makes it a vertical flex container for its children */
+    flex-direction: column;
+    /* This makes it a vertical flex container for its children */
     background: #fff;
     box-shadow: 2px 0 8px #eee;
     position: relative;
@@ -31,7 +38,8 @@ html, body {
 
 #filter-container {
     display: flex;
-    flex-direction: column; /* This makes it a vertical flex container for its children */
+    flex-direction: column;
+    /* This makes it a vertical flex container for its children */
     height: 100vh;
     background: #f9f9f9;
     box-shadow: -2px 0 8px #eee;
@@ -56,8 +64,10 @@ html, body {
 
 /* --- Left Panel Content --- */
 #scatter {
-    flex-grow: 1; /* CRITICAL: Allows the plot to fill the remaining vertical space */
-    min-height: 0; /* CRITICAL: Allows the plot to shrink without overflowing its container */
+    flex-grow: 1;
+    /* CRITICAL: Allows the plot to fill the remaining vertical space */
+    min-height: 0;
+    /* CRITICAL: Allows the plot to shrink without overflowing its container */
     width: 100% !important;
     height: 100% !important;
 }
@@ -67,13 +77,18 @@ html, body {
     justify-content: space-between;
     align-items: center;
     margin: 1rem 0;
-    flex-shrink: 0; /* This content has a fixed height */
+    flex-shrink: 0;
+    /* This content has a fixed height */
 }
 
 #audio-spectrogram-container {
-    flex-shrink: 0; /* This content has a fixed height */
+    flex-shrink: 0;
+    /* This content has a fixed height */
     height: 260px;
-    margin-bottom: 1em; /* The margin you requested */
+    margin-bottom: 1em;
+    /* The margin you requested */
+    display: flex;
+    flex-direction: column;
 }
 
 /* --- Right Panel Content --- */
@@ -84,62 +99,139 @@ html, body {
 }
 
 #histogram-container {
-    flex-shrink: 0; /* This content has a fixed height */
+    flex-shrink: 0;
+    /* This content has a fixed height */
     height: 300px;
     padding: 1rem;
     border-top: 1px solid #ddd;
 }
 
 /* === General Component Styling === */
-#info { font-size: 1.1em; color: #2a3f5f; }
-#spectrogram-plot-container, #spectrogram-plot, #audio-player { width: 100% !important; }
+#info {
+    font-size: 1.1em;
+    color: #2a3f5f;
+}
+
+#spectrogram-plot-container,
+#spectrogram-plot,
+#audio-player {
+    width: 100% !important;
+}
 
 #spectrogram-plot-container {
-    height: 100%;
+    flex: 1;
+    min-height: 0;
+    width: 100% !important;
 }
 
 .panel-toggle-button {
-    position: absolute; top: 3rem; right: 1rem; z-index: 100;
-    width: 30px; height: 30px; border-radius: 50%; border: 1px solid #ccc;
-    background-color: white; font-size: 1.2em; font-weight: bold; color: #555;
-    cursor: pointer; display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+    position: absolute;
+    top: 3rem;
+    right: 1rem;
+    z-index: 100;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    border: 1px solid #ccc;
+    background-color: white;
+    font-size: 1.2em;
+    font-weight: bold;
+    color: #555;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
 }
-.panel-toggle-button:hover { background-color: #f0f0f0; }
-#filter-title, #model-filter-title, #sampling-title, #merging-title, .section-title {
-    color: #2a3f5f; font-weight: 700; margin-top: 1.5rem;
-    padding-bottom: 0.5rem; border-bottom: 1px solid #ddd;
+
+.panel-toggle-button:hover {
+    background-color: #f0f0f0;
 }
-#filter-title { margin-top: 0; }
-.section-title { cursor: pointer; }
+
+#filter-title,
+#model-filter-title,
+#sampling-title,
+#merging-title,
+.section-title {
+    color: #2a3f5f;
+    font-weight: 700;
+    margin-top: 1.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #ddd;
+}
+
+#filter-title {
+    margin-top: 0;
+}
+
+.section-title {
+    cursor: pointer;
+}
+
 .histogram-header {
-    display: flex; justify-content: space-between;
-    align-items: center; margin-bottom: 0.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
 }
-#histogram-title { margin: 0; color: #2a3f5f; font-size: 1.1em; }
-.input-field { width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 5px; }
+
+#histogram-title {
+    margin: 0;
+    color: #2a3f5f;
+    font-size: 1.1em;
+}
+
+.input-field {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+}
 
 .app-button {
-    padding: 6px 14px; border: 1px solid #ccc; border-radius: 5px;
-    background: #f0f0f0; cursor: pointer;
+    padding: 6px 14px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    background: #f0f0f0;
+    cursor: pointer;
 }
-.app-button:hover { background-color: #e0e0e0; }
-.app-button.autoplay-on { background-color: #BADCBD; }
-.app-button.autoplay-on:hover { background-color: #a9cba1; }
+
+.app-button:hover {
+    background-color: #e0e0e0;
+}
+
+.app-button.autoplay-on {
+    background-color: #BADCBD;
+}
+
+.app-button.autoplay-on:hover {
+    background-color: #a9cba1;
+}
+
 .spectrogram-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 15px; /* Adds some space between rows */
+    margin-bottom: 15px;
+    /* Adds some space between rows */
 }
 
 /* ADD these new rules to control the size of the inputs */
-.spectrogram-row > *:nth-child(2) {
-    flex-grow: 1; /* Allows the control to fill available space */
-    margin: 0 10px; /* Adds a small gap around the control */
+.spectrogram-row>*:nth-child(2) {
+    flex-grow: 1;
+    /* Allows the control to fill available space */
+    margin: 0 10px;
+    /* Adds a small gap around the control */
 }
-::-webkit-scrollbar { width: 8px; }
-::-webkit-scrollbar-thumb { background: #c5c5c5; border-radius: 4px; }
+
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #c5c5c5;
+    border-radius: 4px;
+}
 
 .label-with-info {
     display: flex;
@@ -191,15 +283,16 @@ html, body {
 }
 
 .guide-div {
-  display: flex;
-  width: 100%;
+    display: flex;
+    width: 100%;
 }
+
 .guide-title {
-    font-weight: 700; 
+    font-weight: 700;
     text-decoration: none;
 
-  margin-left: auto; 
-  
-  font-size: 1.1rem; 
-  padding: 0.5rem 1rem;
+    margin-left: auto;
+
+    font-size: 1.1rem;
+    padding: 0.5rem 1rem;
 }

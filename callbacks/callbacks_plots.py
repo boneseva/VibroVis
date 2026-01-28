@@ -889,7 +889,8 @@ def register_plot_callbacks(app):
             plot_bgcolor='rgba(0,0,0,0)',
             xaxis=dict(title="Time (s)", showgrid=False),
             yaxis=dict(title="Freq (Hz)", showgrid=False, type='log' if frequency_scale == 'log' else 'linear'),
-            dragmode='zoom' # Better interaction than pan
+            dragmode='zoom', # Better interaction than pan
+            autosize=True
         )
 
         # 6. Prepare Store Data
