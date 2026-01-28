@@ -523,35 +523,43 @@ def create_layout(df):
                                  html.Button('Apply', id='save-label-btn', n_clicks=0, className='app-button'),
                             ], style={'display': 'flex', 'marginBottom': '10px'}),
 
-                            # Row 2: Save/Load (Grouped)
+                            # Row 2: Load (Dropdown + Button)
                             html.Div([
+                                dcc.Dropdown(
+                                    id='label-load-dropdown',
+                                    options=[],
+                                    placeholder="Load labels...",
+                                    style={'flex': '1', 'minWidth': '100px', 'fontSize': '0.9em'},
+                                    clearable=False
+                                ),
                                 html.Button(
-                                    'Save JSON',
-                                    id='btn-save-labels',
+                                    'Load',
+                                    id='label-load-btn',
                                     className='app-button',
-                                    style={'flex': '1', 'marginRight': '5px'}
+                                    style={'marginLeft': '5px', 'padding': '2px 10px', 'height': '36px'}
                                 ),
-                                dcc.Download(id="download-labels-json"),
+                            ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '5px'}),
 
-                                dcc.Upload(
-                                    id='upload-labels-data',
-                                    children=html.Button(
-                                        'Load JSON',
-                                        className='app-button',
-                                        style={'width': '100%'}
+                            # Row 3: Save (Input + Button)
+                            html.Details([
+                                html.Summary("Save current labels...", style={
+                                    'fontSize': '0.85em', 'color': '#888', 'cursor': 'pointer', 'marginBottom': '5px',
+                                    'userSelect': 'none'
+                                }),
+                                html.Div([
+                                    dcc.Input(
+                                        id='label-save-name',
+                                        type='text',
+                                        placeholder='Label set name...',
+                                        className='input-field',
+                                        style={'flex': '1', 'marginRight': '5px'}
                                     ),
-                                    multiple=False,
-                                    style={'flex': '1', 'marginLeft': '5px'}
-                                ),
-                            ], style={
-                                'display': 'flex',
-                                'marginBottom': '10px',
-                                'maxWidth': '80%',
-                                'margin-left': '0',
-                                'margin-right': 'auto'
-                            }),
+                                    html.Button('Save', id='label-save-btn-server', className='app-button'),
+                                ], style={'display': 'flex', 'marginBottom': '5px'}),
+                                html.Div(id='label-save-message', style={'fontSize': '0.8em', 'color': '#666'}),
+                            ], style={'marginBottom': '10px', 'borderBottom': '1px solid #eee', 'paddingBottom': '5px'}),
                             
-                            # Row 3: Reset
+                            # Row 4: Reset
                             html.Div([
                                  html.Button('Reset Labels', id='btn-reset-labels', className='app-button', style={'width': '80%', 'backgroundColor': '#d9534f', 'color': 'white'}),
                                  dcc.ConfirmDialog(
@@ -790,5 +798,6 @@ def create_layout(df):
         dcc.Store(id='cluster-stats-store'),
         dcc.Store(id='last-preset-load-time', data=0),
         dcc.Store(id='manual-labels-store', data={}),
+        dcc.Store(id='label-last-action'),
         dcc.Store(id='params-store'),
     ], id='main-container')

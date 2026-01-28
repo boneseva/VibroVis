@@ -58,5 +58,5 @@ if __name__ == "__main__":
         
     print(f"Dash is running on http://{display_host}:{display_port}/")
     
-   # app.run(port=PORT, host=ADDRESS, debug=False, use_reloader=False, dev_tools_ui=False)
-    app.run(port=PORT, host=ADDRESS, debug=True, use_reloader=True, dev_tools_ui=True)
+    app.run(port=PORT, host=ADDRESS, debug=False, use_reloader=False, dev_tools_ui=False)
+  #  app.run(port=PORT, host=ADDRESS, debug=True, use_reloader=True, dev_tools_ui=True)

@@ -14,6 +14,7 @@ from contextlib import redirect_stderr
 import json
 import base64
 import datetime
+import dash
 from dash import Input, Output, State, callback_context, ALL
 from dash import dcc
 
@@ -403,50 +404,80 @@ def register_data_callbacks(app):
         return dcc.send_data_frame(export_df.to_csv, "filtered_data_export.csv", index=False)
 
     @app.callback(
-        Output("download-labels-json", "data"),
-        Input("btn-save-labels", "n_clicks"),
+        Output('label-load-dropdown', 'options'),
+        Input('label-last-action', 'data'),
+        prevent_initial_call=False
+    )
+    def update_label_dropdown(_):
+        if not os.path.exists('labels'):
+            os.makedirs('labels')
+        files = [f.replace('.json', '') for f in os.listdir('labels') if f.endswith('.json')]
+        return [{'label': p, 'value': p} for p in sorted(files)]
+
+    @app.callback(
+        [Output('label-save-message', 'children'),
+         Output('label-last-action', 'data'),
+         Output('label-save-name', 'value')],
+        Input('label-save-btn-server', 'n_clicks'),
+        State('label-save-name', 'value'),
         prevent_initial_call=True
     )
-    def save_manual_labels_to_file(n_clicks):
-        """Save manual labels to a JSON file."""
+    def save_manual_labels_server_side(n_clicks, name):
+        """Save manual labels to a JSON file on the server."""
         if not n_clicks:
-             return dash.no_update
+             return dash.no_update, dash.no_update, dash.no_update
+        
+        if not name:
+             return "Please enter a name.", dash.no_update, dash.no_update
         
         if not MANUAL_LABELS_CACHE:
-            return dash.no_update
+             return "No labels to save.", dash.no_update, dash.no_update
             
         # Convert tuple keys to string keys for JSON serialization
         # Key format: (loc, micro, f_base, chan, sec)
-        # We will use valid separators, e.g. "||"
         json_data = {}
         for k, v in MANUAL_LABELS_CACHE.items():
             # k is tuple
-            # Convert elements to string
             key_str = "||".join(str(x) for x in k)
             json_data[key_str] = v
             
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"manual_labels_{timestamp}.json"
-        
-        return dict(content=json.dumps(json_data, indent=2), filename=filename)
+        if not os.path.exists('labels'):
+            os.makedirs('labels')
+            
+        try:
+            with open(f"labels/{name}.json", 'w') as f:
+                json.dump(json_data, f, indent=4)
+            return f"Saved '{name}' successfully!", time.time(), ""
+        except Exception as e:
+            return f"Error saving: {str(e)}", dash.no_update, dash.no_update
 
     @app.callback(
         [Output('manual-labels-store', 'data', allow_duplicate=True),
          Output('label-saved-msg', 'children', allow_duplicate=True)],
-        Input('upload-labels-data', 'contents'),
+        Input('label-load-btn', 'n_clicks'),
+        State('label-load-dropdown', 'value'),
         prevent_initial_call=True
     )
-    def load_manual_labels_from_file(contents):
-        """Load manual labels from a JSON file."""
-        if not contents:
+    def load_manual_labels_server_side(n_clicks, name):
+        """Load manual labels from a JSON file on the server."""
+        if not n_clicks or not name:
             return dash.no_update, dash.no_update
             
-        try:
-            content_type, content_string = contents.split(',')
-            decoded = base64.b64decode(content_string)
-            data = json.loads(decoded.decode('utf-8'))
+        path = f"labels/{name}.json"
+        if not os.path.exists(path):
+            return dash.no_update, "File not found."
             
+        try:
+            with open(path, 'r') as f:
+                data = json.load(f)
+                
             count = 0
+            # Optional: clear cache first? User requested "Reset" button kept, so maybe not auto-clear.
+            # But loading usually implies "set state to this". 
+            # Current behavior of load_from_file was Append/Overwrite existing keys but keep others?
+            # Let's check previous implementation: 
+            # "MANUAL_LABELS_CACHE[(loc...)] = label" -> UpSert.
+            
             for k_str, label in data.items():
                 # Parse key
                 parts = k_str.split('||')
@@ -461,7 +492,7 @@ def register_data_callbacks(app):
                     MANUAL_LABELS_CACHE[(loc, micro, f_base, chan, sec)] = label
                     count += 1
             
-            msg = f"Loaded {count} labels."
+            msg = f"Loaded '{name}' ({count} labels)."
             # Trigger update by sending timestamp
             return {'updated_at': time.time()}, msg
             
