@@ -1,3 +1,10 @@
+/* === Reset & Base Styles === */
+*,
+*:before,
+*:after {
+    box-sizing: border-box;
+}
+
 html,
 body {
     width: 100vw;
@@ -6,13 +13,6 @@ body {
     padding: 0;
     overflow: hidden;
     font-family: 'Segoe UI', Arial, sans-serif;
-    box-sizing: border-box;
-}
-
-*,
-*:before,
-*:after {
-    box-sizing: inherit;
 }
 
 #main-content {
@@ -20,15 +20,11 @@ body {
 }
 
 /* === HORIZONTAL LAYOUT (Main Panels) === */
-
 #scatter-audio-container {
     flex: 1;
-    /* Allows this panel to grow and shrink */
-    min-width: 0;
-    /* Prevents flex items from overflowing */
+    min-width: 0; /* Prevents overflow in flex items */
     display: flex;
     flex-direction: column;
-    /* This makes it a vertical flex container for its children */
     background: #fff;
     box-shadow: 2px 0 8px #eee;
     position: relative;
@@ -38,12 +34,11 @@ body {
 #filter-container {
     display: flex;
     flex-direction: column;
-    /* This makes it a vertical flex container for its children */
     height: 100vh;
     background: #f9f9f9;
     box-shadow: -2px 0 8px #eee;
     flex-shrink: 0;
-    transition: min-width 0.3s ease-in-out, width 0.3s ease-in-out, padding 0.3s ease-in-out;
+    transition: all 0.3s ease-in-out;
 }
 
 .filters-expanded {
@@ -63,10 +58,8 @@ body {
 
 /* --- Left Panel Content --- */
 #scatter {
-    flex-grow: 1;
-    /* CRITICAL: Allows the plot to fill the remaining vertical space */
+    flex: 1;
     min-height: 0;
-    /* CRITICAL: Allows the plot to shrink without overflowing its container */
     width: 100% !important;
     height: 100% !important;
 }
@@ -77,15 +70,12 @@ body {
     align-items: center;
     margin: 1rem 0;
     flex-shrink: 0;
-    /* This content has a fixed height */
 }
 
 #audio-spectrogram-container {
     flex-shrink: 0;
-    /* This content has a fixed height */
     height: 260px;
     margin-bottom: 1em;
-    /* The margin you requested */
     display: flex;
     flex-direction: column;
 }
@@ -94,12 +84,11 @@ body {
 #filter-panel-container {
     overflow-y: auto;
     padding: 1rem;
-    flex-grow: 1;
+    flex: 1;
 }
 
 #histogram-container {
     flex-shrink: 0;
-    /* This content has a fixed height */
     height: 300px;
     padding: 1rem;
     border-top: 1px solid #ddd;
@@ -120,7 +109,6 @@ body {
 #spectrogram-plot-container {
     flex: 1;
     min-height: 0;
-    width: 100% !important;
 }
 
 .panel-toggle-button {
@@ -180,92 +168,7 @@ body {
     font-size: 1.1em;
 }
 
-/* === Dash Component Accent Color Overrides ===
-   Dash 2.18.2 defaults to purple for interactive components.
-   These rules override that with the logo accent color.
-*/
-
-/* Radio buttons and checkboxes (native accent-color) */
-input[type="radio"],
-input[type="checkbox"] {
-    accent-color: var(--color-accent);
-}
-
-/* --- dcc.Slider / dcc.RangeSlider (rc-slider) --- */
-.rc-slider-track {
-    background-color: var(--color-accent) !important;
-}
-
-.rc-slider-handle {
-    border-color: var(--color-accent) !important;
-}
-
-.rc-slider-handle:hover {
-    border-color: var(--color-accent-dark) !important;
-}
-
-.rc-slider-handle-dragging,
-.rc-slider-handle:focus-visible {
-    border-color: var(--color-accent-dark) !important;
-    box-shadow: 0 0 0 5px var(--color-accent-light) !important;
-}
-
-.rc-slider-dot-active {
-    border-color: var(--color-accent) !important;
-}
-
-/* --- dcc.Dropdown (VirtualizedSelect / react-select) --- */
-
-/* Focus border on the control */
-.Select-control:focus-within,
-.Select.is-focused>.Select-control,
-.Select.is-focused:not(.is-open)>.Select-control {
-    border-color: var(--color-accent) !important;
-    box-shadow: 0 0 0 3px var(--color-accent-light) !important;
-}
-
-/* Multi-select value tags */
-.Select--multi .Select-value {
-    background-color: var(--color-accent-light) !important;
-    border-color: var(--color-accent) !important;
-    color: var(--color-accent) !important;
-}
-
-.Select--multi .Select-value-icon {
-    border-right-color: var(--color-accent) !important;
-}
-
-.Select--multi .Select-value-icon:hover {
-    background-color: var(--color-accent) !important;
-    color: #fff !important;
-}
-
-/* Hovered / focused option in the dropdown list */
-.VirtualizedSelectFocusedOption,
-.Select-option.is-focused {
-    background-color: var(--color-accent-light) !important;
-}
-
-/* Selected option in the list */
-.VirtualizedSelectSelectedOption,
-.Select-option.is-selected {
-    background-color: var(--color-accent) !important;
-    color: #fff !important;
-}
-
-/* --- daq.BooleanSwitch --- */
-/* The track when toggled ON */
-.bp3-control.bp3-switch input:checked~.bp3-control-indicator,
-input:checked+.slider,
-.daq-BooleanSwitch .bp3-switch input:checked~.bp3-control-indicator {
-    background-color: var(--color-accent) !important;
-}
-
-/* Focus ring on BooleanSwitch */
-.bp3-control input:focus~.bp3-control-indicator {
-    outline: 3px solid var(--color-accent-light) !important;
-}
-
+/* === Buttons & Inputs === */
 .input-field {
     width: 100%;
     padding: 0.5rem;
@@ -298,17 +201,14 @@ input:checked+.slider,
     justify-content: space-between;
     align-items: center;
     margin-bottom: 15px;
-    /* Adds some space between rows */
 }
 
-/* ADD these new rules to control the size of the inputs */
-.spectrogram-row>*:nth-child(2) {
-    flex-grow: 1;
-    /* Allows the control to fill available space */
+.spectrogram-row > *:nth-child(2) {
+    flex: 1;
     margin: 0 10px;
-    /* Adds a small gap around the control */
 }
 
+/* === Scrollbars === */
 ::-webkit-scrollbar {
     width: 8px;
 }
@@ -318,6 +218,7 @@ input:checked+.slider,
     border-radius: 4px;
 }
 
+/* === Tooltips === */
 .label-with-info {
     display: flex;
     align-items: center;
@@ -348,7 +249,6 @@ input:checked+.slider,
     transform: translateY(-50%);
     opacity: 0;
     transition: opacity 0.3s;
-    white-space: normal;
 }
 
 .tooltip-container:hover .tooltip-text {
@@ -362,24 +262,17 @@ input:checked+.slider,
     top: 50%;
     left: 100%;
     margin-top: -5px;
-    border-width: 5px;
-    border-style: solid;
-    border-color: transparent transparent transparent #333;
+    border: 5px solid transparent;
+    border-left-color: #333;
 }
 
-/* === Cluster list item fixes === */
-
-/* Tighten the checklist inside each cluster row */
-#cluster-list-container .dash-checklist label {
+/* === Cluster List Fixes === */
+#cluster-list-container .dash-checklist label,
+#cluster-list-container .dash-checklist .dash-checkbox {
     padding: 0 !important;
     margin: 0 !important;
 }
 
-#cluster-list-container .dash-checklist .dash-checkbox {
-    margin: 0 !important;
-}
-
-/* Ensure the native color input swatch is always visible */
 #cluster-list-container input[type="color"] {
     -webkit-appearance: none;
     appearance: none;
@@ -403,6 +296,7 @@ input:checked+.slider,
     border-radius: 2px;
 }
 
+/* === Guide / Misc === */
 .guide-div {
     display: flex;
     width: 100%;
@@ -411,9 +305,7 @@ input:checked+.slider,
 .guide-title {
     font-weight: 700;
     text-decoration: none;
-
     margin-left: auto;
-
     font-size: 1.1rem;
     padding: 0.5rem 1rem;
 }
