@@ -178,6 +178,8 @@ def register_filter_callbacks(app):
         if not selected_location:
             return [], None
 
+        print(f"Available columns: {initial_df.columns.tolist()}")
+        
         dff_loc = initial_df[initial_df['location'] == selected_location]
         models = sorted(dff_loc['model_name'].dropna().unique())
         options = [{'label': m, 'value': m} for m in models]

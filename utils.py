@@ -106,11 +106,15 @@ def compute_spectrogram(segment, samplerate, scale='log', fft_window_size=1024, 
             Sxx_log_interpolated[:, i] = np.interp(log_f_bins, f, Sxx[:, i])
 
         Sxx_db = 10 * np.log10(Sxx_log_interpolated + 1e-10)
+    
+        Sxx_db -= Sxx_db.max()
         f_out = log_f_bins
 
     # --- Linear Scale (no interpolation) ---
     else:  # scale == 'linear'
         Sxx_db = 10 * np.log10(Sxx + 1e-10)
+        
+        Sxx_db -= Sxx_db.max()
         f_out = f
 
     Sxx_db = np.maximum(Sxx_db, db_floor)
