@@ -20,4 +20,4 @@ COPY . .
 EXPOSE 8080
 
 # The command to run when the container starts
-CMD ["gunicorn", "-w", "4", "--threads", "2", "-b", "0.0.0.0:8080", "--timeout", "60", "app:server"]
+CMD ["gunicorn", "-w", "1", "--threads", "2", "-b", "0.0.0.0:8080", "--timeout", "60", "app:server"]
