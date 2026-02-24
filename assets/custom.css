@@ -1,4 +1,3 @@
-/* === Global & Main Layout === */
 html,
 body {
     width: 100vw;
@@ -181,6 +180,92 @@ body {
     font-size: 1.1em;
 }
 
+/* === Dash Component Accent Color Overrides ===
+   Dash 2.18.2 defaults to purple for interactive components.
+   These rules override that with the logo accent color.
+*/
+
+/* Radio buttons and checkboxes (native accent-color) */
+input[type="radio"],
+input[type="checkbox"] {
+    accent-color: var(--color-accent);
+}
+
+/* --- dcc.Slider / dcc.RangeSlider (rc-slider) --- */
+.rc-slider-track {
+    background-color: var(--color-accent) !important;
+}
+
+.rc-slider-handle {
+    border-color: var(--color-accent) !important;
+}
+
+.rc-slider-handle:hover {
+    border-color: var(--color-accent-dark) !important;
+}
+
+.rc-slider-handle-dragging,
+.rc-slider-handle:focus-visible {
+    border-color: var(--color-accent-dark) !important;
+    box-shadow: 0 0 0 5px var(--color-accent-light) !important;
+}
+
+.rc-slider-dot-active {
+    border-color: var(--color-accent) !important;
+}
+
+/* --- dcc.Dropdown (VirtualizedSelect / react-select) --- */
+
+/* Focus border on the control */
+.Select-control:focus-within,
+.Select.is-focused>.Select-control,
+.Select.is-focused:not(.is-open)>.Select-control {
+    border-color: var(--color-accent) !important;
+    box-shadow: 0 0 0 3px var(--color-accent-light) !important;
+}
+
+/* Multi-select value tags */
+.Select--multi .Select-value {
+    background-color: var(--color-accent-light) !important;
+    border-color: var(--color-accent) !important;
+    color: var(--color-accent) !important;
+}
+
+.Select--multi .Select-value-icon {
+    border-right-color: var(--color-accent) !important;
+}
+
+.Select--multi .Select-value-icon:hover {
+    background-color: var(--color-accent) !important;
+    color: #fff !important;
+}
+
+/* Hovered / focused option in the dropdown list */
+.VirtualizedSelectFocusedOption,
+.Select-option.is-focused {
+    background-color: var(--color-accent-light) !important;
+}
+
+/* Selected option in the list */
+.VirtualizedSelectSelectedOption,
+.Select-option.is-selected {
+    background-color: var(--color-accent) !important;
+    color: #fff !important;
+}
+
+/* --- daq.BooleanSwitch --- */
+/* The track when toggled ON */
+.bp3-control.bp3-switch input:checked~.bp3-control-indicator,
+input:checked+.slider,
+.daq-BooleanSwitch .bp3-switch input:checked~.bp3-control-indicator {
+    background-color: var(--color-accent) !important;
+}
+
+/* Focus ring on BooleanSwitch */
+.bp3-control input:focus~.bp3-control-indicator {
+    outline: 3px solid var(--color-accent-light) !important;
+}
+
 .input-field {
     width: 100%;
     padding: 0.5rem;
@@ -280,6 +365,42 @@ body {
     border-width: 5px;
     border-style: solid;
     border-color: transparent transparent transparent #333;
+}
+
+/* === Cluster list item fixes === */
+
+/* Tighten the checklist inside each cluster row */
+#cluster-list-container .dash-checklist label {
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+#cluster-list-container .dash-checklist .dash-checkbox {
+    margin: 0 !important;
+}
+
+/* Ensure the native color input swatch is always visible */
+#cluster-list-container input[type="color"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px !important;
+    height: 20px !important;
+    min-width: 20px;
+    padding: 0 !important;
+    border: 1px solid #bbb !important;
+    border-radius: 3px;
+    cursor: pointer;
+    background: none;
+    flex-shrink: 0;
+}
+
+#cluster-list-container input[type="color"]::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+#cluster-list-container input[type="color"]::-webkit-color-swatch {
+    border: none;
+    border-radius: 2px;
 }
 
 .guide-div {

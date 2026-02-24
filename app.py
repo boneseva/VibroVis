@@ -1,3 +1,5 @@
+import os
+import re
 from dash import Dash, html
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -14,23 +16,44 @@ server.config['WTF_CSRF_ENABLED'] = False
 # Apply ProxyFix to handle HTTPS headers correctly
 server.wsgi_app = ProxyFix(server.wsgi_app, x_proto=1, x_host=1)
 
-app.index_string = '''
+
+def _extract_logo_accent_color(svg_path: str, fallback: str = '#4b8af2') -> str:
+    """Read the logo SVG and return the first fill color found in its <style> block."""
+    try:
+        with open(svg_path, 'r', encoding='utf-8') as f:
+            svg_text = f.read()
+        match = re.search(r'fill:\s*(#[0-9a-fA-F]{3,8})', svg_text)
+        if match:
+            return match.group(1)
+    except Exception:
+        pass
+    return fallback
+
+
+_logo_path = os.path.join(os.path.dirname(__file__), 'assets', 'logo.svg')
+_accent_color = _extract_logo_accent_color(_logo_path)
+print(f'[VibroVis] Theme accent color extracted from logo: {_accent_color}')
+
+app.index_string = f'''
 <!DOCTYPE html>
 <html>
     <head>
-        {%metas%}
-        <title>{%title%}</title>
+        {{%metas%}}
+        <title>{{%title%}}</title>
         <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
         <link rel="shortcut icon" type="image/svg+xml" href="/assets/favicon.svg">
         <link rel="apple-touch-icon" href="/assets/favicon.svg">
-        {%css%}
+        <style>
+            :root {{ --color-accent: {_accent_color}; }}
+        </style>
+        {{%css%}}
     </head>
     <body>
-        {%app_entry%}
+        {{%app_entry%}}
         <footer>
-            {%config%}
-            {%scripts%}
-            {%renderer%}
+            {{%config%}}
+            {{%scripts%}}
+            {{%renderer%}}
         </footer>
     </body>
 </html>
