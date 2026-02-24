@@ -1,9 +1,24 @@
 # Updated layout.py
 import os
+import re
 
 import dash_daq as daq
 from dash import html, dcc
 import pandas as pd
+
+
+def _extract_logo_accent_color(svg_path: str = "assets/logo.svg", fallback: str = "#4b8af2") -> str:
+    """Extract the primary fill color from the logo SVG (cls-1 rule)."""
+    try:
+        with open(svg_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        # Match the first fill color in a CSS class definition inside <style>
+        match = re.search(r'\.cls-\d+\s*\{[^}]*fill\s*:\s*(#[0-9a-fA-F]{3,6})', content)
+        if match:
+            return match.group(1)
+    except Exception:
+        pass
+    return fallback
 
 CLUSTER_COLORS = ['#4E79A7', '#F28E2B', '#E15759', '#76B7B2', '#EDC948', '#B07AA1', '#FF9DA7', '#A6A377', '#F2C894',
                   '#BADCBD', '#59A14F', '#9C755F', '#BAB0AC', '#D37295', '#A0CBE8',
@@ -175,7 +190,7 @@ def create_layout(df):
             color = CLUSTER_COLORS[c_int % len(CLUSTER_COLORS)]
 
             label_component = html.Span([
-                html.Span("■", style={'color': color, 'fontSize': '1.5em', 'marginRight': '5px', 'lineHeight': '1'}),
+                html.Span("■", style={'color': color, 'fontSize': '1.5em', 'marginRight': '3px', 'lineHeight': '1'}),
                 html.Span(str(c_int))
             ], style={'display': 'flex', 'alignItems': 'center'})
 
@@ -186,7 +201,19 @@ def create_layout(df):
 
     date_selector = generate_date_selector(df)
 
-    return html.Div([
+    accent = _extract_logo_accent_color()
+
+    return html.Div(
+        style={
+            "--Dash-Fill-Interactive-Strong": accent,
+            "--Dash-Accent": accent,
+
+            "--Dash-Control-Height": "34px",
+            "--Dash-Control-Padding-Y": "2px",
+            "--Dash-Control-Padding-X": "2px",
+            "--Dash-Control-Font-Size": "14px",
+    }, children=
+    [
 
         html.Div([
             html.Div([
@@ -207,10 +234,11 @@ def create_layout(df):
                         className='app-button autoplay-off'
                     ),
                 ], className='info-autoplay-row'),
+
                 html.Div([
                     html.Audio(id='audio-player', controls=True, autoPlay=False),
                     html.Div(
-                        dcc.Graph(id='spectrogram-plot', config={'displayModeBar': False}),
+                        dcc.Graph(id='spectrogram-plot', config={'displayModeBar': False}, style={'height': '100%'}),
                         id='spectrogram-plot-container'
                     ),
                 ], id='audio-spectrogram-container')
@@ -260,7 +288,6 @@ def create_layout(df):
                             className='app-button',
                             style={'marginLeft': '5px', 'padding': '2px 10px', 'height': '36px'}
                         ),
-
                     ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '5px'}),
 
                     html.Details([
@@ -331,7 +358,8 @@ def create_layout(df):
                                           options=[{'label': str(c), 'value': c} for c in
                                                    sorted(df['channel'].unique())],
                                           value=df['channel'].unique().tolist(),
-                                          labelStyle={"display": "inline-block"}),
+                                          labelStyle={"display": "inline-block"},
+                                          style={"display": "flex", "flexWrap": "wrap", "gap": "2px 8px"}),
 
                             html.Div([
                                 html.Label("Dates"),
@@ -393,6 +421,25 @@ def create_layout(df):
                             ),
 
                             html.Div([
+                                html.Label("Color by"),
+                                html.Div(className="tooltip-container", children=[
+                                    html.Span(" ⓘ", className="info-icon"),
+                                    html.Span("Choose to color points by their cluster assignment or by manual labels.",
+                                              className="tooltip-text")
+                                ])
+                            ], className="label-with-info", style={'marginTop': '1em'}),
+
+                            dcc.RadioItems(
+                                id='color-mode-radio',
+                                options=[
+                                    {'label': 'Clusters', 'value': 'cluster'},
+                                    {'label': 'Manual Labels', 'value': 'manual'}
+                                ],
+                                value='cluster',
+                                labelStyle={'display': 'inline-block', 'marginRight': '10px'}
+                            ),
+
+                            html.Div([
                                 html.Label("Clusters"),
                                 html.Div(className="tooltip-container", children=[
                                     html.Span(" ⓘ", className="info-icon"),
@@ -410,7 +457,7 @@ def create_layout(df):
                                     'flexWrap': 'wrap',
                                     'gap': '8px',
                                     'marginTop': '10px',
-                                    'maxHeight': '300px',
+                                    'maxHeight': '200px',
                                     'overflowY': 'auto',
                                     'alignContent': 'flex-start'
                                 }
@@ -456,7 +503,8 @@ def create_layout(df):
                                 id='merge-switch',
                                 on=False,
                                 label='',
-                                labelPosition='top'
+                                labelPosition='top',
+                                persistence=False
                             ),
 
                             html.Div(id='merge-threshold-container', children=[
@@ -470,7 +518,7 @@ def create_layout(df):
                                     ])
                                 ], className="label-with-info"),
                                 dcc.Slider(id='merge-threshold', min=0, max=100,
-                                           step=1, value=1,
+                                           step=1, value=15,
                                            marks={i: str(i) for i in range(0, 101, 20)})
                             ]),
 
@@ -504,6 +552,67 @@ def create_layout(df):
                     ], open=True),
 
                     html.Details([
+                        html.Summary("Labeling", className='section-title'),
+                        html.Div(children=[
+                            # Row 1: Input and Apply
+                            html.Div([
+                                 dcc.Input(id='manual-label-input', type='text', placeholder='Enter label...', list='manual-label-datalist', className='input-field', style={'flex': '1', 'marginRight': '5px'}),
+                                 html.Datalist(id='manual-label-datalist'),
+                                 html.Button('Apply', id='save-label-btn', n_clicks=0, className='app-button'),
+                            ], style={'display': 'flex', 'marginBottom': '10px'}),
+
+                            # Row 2: Load (Dropdown + Button)
+                            html.Div([
+                                dcc.Dropdown(
+                                    id='label-load-dropdown',
+                                    options=[],
+                                    placeholder="Load labels...",
+                                    style={'flex': '1', 'minWidth': '100px', 'fontSize': '0.9em'},
+                                    clearable=False
+                                ),
+                                html.Button(
+                                    'Load',
+                                    id='label-load-btn',
+                                    className='app-button',
+                                    style={'marginLeft': '5px', 'padding': '2px 10px', 'height': '36px'}
+                                ),
+                            ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '5px'}),
+
+                            # Row 3: Save (Input + Button)
+                            html.Details([
+                                html.Summary("Save current labels...", style={
+                                    'fontSize': '0.85em', 'color': '#888', 'cursor': 'pointer', 'marginBottom': '5px',
+                                    'userSelect': 'none'
+                                }),
+                                html.Div([
+                                    dcc.Input(
+                                        id='label-save-name',
+                                        type='text',
+                                        placeholder='Label set name...',
+                                        className='input-field',
+                                        style={'flex': '1', 'marginRight': '5px'}
+                                    ),
+                                    html.Button('Save', id='label-save-btn-server', className='app-button'),
+                                ], style={'display': 'flex', 'marginBottom': '5px'}),
+                                html.Div(id='label-save-message', style={'fontSize': '0.8em', 'color': '#666'}),
+                            ], style={'marginBottom': '10px', 'borderBottom': '1px solid #eee', 'paddingBottom': '5px'}),
+                            
+                            # Row 4: Reset
+                            html.Div([
+                                 html.Button('Reset Labels', id='btn-reset-labels', className='app-button', style={'width': '80%', 'backgroundColor': '#d9534f', 'color': 'white'}),
+                                 dcc.ConfirmDialog(
+                                      id='confirm-reset-labels',
+                                      message='Are you sure you want to RESET all manual labels?\n\nThis will clear all labels from memory.\nMake sure you have saved your labels if you want to keep them.',
+                                 ),
+                            ], style={'marginBottom': '5px'}),
+
+                            # Status Message
+                            html.Div(id='label-saved-msg', style={'color':'#28a745', 'fontSize':'0.9em', 'fontWeight': 'bold', 'textAlign': 'center', 'minHeight': '1.2em'})
+
+                        ], style={'padding': '10px'})
+                    ], open=True),
+
+                    html.Details([
                         html.Summary("Spectrogram Settings", className='section-title'),
                         html.Div(id='advanced-options-content', children=[
 
@@ -524,7 +633,7 @@ def create_layout(df):
                                 dcc.Dropdown(id='fft-window-size',
                                              options=[{'label': str(s), 'value': s} for s in
                                                       [256, 512, 1024, 2048, 4096]],
-                                             value=4096),
+                                             value=1024),
                                 html.Div(className="tooltip-container", children=[
                                     html.Span(" ⓘ", className="info-icon"),
                                     html.Span(
@@ -535,7 +644,7 @@ def create_layout(df):
 
                             html.Div([
                                 html.Label("Window Overlap"),
-                                dcc.Slider(id='window-overlap', min=0, max=0.9, step=0.05, value=0.9,
+                                dcc.Slider(id='window-overlap', min=0, max=0.9, step=0.05, value=0.5,
                                            marks={i / 10: f'{int(i * 10)}%' for i in range(0, 10, 2)}),
                                 html.Div(className="tooltip-container", children=[
                                     html.Span(" ⓘ", className="info-icon"),
@@ -547,7 +656,7 @@ def create_layout(df):
 
                             html.Div([
                                 html.Label("Frequency Bins"),
-                                dcc.Input(id='num-bins', type='number', value=512,
+                                dcc.Input(id='num-bins', type='number', value=128,
                             className='input-field'),
                                 html.Div(className="tooltip-container", children=[
                                     html.Span(" ⓘ", className="info-icon"),
@@ -625,7 +734,8 @@ def create_layout(df):
                                     id='anim-enabled-switch',
                                     on=False,
                                     label='',
-                                    labelPosition='top'
+                                    labelPosition='top',
+                                    persistence=False
                                 )
                             ], className="label-with-info", style={'marginBottom': '15px'}),
 
@@ -723,5 +833,9 @@ def create_layout(df):
         dcc.Store(id='cluster-name-store', data={}),
         dcc.Store(id='preset-last-action'),
         dcc.Store(id='preset-cluster-selection'),
+        dcc.Store(id='cluster-stats-store'),
         dcc.Store(id='last-preset-load-time', data=0),
+        dcc.Store(id='manual-labels-store', data={}),
+        dcc.Store(id='label-last-action'),
+        dcc.Store(id='params-store'),
     ], id='main-container')

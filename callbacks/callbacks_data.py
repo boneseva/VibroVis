@@ -11,12 +11,16 @@ import pandas as pd
 import numpy as np
 import warnings
 from contextlib import redirect_stderr
+import json
+import base64
+import datetime
+import dash
 from dash import Input, Output, State, callback_context, ALL
 from dash import dcc
 
 import read_data
 import utils
-from .callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, initial_df
+from .callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, initial_df, MANUAL_LABELS_CACHE
 
 # Suppress mpg123 decoder warnings (these are non-critical)
 warnings.filterwarnings('ignore', category=UserWarning)
@@ -37,8 +41,18 @@ def merge_clips_vectorized(dff, merge_threshold):
         dff['channel'] = dff['channel'].astype('category')
     
     dff = dff.sort_values(['file_name', 'channel', 'clip_time'])
+    
+    # Ensure numeric consistency for math
+    dff['clip_time'] = pd.to_numeric(dff['clip_time'], errors='coerce').fillna(0.0)
+    # Handle variable clip durations (user confirmed they vary and overlap)
+    # Default to 5.0 only if widely missing, but respect existing data
+    if 'clip_duration' not in dff.columns:
+        dff['clip_duration'] = 5.0
+    else:
+        dff['clip_duration'] = pd.to_numeric(dff['clip_duration'], errors='coerce').fillna(5.0)
+
     same_context = (
-            (dff['file_name'] == dff['file_name'].shift(1)) &
+            (dff['mp3_file'] == dff['mp3_file'].shift(1)) &
             (dff['channel'] == dff['channel'].shift(1)) &
             (dff['cluster_id'] == dff['cluster_id'].shift(1))
     )
@@ -54,15 +68,17 @@ def merge_clips_vectorized(dff, merge_threshold):
 
     agg_dict = {
         'x': ('x', 'mean'), 'y': ('y', 'mean'),
-        'clip_time': ('clip_time', 'first'), 'clip_end': ('clip_end', 'last'),
+        'clip_time': ('clip_time', 'first'), 'clip_end': ('clip_end', 'max'),
         'recorder_type': ('recorder_type', 'first'), 'clip_count': ('clip_count', 'sum'),
         'cluster_id': ('cluster_id', 'first'), 'file_name': ('file_name', 'first'),
         'channel': ('channel', 'first'), 'start_dt': ('start_dt', 'first'),
         'time_of_day': ('time_of_day', 'first'), 'model_name': ('model_name', 'first'),
         'mp3_file': ('mp3_file', 'first'), 'row_idx': ('row_idx', 'first'),
         'cluster_num': ('cluster_num', 'first'),
-        'microlocation': ('microlocation', 'first'), 'day_dt': ('day_dt', 'first'),
-        'start_hour_float': ('start_hour_float', 'first')
+        'start_hour_float': ('start_hour_float', 'first'),
+        'location': ('location', 'first'),
+        'day_dt': ('day_dt', 'first'),
+        'microlocation': ('microlocation', 'first'),
     }
     grouped = dff.groupby(merge_groups).agg(**agg_dict).reset_index(drop=True)
     grouped['clip_duration'] = grouped['clip_end'] - grouped['clip_time']
@@ -267,12 +283,18 @@ def register_data_callbacks(app):
             prev_cluster = None
             prev_end = None
             
+            # Ensure clip_duration is present
+            if 'clip_duration' not in dff_filtered.columns:
+                dff_filtered['clip_duration'] = 5.0
+            else:
+                 dff_filtered['clip_duration'] = pd.to_numeric(dff_filtered['clip_duration'], errors='coerce').fillna(5.0)
+
             for idx, row in dff_filtered.iterrows():
                 file_name = row['file_name']
                 channel = row['channel']
                 cluster_id = row['cluster_id']
                 clip_time = row['clip_time']
-                clip_duration = row.get('clip_duration', 0)
+                clip_duration = row.get('clip_duration', 5.0)
                 clip_end = clip_time + clip_duration
                 
                 can_merge = (
@@ -285,19 +307,22 @@ def register_data_callbacks(app):
                 
                 if not can_merge:
                     current_group += 1
+                    prev_end = clip_end
+                else:
+                    # Extend the merge window to the maximum end time seen so far
+                    prev_end = max(prev_end, clip_end)
                 
                 merge_groups.append(current_group)
                 prev_file = file_name
                 prev_channel = channel
                 prev_cluster = cluster_id
-                prev_end = clip_end
             
             dff_filtered['merge_group'] = merge_groups
             dff_filtered['clip_end'] = dff_filtered['clip_time'] + dff_filtered['clip_duration']
             
             agg_dict = {
                 'clip_time': ('clip_time', 'first'),
-                'clip_end': ('clip_end', 'last'),
+                'clip_end': ('clip_end', 'max'),
                 'file_name': ('file_name', 'first'),
                 'channel': ('channel', 'first'),
                 'cluster_id': ('cluster_id', 'first'),
@@ -360,8 +385,143 @@ def register_data_callbacks(app):
             export_df['timestamp_start'] = ''
             export_df['timestamp_end'] = ''
 
+        # Apply manual labels
+        if 'clip_duration' not in dff_filtered.columns:
+             dff_filtered['clip_duration'] = 5.0
+        
+        # We need to import the function dynamically or use utils if available
+        # It is available as utils.apply_manual_labels_efficiently
+        dff_filtered = utils.apply_manual_labels_efficiently(dff_filtered)
+        
+        export_df['manual_label'] = dff_filtered['manual_label'] if 'manual_label' in dff_filtered.columns else 'Unlabeled'
+
+
         export_df['cluster_id'] = dff_filtered['cluster_id'].astype(str) if 'cluster_id' in dff_filtered.columns else ''
         export_df = export_df.sort_values(['wav_file', 'date_time'])
 
+        export_df = export_df.sort_values(['wav_file', 'date_time'])
+
         return dcc.send_data_frame(export_df.to_csv, "filtered_data_export.csv", index=False)
+
+    @app.callback(
+        Output('label-load-dropdown', 'options'),
+        Input('label-last-action', 'data'),
+        prevent_initial_call=False
+    )
+    def update_label_dropdown(_):
+        if not os.path.exists('labels'):
+            os.makedirs('labels')
+        files = [f.replace('.json', '') for f in os.listdir('labels') if f.endswith('.json')]
+        return [{'label': p, 'value': p} for p in sorted(files)]
+
+    @app.callback(
+        [Output('label-save-message', 'children'),
+         Output('label-last-action', 'data'),
+         Output('label-save-name', 'value')],
+        Input('label-save-btn-server', 'n_clicks'),
+        State('label-save-name', 'value'),
+        prevent_initial_call=True
+    )
+    def save_manual_labels_server_side(n_clicks, name):
+        """Save manual labels to a JSON file on the server."""
+        if not n_clicks:
+             return dash.no_update, dash.no_update, dash.no_update
+        
+        if not name:
+             return "Please enter a name.", dash.no_update, dash.no_update
+        
+        if not MANUAL_LABELS_CACHE:
+             return "No labels to save.", dash.no_update, dash.no_update
+            
+        # Convert tuple keys to string keys for JSON serialization
+        # Key format: (loc, micro, f_base, chan, sec)
+        json_data = {}
+        for k, v in MANUAL_LABELS_CACHE.items():
+            # k is tuple
+            key_str = "||".join(str(x) for x in k)
+            json_data[key_str] = v
+            
+        if not os.path.exists('labels'):
+            os.makedirs('labels')
+            
+        try:
+            with open(f"labels/{name}.json", 'w') as f:
+                json.dump(json_data, f, indent=4)
+            return f"Saved '{name}' successfully!", time.time(), ""
+        except Exception as e:
+            return f"Error saving: {str(e)}", dash.no_update, dash.no_update
+
+    @app.callback(
+        [Output('manual-labels-store', 'data', allow_duplicate=True),
+         Output('label-saved-msg', 'children', allow_duplicate=True)],
+        Input('label-load-btn', 'n_clicks'),
+        State('label-load-dropdown', 'value'),
+        prevent_initial_call=True
+    )
+    def load_manual_labels_server_side(n_clicks, name):
+        """Load manual labels from a JSON file on the server."""
+        if not n_clicks or not name:
+            return dash.no_update, dash.no_update
+            
+        path = f"labels/{name}.json"
+        if not os.path.exists(path):
+            return dash.no_update, "File not found."
+            
+        try:
+            with open(path, 'r') as f:
+                data = json.load(f)
+                
+            count = 0
+            # Optional: clear cache first? User requested "Reset" button kept, so maybe not auto-clear.
+            # But loading usually implies "set state to this". 
+            # Current behavior of load_from_file was Append/Overwrite existing keys but keep others?
+            # Let's check previous implementation: 
+            # "MANUAL_LABELS_CACHE[(loc...)] = label" -> UpSert.
+            
+            for k_str, label in data.items():
+                # Parse key
+                parts = k_str.split('||')
+                if len(parts) == 5:
+                    loc = parts[0]
+                    micro = parts[1]
+                    f_base = parts[2]
+                    chan = int(parts[3])
+                    sec = int(parts[4])
+                    
+                    # Store in cache
+                    MANUAL_LABELS_CACHE[(loc, micro, f_base, chan, sec)] = label
+                    count += 1
+            
+            msg = f"Loaded '{name}' ({count} labels)."
+            # Trigger update by sending timestamp
+            return {'updated_at': time.time()}, msg
+            
+        except Exception as e:
+            print(f"Error loading manual labels: {e}")
+            return dash.no_update, f"Error: {str(e)}"
+
+    @app.callback(
+        Output('confirm-reset-labels', 'displayed'),
+        Input('btn-reset-labels', 'n_clicks'),
+        prevent_initial_call=True
+    )
+    def display_reset_confirm(n_clicks):
+        if n_clicks:
+            return True
+        return False
+
+    @app.callback(
+        [Output('manual-labels-store', 'data', allow_duplicate=True),
+         Output('label-saved-msg', 'children', allow_duplicate=True)],
+        Input('confirm-reset-labels', 'submit_n_clicks'),
+        prevent_initial_call=True
+    )
+    def reset_manual_labels(submit_n_clicks):
+        if not submit_n_clicks:
+             return dash.no_update, dash.no_update
+        
+        MANUAL_LABELS_CACHE.clear()
+        
+        # Trigger update
+        return {'updated_at': time.time(), 'cleared': True}, "Labels Reset!"
 

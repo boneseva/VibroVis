@@ -114,7 +114,7 @@ def register_preset_callbacks(app):
          Output('frequency-scale', 'value'),
          Output('fft-window-size', 'value'),
          Output('window-overlap', 'value'),
-         Output('num-bins', 'value'),
+         Output('num-bins', 'value', allow_duplicate=True),
          Output('min-freq', 'value'),
          Output('max-freq', 'value'),
          Output('colormap', 'value'),

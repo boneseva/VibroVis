@@ -1,6 +1,9 @@
 # Use a stable Debian-based Python image
 FROM python:3.11-slim-bookworm
 
+# Ensure output logs are sent directly to terminal
+ENV PYTHONUNBUFFERED=1
+
 # Set the working directory inside the container
 WORKDIR /app
 
@@ -17,4 +20,4 @@ COPY . .
 EXPOSE 8080
 
 # The command to run when the container starts
-CMD ["gunicorn", "-w", "1", "-b", "0.0.0.0:8080", "app:server"]
+CMD ["gunicorn", "-w", "1", "--threads", "2", "-b", "0.0.0.0:8080", "--timeout", "60", "app:server"]

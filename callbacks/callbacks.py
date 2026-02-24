@@ -15,8 +15,8 @@ def register_callbacks(dash_app):
     register_data_callbacks(dash_app)
     register_cluster_callbacks(dash_app)
     register_plot_callbacks(dash_app)
-    register_filter_callbacks(dash_app)
     register_ui_callbacks(dash_app)
     register_preset_callbacks(dash_app)
+    register_filter_callbacks(dash_app)
     register_date_selector_callbacks(dash_app)
 
