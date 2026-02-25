@@ -8,6 +8,7 @@ from .callbacks_filters import register_filter_callbacks
 from .callbacks_ui import register_ui_callbacks
 from .callbacks_presets import register_preset_callbacks
 from .callbacks_date_selector import register_date_selector_callbacks
+from .callbacks_table import register_table_callbacks
 
 
 def register_callbacks(dash_app):
@@ -19,4 +20,5 @@ def register_callbacks(dash_app):
     register_preset_callbacks(dash_app)
     register_filter_callbacks(dash_app)
     register_date_selector_callbacks(dash_app)
+    register_table_callbacks(dash_app)
 

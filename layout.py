@@ -218,13 +218,73 @@ def create_layout(df):
         html.Div([
             html.Div([
 
+                # --- Simple Tab Bar (no dcc.Tabs, pure HTML) ---
                 html.Div([
+                    html.Button(
+                        "Scatter View",
+                        id='tab-btn-scatter',
+                        n_clicks=0,
+                        className='view-tab-btn view-tab-btn--active'
+                    ),
+                    html.Button(
+                        "Table View",
+                        id='tab-btn-table',
+                        n_clicks=0,
+                        className='view-tab-btn'
+                    ),
+                    dcc.Store(id='main-view-tabs', data='scatter-tab'),
                     html.Button(">", id="toggle-filters-btn", n_clicks=0, className="panel-toggle-button"),
-                ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '10px'}),
-                
-                dcc.Graph(id='scatter'),
-                
-                html.Div(id='fft-warning', style={'color': 'red', 'margin': '0.1em'}),
+                ], id='view-tab-bar'),
+
+                # --- Scatter pane (graph only) ---
+                html.Div([
+                    dcc.Graph(id='scatter'),
+                    html.Div(id='fft-warning', style={'color': 'red', 'margin': '0.1em'}),
+                ], id='scatter-pane', className='view-pane view-pane--active'),
+
+                # --- Table pane ---
+                html.Div([
+                    html.Div([
+                        html.Label("Visible columns:", style={'fontWeight': 'bold', 'marginRight': '8px', 'whiteSpace': 'nowrap'}),
+                        dcc.Dropdown(
+                            id='table-column-selector',
+                            options=[
+                                {'label': 'File',          'value': 'file_name'},
+                                {'label': 'Date',          'value': 'date'},
+                                {'label': 'Recording Time',          'value': 'recording_time'},
+                                {'label': 'Start Time', 'value': 'cluster_start'},
+                                {'label': 'End Time',   'value': 'cluster_end'},
+                                {'label': 'Duration',      'value': 'duration'},
+                                {'label': 'Cluster',       'value': 'cluster_id'},
+                                {'label': 'Channel',       'value': 'channel'},
+                                {'label': 'Microlocation', 'value': 'microlocation'},
+                                {'label': 'Recorder',      'value': 'recorder_type'},
+                                {'label': 'Clip Count',    'value': 'clip_count'},
+                            ],
+                            value=['file_name', 'date', 'recording_time',
+                                   'cluster_start', 'cluster_end', 'duration', 'cluster_id'],
+                            multi=True,
+                            clearable=False,
+                            style={'flex': '1'},
+                        ),
+                    ], style={'display': 'flex', 'alignItems': 'center', 'padding': '8px 0',
+                              'borderBottom': '1px solid #e0e0e0', 'flexShrink': '0'}),
+                    # Pagination bar
+                    html.Div([
+                        html.Button('\u2039 Prev', id='table-prev-btn', n_clicks=0,
+                                    className='app-button', style={'marginRight': '8px'}),
+                        html.Span(id='table-page-info', style={'fontSize': '0.9em', 'color': '#555'}),
+                        html.Button('Next \u203a', id='table-next-btn', n_clicks=0,
+                                    className='app-button', style={'marginLeft': '8px'}),
+                    ], style={'display': 'flex', 'alignItems': 'center', 'padding': '6px 0',
+                              'borderBottom': '1px solid #e0e0e0', 'flexShrink': '0'}),
+                    html.Div(
+                        id='table-view-output',
+                        style={'overflowY': 'auto', 'flex': '1', 'minHeight': '0'}
+                    ),
+                ], id='table-pane', className='view-pane'),
+
+                # --- Shared: info row + audio/spectrogram — always visible ---
                 html.Div([
                     html.Div(id="info"),
                     html.Button(
@@ -242,6 +302,7 @@ def create_layout(df):
                         id='spectrogram-plot-container'
                     ),
                 ], id='audio-spectrogram-container')
+
             ], id='scatter-audio-container'),
 
             html.Div([
@@ -838,4 +899,6 @@ def create_layout(df):
         dcc.Store(id='manual-labels-store', data={}),
         dcc.Store(id='label-last-action'),
         dcc.Store(id='params-store'),
+        dcc.Store(id='table-page-store', data=0),
+        dcc.Store(id='table-total-pages-store', data=1),
     ], id='main-container')
