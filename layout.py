@@ -256,6 +256,7 @@ def create_layout(df):
                                 {'label': 'End Time',   'value': 'cluster_end'},
                                 {'label': 'Duration',      'value': 'duration'},
                                 {'label': 'Cluster',       'value': 'cluster_id'},
+                                {'label': 'Label',         'value': 'manual_label'},
                                 {'label': 'Channel',       'value': 'channel'},
                                 {'label': 'Microlocation', 'value': 'microlocation'},
                                 {'label': 'Recorder',      'value': 'recorder_type'},
@@ -442,10 +443,9 @@ def create_layout(df):
                                     html.Span("Filter by the time of day.", className="tooltip-text")
                                 ])
                             ], className="label-with-info", style={'marginTop': '1em'}),
-                            dcc.RangeSlider(id='hour-slider', min=int(min_hour), max=int(max_hour) + 1,
+                            dcc.RangeSlider(id='hour-slider', min=0, max=24,
                                             value=[min_hour, max_hour], step=0.5,
-                                            marks={h: f"{int(h):02d}:00" for h in
-                                                   range(int(min_hour), int(max_hour) + 2, 2)}
+                                            marks={h: f"{h:02d}:00" for h in range(0, 25, 6)}
                                             ),
                         ])
                     ], open=True),
@@ -490,14 +490,16 @@ def create_layout(df):
                                 ])
                             ], className="label-with-info", style={'marginTop': '1em'}),
 
-                            dcc.RadioItems(
+                            dcc.Dropdown(
                                 id='color-mode-radio',
                                 options=[
-                                    {'label': 'Clusters', 'value': 'cluster'},
-                                    {'label': 'Manual Labels', 'value': 'manual'}
+                                    {'label': 'Cluster',       'value': 'cluster'},
+                                    {'label': 'Manual Labels', 'value': 'manual'},
                                 ],
                                 value='cluster',
-                                labelStyle={'display': 'inline-block', 'marginRight': '10px'}
+                                clearable=False,
+                                searchable=False,
+                                style={'marginTop': '4px'},
                             ),
 
                             html.Div([
@@ -511,18 +513,48 @@ def create_layout(df):
                             dcc.Checklist(id="all-or-none-cluster", options=[{"label": "Select All", "value": "All"}],
                                           value=["All"], labelStyle={"display": "inline-block"}),
                             html.Div(
-                                id='cluster-list-container',
-                                style={
-                                    'display': 'flex',
-                                    'flexDirection': 'row',
-                                    'flexWrap': 'wrap',
-                                    'gap': '8px',
-                                    'marginTop': '10px',
-                                    'maxHeight': '200px',
-                                    'overflowY': 'auto',
-                                    'alignContent': 'flex-start'
-                                }
+                                    id='cluster-list-container',
+                                    style={
+                                        'display': 'flex',
+                                        'flexDirection': 'column',
+                                        'flexWrap': 'nowrap',
+                                        'gap': '8px',
+                                        'marginTop': '10px',
+                                        'minHeight': '200px',
+                                        'maxHeight': '200px',
+                                        'overflowY': 'auto',
+                                        'alignContent': 'flex-start',
+                                        'width': '100%'
+                                    }
                             ),
+
+                            # Label Filter Section (Option B)
+                            html.Div([
+                                html.Div([
+                                    html.Label("Labels"),
+                                    html.Div(className="tooltip-container", children=[
+                                        html.Span(" ⓘ", className="info-icon"),
+                                        html.Span("Select specific manual labels to display.",
+                                                  className="tooltip-text")
+                                    ])
+                                ], className="label-with-info", style={'marginTop': '1em'}),
+                                dcc.Checklist(id="all-or-none-label", options=[{"label": "Select All", "value": "All"}],
+                                              value=["All"], labelStyle={"display": "inline-block"}),
+                                html.Div(
+                                    id='label-list-container',
+                                    style={
+                                        'display': 'flex',
+                                        'flexDirection': 'column',
+                                        'flexWrap': 'nowrap',
+                                        'gap': '8px',
+                                        'marginTop': '10px',
+                                        'maxHeight': '200px',
+                                        'overflowY': 'auto',
+                                        'alignContent': 'flex-start',
+                                        'width': '100%'
+                                    }
+                                ),
+                            ], id='label-filter-section', style={'display': 'none'}) # Hidden by default
                         ])
                     ], open=True),
 
@@ -897,8 +929,12 @@ def create_layout(df):
         dcc.Store(id='cluster-stats-store'),
         dcc.Store(id='last-preset-load-time', data=0),
         dcc.Store(id='manual-labels-store', data={}),
+        dcc.Store(id='label-color-store', data={}),
+        dcc.Store(id='label-name-store', data={}),
         dcc.Store(id='label-last-action'),
         dcc.Store(id='params-store'),
         dcc.Store(id='table-page-store', data=0),
         dcc.Store(id='table-total-pages-store', data=1),
+        dcc.Store(id='table-sort-store', data={'col': None, 'asc': True}),
+        dcc.Store(id='table-click-data-store', data=None),
     ], id='main-container')

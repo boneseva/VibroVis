@@ -20,7 +20,7 @@ from dash import dcc
 
 import read_data
 import utils
-from .callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, initial_df, MANUAL_LABELS_CACHE
+from callbacks.callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, initial_df, MANUAL_LABELS_CACHE
 
 # Suppress mpg123 decoder warnings (these are non-critical)
 warnings.filterwarnings('ignore', category=UserWarning)

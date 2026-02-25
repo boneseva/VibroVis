@@ -222,6 +222,8 @@ def apply_manual_labels_efficiently(dff):
     # Initialize with Unlabeled
     dff['manual_label'] = 'Unlabeled'
     
+    print(f"DEBUG: apply_manual_labels_efficiently called on {len(dff)} rows with label_map={list(label_map.keys())}")
+    
     # Iterate over labeled files only
     for (loc, micro, f_base, chan), sec_map in label_map.items():
         # Fast filter: channel is usually integer or char
@@ -251,8 +253,10 @@ def apply_manual_labels_efficiently(dff):
              indices = dff.index[mask]
              
              if len(indices) == 0:
+                 # print(f"DEBUG: No matches for group {loc}/{micro}/{f_base} ch{chan}")
                  continue
                  
+             print(f"DEBUG: Found {len(indices)} matches for group {loc}/{micro}/{f_base} ch{chan}")
              # Iterate only the relevant rows
              # This is much faster (e.g. 100 rows vs 700k)
              for idx in indices:
@@ -264,7 +268,8 @@ def apply_manual_labels_efficiently(dff):
                  end_second = math.ceil(row_start + row_dur)
                  
                  found_labels = []
-                 for sec in range(start_second, end_second):
+                 # ADD +1 to include the end_second in the check
+                 for sec in range(start_second, end_second + 1):
                      l = sec_map.get(sec)
                      if l and l != 'Unlabeled':
                          found_labels.append(l)
@@ -273,14 +278,13 @@ def apply_manual_labels_efficiently(dff):
                      # Filter valid (ignore 'Unlabeled' if it snuck in)
                      valid_labels = [l for l in found_labels if l != 'Unlabeled']
                      
-                     # NEW LOGIC: Require >50% overlap
-                     if len(valid_labels) >= (0.5 * row_dur):
-                         # Majority vote
-                         final_label = Counter(valid_labels).most_common(1)[0][0]
-                         dff.at[idx, 'manual_label'] = final_label
-                     else:
-                          # Explicitly Unlabeled if threshold not met
-                          dff.at[idx, 'manual_label'] = 'Unlabeled'
+                     # We relax the strict >50% overlap rule to a simple "any overlap" rule.
+                     # If the user labelled *any* second within this clip's time range, 
+                     # we assign the most frequent label. This prevents labels from disappearing 
+                     # when the clip duration is long or when labelling tightly overlapping clips.
+                     final_label = Counter(valid_labels).most_common(1)[0][0]
+                     dff.at[idx, 'manual_label'] = final_label
+                     # print(f"DEBUG: Applied label '{final_label}' to row {idx}")
                      
         except Exception as e:
             # Fallback or ignore errors in optimization to allow other rows to proceed

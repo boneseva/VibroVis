@@ -153,23 +153,23 @@ def register_filter_callbacks(app):
     def update_hour_slider_configuration(model_ready, current_value, last_preset_time):
         dff = MODEL_DATA_CACHE.get('df')
         if dff is None or dff.empty:
-            return 0, 24, [0, 24], {h: f"{h:02d}:00" for h in range(0, 25, 4)}
+            return 0, 24, [0, 24], {h: f"{h:02d}:00" for h in range(0, 25, 6)}
 
         min_val = dff['start_hour_float'].min()
         max_val = dff['start_hour_float'].max()
         if pd.isna(min_val) or pd.isna(max_val):
-            return 0, 24, [0, 24], {h: f"{h:02d}:00" for h in range(0, 25, 4)}
+            return 0, 24, [0, 24], {h: f"{h:02d}:00" for h in range(0, 25, 6)}
 
         min_h = int(min_val);
         max_h = int(max_val) + 1
         duration = max_h - min_h
-        tick_step = 4
+        tick_step = 6
         if duration <= 6:
-            tick_step = 1
-        elif duration <= 12:
             tick_step = 2
-        elif duration <= 18:
+        elif duration <= 12:
             tick_step = 3
+        elif duration <= 18:
+            tick_step = 4
 
         marks = {h: f"{int(h):02d}:00" for h in range(min_h, max_h + 1, tick_step)}
 
