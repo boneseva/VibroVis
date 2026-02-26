@@ -72,7 +72,7 @@ def register_filter_callbacks(app):
         if is_preset_active:
             return options, dash.no_update
 
-        return options, []
+        return options, micros
 
     @app.callback(
         [Output('recorder-type-dropdown', 'options', allow_duplicate=True),
@@ -88,7 +88,9 @@ def register_filter_callbacks(app):
         if dff is None or dff.empty: return [], []
 
         mask = pd.Series(True, index=dff.index)
-        if selected_microlocation:
+        if selected_microlocation is not None:
+            if not selected_microlocation: # Empty list
+                return [], []
             mask &= dff['microlocation'].isin(selected_microlocation)
         if not mask.any(): return [], []
 
@@ -100,7 +102,7 @@ def register_filter_callbacks(app):
         if is_preset_active:
             return options, dash.no_update
 
-        return options, []
+        return options, recorders
 
     @app.callback(
         [Output('channel-checklist', 'options', allow_duplicate=True),

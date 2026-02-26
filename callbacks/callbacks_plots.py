@@ -240,11 +240,17 @@ def register_plot_callbacks(app):
              if 'cluster_num' in dff_base.columns:
                  mask &= (dff_base['cluster_num'] == active_k)
 
-        if selected_microlocations:
-            mask &= dff_base['microlocation'].isin(selected_microlocations)
+        if selected_microlocations is not None:
+            if not selected_microlocations:  # Empty list selected
+                 mask &= False
+            else:
+                 mask &= dff_base['microlocation'].isin(selected_microlocations)
 
         if selected_recorders is not None:
-            mask &= dff_base['recorder_type'].isin(selected_recorders) if selected_recorders else pd.Series(True, index=dff_base.index)
+            if not selected_recorders: # Empty list selected
+                 mask &= False
+            else:
+                 mask &= dff_base['recorder_type'].isin(selected_recorders)
 
         if selected_channels is not None:
             mask &= dff_base['channel'].isin(selected_channels) if selected_channels else pd.Series(True, index=dff_base.index)
