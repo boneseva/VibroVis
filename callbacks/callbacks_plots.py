@@ -14,8 +14,8 @@ import pandas as pd
 import uuid
 
 import utils
-import utils
-from .callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, server_cache, initial_df, CLUSTER_COLORS, MANUAL_LABELS_CACHE, apply_manual_labels_efficiently
+from callbacks.callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, server_cache, initial_df, CLUSTER_COLORS, MANUAL_LABELS_CACHE
+from utils import apply_manual_labels_efficiently
 
 # Performance profiling
 ENABLE_PROFILING = False
@@ -54,7 +54,7 @@ def register_plot_callbacks(app):
 
 
     @app.callback(
-         Output('scatter', 'figure'),
+        [Output('scatter', 'figure'),
          Output('filtered-data', 'data'),
          Output('clip-count-max-store', 'data'),
          Output('merge-max-store', 'data'),
@@ -62,45 +62,70 @@ def register_plot_callbacks(app):
          Output('anim-ranges-store', 'data'),
          Output('sampling-info-display', 'children'),
          Output('cluster-stats-store', 'data'),
-         Output('scatter', 'clickData'),
+         Output('scatter', 'clickData')],
         [Input('model-data-ready-signal', 'data'),
          Input('channel-checklist', 'value'),
          Input('num-cluster-dropdown', 'value'),
          Input({'type': 'cluster-checkbox', 'index': ALL}, 'value'),
          Input('cluster-color-store', 'data'),
+         Input('cluster-name-store', 'data'),
          Input('date-dropdown', 'data'),
          Input('hour-slider', 'value'),
          Input('max-points', 'value'),
-
          Input('merge-switch', 'on'),
          Input('merge-threshold', 'value'),
          Input('clip-count-threshold', 'value'),
          Input('microlocation-dropdown', 'value'),
          Input('recorder-type-dropdown', 'value'),
          Input('color-mode-radio', 'value'),
-         Input('manual-labels-store', 'data')],
+         Input('manual-labels-store', 'data'),
+         Input('label-color-store', 'data'),
+         Input('label-name-store', 'data'),
+         Input({'type': 'label-checkbox', 'index': ALL}, 'value')],
         [State('scatter', 'figure'),
          State('params-store', 'data'),
          State('location-dropdown', 'value'),
          State('last-preset-load-time', 'data'),
-         State({'type': 'cluster-checkbox', 'index': ALL}, 'id')],
-        prevent_initial_call=True
+         State({'type': 'cluster-checkbox', 'index': ALL}, 'id'),
+         State({'type': 'label-checkbox', 'index': ALL}, 'id')],
+        prevent_initial_call=False
     )
-    def update_figure(*args):
-        try:
-            return _update_figure_impl(*args)
-        except Exception:
-            traceback.print_exc()
-            return (no_update,) * 9
-
-    def _update_figure_impl(model_ready_signal, selected_channels, selected_num_clusters,
-                      cluster_checkbox_values, cluster_colors_data,
+    def update_figure(model_ready_signal, selected_channels, selected_num_clusters,
+                      cluster_checkbox_values, cluster_colors_data, cluster_names_data,
                       selected_dates, hour_range, max_points, merge_on, merge_threshold,
                       clip_count_threshold,
                       selected_microlocations, selected_recorders, 
-                      color_mode, manual_labels_trigger,
+                      color_mode, manual_labels_trigger, label_colors_data, label_names_data,
+                      label_checkbox_values,
                       current_figure_state, stored_indices,
-                      selected_location, last_preset_time, cluster_checkbox_ids):
+                      selected_location, last_preset_time, cluster_checkbox_ids,
+                      label_checkbox_ids):
+        try:
+            return _update_figure_impl(model_ready_signal, selected_channels, selected_num_clusters,
+                      cluster_checkbox_values, cluster_colors_data, cluster_names_data,
+                      selected_dates, hour_range, max_points, merge_on, merge_threshold,
+                      clip_count_threshold,
+                      selected_microlocations, selected_recorders, 
+                      color_mode, manual_labels_trigger, label_colors_data, label_names_data,
+                      label_checkbox_values,
+                      current_figure_state, stored_indices,
+                      selected_location, last_preset_time, cluster_checkbox_ids,
+                      label_checkbox_ids)
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            return (dash.no_update,) * 9
+
+    def _update_figure_impl(model_ready_signal, selected_channels, selected_num_clusters,
+                      cluster_checkbox_values, cluster_colors_data, cluster_names_data,
+                      selected_dates, hour_range, max_points, merge_on, merge_threshold,
+                      clip_count_threshold,
+                      selected_microlocations, selected_recorders, 
+                      color_mode, manual_labels_trigger, label_colors_data, label_names_data,
+                      label_checkbox_values,
+                      current_figure_state, stored_indices,
+                      selected_location, last_preset_time, cluster_checkbox_ids,
+                      label_checkbox_ids):
 
         t_start = time.time() if ENABLE_PROFILING else None
         t_checkpoint = {}
@@ -140,7 +165,8 @@ def register_plot_callbacks(app):
                 )
                 fig.update_xaxes(visible=False);
                 fig.update_yaxes(visible=False)
-                return fig, None, 1, 100, [], None, "", {}, None
+                msg = "Loading data..."
+                return fig, None, 1, 100, [], None, msg, {'total': 0}, None
 
         if dff_raw is None:
             fig = go.Figure()
@@ -151,21 +177,26 @@ def register_plot_callbacks(app):
             )
             fig.update_xaxes(visible=False);
             fig.update_yaxes(visible=False)
-            return fig, None, 1, 100, [], None, "", {}, None
+            msg = "Select a model and location to begin."
+            return fig, None, 1, 100, [], None, msg, {'total': 0}, None
 
         is_preset_active = last_preset_time and (time.time() - last_preset_time < 6.0)
         should_force_defaults = is_fresh_load and not is_preset_active
 
         if should_force_defaults:
-            selected_channels = []
-            selected_num_clusters = None
-            selected_microlocations = []
-            selected_recorders = []
-            selected_dates = []
+            # When forcing defaults (fresh load), we want to show ALL data initially
+            # unless restricted by dropdown defaults.
+            # Empty list here usually means "unfiltered" in our mask logic below if we handle it right.
+            selected_channels = None # None = All
+            selected_num_clusters = None # Pick first available K later
+            selected_microlocations = None
+            selected_recorders = None
+            selected_dates = None
             hour_range = None
             clip_count_threshold = 1
             cluster_checkbox_values = []
             stored_indices = None
+            print("DEBUG: forcing defaults for fresh load")
 
         if is_fresh_load:
             stored_indices = None
@@ -209,14 +240,20 @@ def register_plot_callbacks(app):
              if 'cluster_num' in dff_base.columns:
                  mask &= (dff_base['cluster_num'] == active_k)
 
-        if selected_microlocations:
-            mask &= dff_base['microlocation'].isin(selected_microlocations)
+        if selected_microlocations is not None:
+            if not selected_microlocations:  # Empty list selected
+                 mask &= False
+            else:
+                 mask &= dff_base['microlocation'].isin(selected_microlocations)
 
-        if selected_recorders:
-            mask &= dff_base['recorder_type'].isin(selected_recorders)
+        if selected_recorders is not None:
+            if not selected_recorders: # Empty list selected
+                 mask &= False
+            else:
+                 mask &= dff_base['recorder_type'].isin(selected_recorders)
 
-        if selected_channels:
-            mask &= dff_base['channel'].isin(selected_channels)
+        if selected_channels is not None:
+            mask &= dff_base['channel'].isin(selected_channels) if selected_channels else pd.Series(True, index=dff_base.index)
 
         if selected_dates:
             if 'day_dt_str' in dff_base.columns:
@@ -280,51 +317,53 @@ def register_plot_callbacks(app):
         dff_sampled = dff_macro
         new_indices_to_store = dash.no_update
 
-        # Calculate cluster stats for percentages
-        cluster_stats = {}
+        # Calculate comprehensive statistics for both Cluster and Label lists
+        cluster_stats = {'total': int(total_clips_available) if not dff_macro.empty else 0}
         if not dff_macro.empty:
-            total_filtered_clips = dff_macro['clip_count'].sum()
-            
-            # Use 'color_col_content' if it exists (which we create later, but need here for stats)
-            # Actually we need to determine the grouping column based on mode *before* this point
-            # But 'color_mode' input is available.
-            
-            group_col = 'cluster_id' 
-            is_manual_mode = (color_mode == 'manual')
-            
-            # Always compute manual labels if cache is not empty, for sampling priority
-            has_manual_labels = bool(MANUAL_LABELS_CACHE)
-            
-            # CRITICAL FIX: If is_manual_mode is True, we MUST return a df with 'manual_label' column
-            # even if the cache is empty. apply_manual_labels_efficiently handles empty cache by 
-            # setting everything to 'Unlabeled'.
-            if has_manual_labels or is_manual_mode:
-                 # Use optimized helper
-                 dff_macro = dff_macro.copy() # Avoid SettingWithCopy
-                 
-                 # Ensure duration exists
-                 if 'clip_duration' not in dff_macro.columns:
-                     dff_macro['clip_duration'] = 5.0
+             # Always ensure we have labels for stats if possible (needed for Labels sidebar percentage)
+             dff_for_stats = dff_macro.copy()
+             if 'clip_duration' not in dff_for_stats.columns: dff_for_stats['clip_duration'] = 5.0
+             dff_for_stats = apply_manual_labels_efficiently(dff_for_stats)
+             
+             # 1. Cluster Stats
+             if 'cluster_id' in dff_for_stats.columns:
+                 c_counts = dff_for_stats.groupby('cluster_id')['clip_count'].sum().to_dict()
+                 for cid, count in c_counts.items():
+                     cluster_stats[str(cid)] = int(count)
+             
+             # 2. Label Stats
+             if 'manual_label' in dff_for_stats.columns:
+                 l_counts = dff_for_stats.groupby('manual_label')['clip_count'].sum().to_dict()
+                 for lbl, count in l_counts.items():
+                     cluster_stats[str(lbl)] = int(count)
 
-                 dff_macro = apply_manual_labels_efficiently(dff_macro)
-
-            if is_manual_mode:
-                group_col = 'manual_label'
-            else:
-                group_col = 'cluster_id'
+        group_col = 'cluster_id' 
+        is_manual_mode = (color_mode == 'manual')
+        
+        # Always compute manual labels if cache is not empty, for sampling priority
+        has_manual_labels = bool(MANUAL_LABELS_CACHE)
             
-            stats_series = dff_macro.groupby(group_col)['clip_count'].sum()
-            cluster_stats = stats_series.to_dict()
-            # Convert keys to string to ensure JSON compatibility and matching
-            cluster_stats = stats_series.to_dict()
-            # Convert keys to string to ensure JSON compatibility and matching
+        # CRITICAL FIX: If is_manual_mode is True, we MUST return a df with 'manual_label' column
+        # even if the cache is empty. apply_manual_labels_efficiently handles empty cache by 
+        # setting everything to 'Unlabeled'.
+        if has_manual_labels or is_manual_mode:
+             # Use optimized helper
+             dff_macro = dff_macro.copy() # Avoid SettingWithCopy
+             
+             # Ensure duration exists
+             if 'clip_duration' not in dff_macro.columns:
+                 dff_macro['clip_duration'] = 5.0
+
+             dff_macro = apply_manual_labels_efficiently(dff_macro)
+
+        if is_manual_mode:
+            group_col = 'manual_label'
+        else:
+            group_col = 'cluster_id'
+        
+        # Ensure cluster_stats keys are strings for JSON compatibility
+        if cluster_stats:
             cluster_stats = {str(k): int(v) for k, v in cluster_stats.items()}
-            
-            # Calculate total for percentage (excluding Unlabeled if manual mode)
-            if is_manual_mode:
-                cluster_stats['total'] = sum(v for k, v in cluster_stats.items() if k != 'Unlabeled')
-            else:
-                 cluster_stats['total'] = int(total_filtered_clips)
         else:
             cluster_stats = {'total': 0}
 
@@ -453,6 +492,13 @@ def register_plot_callbacks(app):
                     except:
                         pass
         
+        # Prepare selected_labels set
+        selected_labels = set()
+        if label_checkbox_values and label_checkbox_ids:
+            for val, id_dict in zip(label_checkbox_values, label_checkbox_ids):
+                if val and 'on' in val:
+                    selected_labels.add(str(id_dict['index']))
+        
         # FIX RACE CONDITION:
         # If Manual Mode, and we have labels in the cache that are NOT in ui_known_labels,
         # it implies they are NEW labels created by `save_manual_label` but `render_cluster_controls` 
@@ -465,30 +511,32 @@ def register_plot_callbacks(app):
             for missing_lbl in missing_from_ui:
                  selected_clusters.add(str(missing_lbl))
 
-        has_checkbox_inputs = bool(cluster_checkbox_ids) or (is_manual_mode and bool(MANUAL_LABELS_CACHE))
+        has_checkbox_inputs = bool(cluster_checkbox_ids) or bool(label_checkbox_ids) or (is_manual_mode and bool(MANUAL_LABELS_CACHE))
+        
+        # DEFENSIVE CHECK: On first load or sync, if selected_clusters is empty but checkboxes EXIST,
+        # it might be a race condition. Skip filtering unless it's a confirmed click.
+        do_filter = has_checkbox_inputs and not should_force_defaults
+        if do_filter and not selected_clusters and not selected_labels:
+            if not is_cluster_checkbox_click: # Only skip if not an explicit interaction
+                do_filter = False
 
+        if do_filter:
+            # ALWAYS apply visibility filters based on current checkbox state (Option B Decoupling)
+            if not dff_sampled.empty:
+                # 1. Filter by Cluster (Always applicable)
+                if 'cluster_id' in dff_sampled.columns:
+                    dff_sampled = dff_sampled[dff_sampled['cluster_id'].astype(str).isin(selected_clusters)]
+                
+                # 2. Filter by Label (Applicable if label checkboxes exist)
+                if label_checkbox_ids:
+                    # Ensure manual_label column exists
+                    if 'manual_label' not in dff_sampled.columns:
+                        if 'clip_duration' not in dff_sampled.columns: dff_sampled['clip_duration'] = 5.0
+                        dff_sampled = apply_manual_labels_efficiently(dff_sampled)
+                    dff_sampled = dff_sampled[dff_sampled['manual_label'].isin(selected_labels)]
 
-
-        if has_checkbox_inputs and not should_force_defaults:
-            should_apply_checkbox_filter = is_cluster_checkbox_click or is_preset_active
-
-            if should_apply_checkbox_filter:
-                if not dff_sampled.empty:
-                    # Only apply post-filter for Manual Mode (labels don't exist in pre-merge)
-                    # Cluster Mode is handled by Pre-Merge mask aka "Filter First"
-                    if is_manual_mode:
-                        # Ensure manual_label column exists in dff_sampled
-                        if 'manual_label' not in dff_sampled.columns:
-                            if 'clip_duration' not in dff_sampled.columns: dff_sampled['clip_duration'] = 5.0
-                            dff_sampled = apply_manual_labels_efficiently(dff_sampled)
-                        
-                        # Filter using the string labels
-                        # selected_clusters contains strings here
-                        dff_sampled = dff_sampled[dff_sampled['manual_label'].isin(selected_clusters)]
-
+        # Calculate Visibility Stats AFTER final filters
         clips_visible = dff_sampled['clip_count'].sum() if not dff_sampled.empty else 0
-        clips_sampled = dff_sampled['clip_count'].sum() if not dff_sampled.empty else 0
-
         if total_clips_available > 0:
             sampling_text = f"Visible: {int(clips_visible):,} | Filtered: {int(total_clips_available):,} | Total: {int(total_clips_at_location):,}"
         else:
@@ -514,7 +562,7 @@ def register_plot_callbacks(app):
             else:
                 fig.update_xaxes(visible=False);
                 fig.update_yaxes(visible=False)
-            return fig, None, 1, max_distance, new_indices_to_store, None, "", cluster_stats, None
+            return fig, None, 1, max_distance, new_indices_to_store, None, sampling_text, cluster_stats, None
 
         t_last = checkpoint('sampling') or t_last
         dff = dff_sampled.reset_index(drop=True).copy()
@@ -558,40 +606,46 @@ def register_plot_callbacks(app):
             dff = apply_manual_labels_efficiently(dff)
             color_col = 'manual_label'
             
-            # To ensure consistent coloring with the UI list, we must use the same matching logic
-            # as in callbacks_clusters.py. 
-            # Logic: Hash-based assignment.
+        if is_manual_mode:
+            # Priority: 1. label_colors_data (Store), 2. cluster_colors_data (Seed), 3. Hash
             
-            # Map each label to its color using hash
+            # Seed from clusters if available
+            label_seed_colors = {}
+            if cluster_colors_data:
+                tmp = dff[['cluster_id_str', 'manual_label']].drop_duplicates()
+                for _, row in tmp.iterrows():
+                    cid = row['cluster_id_str']
+                    lbl = row['manual_label']
+                    if cid in cluster_colors_data and lbl not in label_seed_colors:
+                        label_seed_colors[lbl] = cluster_colors_data[cid]
+
             unique_labels = sorted(dff['manual_label'].unique())
-
             for lbl in unique_labels:
-                 if lbl == 'Unlabeled':
-                     final_color_map[lbl] = '#dddddd' # Grey for unlabeled
-                 elif cluster_colors_data and lbl in cluster_colors_data:
-                     # Use the color from the store
-                     final_color_map[lbl] = cluster_colors_data[lbl]
-                 else:
-                     # Use hash-based color assignment
-                     lbl_str = str(lbl)
-                     hash_val = int(hashlib.md5(lbl_str.encode('utf-8')).hexdigest(), 16)
-                     final_color_map[lbl] = CLUSTER_COLORS[hash_val % len(CLUSTER_COLORS)]
-
-
+                lbl_str = str(lbl)
+                if lbl == 'Unlabeled':
+                    final_color_map[lbl_str] = '#dddddd'
+                elif label_colors_data and lbl_str in label_colors_data:
+                    final_color_map[lbl_str] = label_colors_data[lbl_str]
+                elif lbl in label_seed_colors:
+                    final_color_map[lbl_str] = label_seed_colors[lbl]
+                else:
+                    hash_val = int(hashlib.md5(lbl_str.encode('utf-8')).hexdigest(), 16)
+                    final_color_map[lbl_str] = CLUSTER_COLORS[hash_val % len(CLUSTER_COLORS)]
         else:
-             unique_clusters = sorted(dff['cluster_id'].unique())
-             for i, c in enumerate(unique_clusters):
-                 c_str = str(c)
-                 if cluster_colors_data and c_str in cluster_colors_data:
-                     final_color_map[c_str] = cluster_colors_data[c_str]
-                 else:
-                     # Safe color assignment: use integer value if possible, else use enumeration index
-                     try:
-                         color_idx = int(c)
-                     except:
-                         color_idx = i
-                     final_color_map[c_str] = CLUSTER_COLORS[color_idx % len(CLUSTER_COLORS)]
-        
+            # Cluster mode color mapping
+            # Priority: 1. cluster_colors_data (Store), 2. Default color logic
+            unique_clusters = sorted(dff['cluster_id'].unique())
+            for i, c in enumerate(unique_clusters):
+                c_str = str(c)
+                if cluster_colors_data and c_str in cluster_colors_data:
+                    final_color_map[c_str] = cluster_colors_data[c_str]
+                else:
+                    try:
+                        color_idx = int(c)
+                    except:
+                        color_idx = i
+                    final_color_map[c_str] = CLUSTER_COLORS[color_idx % len(CLUSTER_COLORS)]
+
         dff['color_col_content'] = dff[color_col] if color_col in dff else 'Unlabeled'
         t_last = checkpoint('color_map') or t_last
         
@@ -602,16 +656,7 @@ def register_plot_callbacks(app):
         if has_checkbox_inputs and not should_force_defaults:
              should_apply_checkbox_filter = True 
 
-             if should_apply_checkbox_filter:
-                 if not dff.empty:
-                      if is_manual_mode:
-                           # Ensure labels exist 
-                           if 'manual_label' in dff.columns:
-                               dff = dff[dff['manual_label'].isin(selected_clusters)]
-                      else:
-                           # Cluster ID filtering
-                           if 'cluster_id' in dff.columns:
-                               dff = dff[dff['cluster_id'].astype(str).isin(selected_clusters)]
+        # Visibility filtering is now handled at the early dff_sampled stage to ensure accurate 'Visible' stats.
         
         # REORDERING FOR Z-INDEX:
         # We want labeled points to be rendered ON TOP of Unlabeled ones.
@@ -635,26 +680,34 @@ def register_plot_callbacks(app):
         
         label_name = 'Label' if is_manual_mode else 'Cluster'
         
-        fig.add_trace(go.Scattergl(
-            x=dff['x'], 
-            y=dff['y'],
-            mode='markers',
-            marker=dict(
-                size=dff['marker_size'],
-                color=dff['mapped_color'],
-                sizemode='diameter',
-                sizeref=1,
-                opacity=1.0 # explicit opacity to avoid template issues
-            ),
-            customdata=dff[["color_col_content", "row_idx", "plot_id", "start_hour_float", "day_int", "clip_count", "file_name", "clip_time", "channel", "date_time_str"]].to_numpy(),
-            hovertemplate=f'<b>{label_name}:</b> %{{customdata[0]}}<br>' +
-                         '<b>File:</b> %{customdata[6]}<br>' +
-                         '<b>Clip Count:</b> %{customdata[5]}<br>' +
-                         '<b>Time:</b> %{customdata[7]:.2f}s<br>' +
-                         '<b>Date & Time:</b> %{customdata[9]}<br>' +
-                         '<b>Channel:</b> %{customdata[8]}<extra></extra>',
-            name=""
-        ))
+        # Legend support: one trace per color category
+        if not dff.empty:
+            unique_groups = sorted(dff[color_col].unique())
+            for group in unique_groups:
+                gp_df = dff[dff[color_col] == group]
+                if gp_df.empty: continue
+                
+                fig.add_trace(go.Scattergl(
+                    x=gp_df['x'], 
+                    y=gp_df['y'],
+                    mode='markers',
+                    marker=dict(
+                        size=gp_df['marker_size'],
+                        color=gp_df['mapped_color'],
+                        sizemode='diameter',
+                        sizeref=1,
+                        opacity=1.0
+                    ),
+                    customdata=gp_df[["color_col_content", "row_idx", "plot_id", "start_hour_float", "day_int", "clip_count", "file_name", "clip_time", "channel", "date_time_str"]].to_numpy(),
+                    hovertemplate=f'<b>{label_name}:</b> %{{customdata[0]}}<br>' +
+                                 '<b>File:</b> %{customdata[6]}<br>' +
+                                 '<b>Clip Count:</b> %{customdata[5]}<br>' +
+                                 '<b>Time:</b> %{customdata[7]:.2f}s<br>' +
+                                 '<b>Date & Time:</b> %{customdata[9]}<br>' +
+                                 '<b>Channel:</b> %{customdata[8]}<extra></extra>',
+                    name=str(group),
+                    showlegend=True
+                ))
 
         fig.update_layout(showlegend=False, margin=dict(l=5, r=5, t=5, b=5),
                           paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
@@ -884,7 +937,7 @@ def register_plot_callbacks(app):
         ))
 
         fig.update_layout(
-            margin=dict(l=40, r=10, t=10, b=30),
+            margin=dict(l=40, r=10, t=10, b=0),
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
             xaxis=dict(title="Time (s)", showgrid=False),
@@ -973,12 +1026,29 @@ def register_plot_callbacks(app):
          Input('histogram-type-dropdown', 'value'),
          Input('histogram-time-scale-store', 'data'),
          Input('cluster-color-store', 'data'),
+         Input('label-color-store', 'data'),
+         Input('label-name-store', 'data'),
          Input('color-mode-radio', 'value'),
+         Input('table-click-data-store', 'data'),
          State('filtered-data', 'data')])
-    def show_histogram_for_clicked_cluster(clickData, hist_type, time_scale, cluster_colors, color_mode, filtered_data_cache_key):
+    def show_histogram_for_clicked_cluster(clickData, hist_type, time_scale, cluster_colors, label_colors, label_names, color_mode,
+                                           table_click_data, filtered_data_cache_key):
         print("\n--- HISTOGRAM CALLBACK TRIGGERED ---")
+
+        # Determine the effective clickData source
+        triggered = dash.callback_context.triggered
+        triggered_id = triggered[0]['prop_id'].split('.')[0] if triggered else ''
+        if triggered_id == 'table-click-data-store' and table_click_data:
+            effective_click = table_click_data
+        elif clickData:
+            effective_click = clickData
+        elif table_click_data:
+            effective_click = table_click_data
+        else:
+            effective_click = None
+
         try:
-            if not clickData or not filtered_data_cache_key:
+            if not effective_click or not filtered_data_cache_key:
                 print("Abort Histogram: No clickData or cache key")
                 fig = go.Figure()
                 title = "Time of Day" if time_scale == 'daily' else "Week of Year"
@@ -1001,7 +1071,7 @@ def register_plot_callbacks(app):
             is_manual = (color_mode == 'manual')
             
             if is_manual:
-                 clicked_label = str(clickData["points"][0]["customdata"][0])
+                 clicked_label = str(effective_click["points"][0]["customdata"][0])
                  
                  if 'manual_label' not in dff.columns:
                      if 'clip_duration' not in dff.columns: dff['clip_duration'] = 5.0
@@ -1011,7 +1081,7 @@ def register_plot_callbacks(app):
                  target_id_for_color = clicked_label
                  
             else:
-                cluster_id = str(clickData["points"][0]["customdata"][0])
+                cluster_id = str(effective_click["points"][0]["customdata"][0])
                 if 'cluster_id_str' in dff.columns:
                     cluster_df = dff[dff['cluster_id_str'] == cluster_id].copy()
                 else:
@@ -1019,9 +1089,16 @@ def register_plot_callbacks(app):
                 target_id_for_color = cluster_id
 
             bar_color = '#CCCCCC'
-            if cluster_colors and target_id_for_color in cluster_colors:
-                bar_color = cluster_colors[target_id_for_color]
+            if is_manual:
+                if label_colors and target_id_for_color in label_colors:
+                    bar_color = label_colors[target_id_for_color]
+                elif cluster_colors and target_id_for_color in cluster_colors:
+                    bar_color = cluster_colors[target_id_for_color]
             else:
+                if cluster_colors and target_id_for_color in cluster_colors:
+                    bar_color = cluster_colors[target_id_for_color]
+            
+            if bar_color == '#CCCCCC':
                 try:
                     if is_manual:
                          all_known_labels = sorted(set(MANUAL_LABELS_CACHE.values()))
@@ -1158,10 +1235,15 @@ def register_plot_callbacks(app):
                  start_second = math.floor(start_time)
                  end_second = math.ceil(start_time + duration)
                  
-                 for sec in range(start_second, end_second):
-                     # Key: (Location, Micro, Basename, Chan, Sec)
+                 print(f"DEBUG: Saving label '{label_val}' for seconds {start_second} to {end_second} of {file_basename}")
+                 # ADD +1 to include the end_second in the range!
+                 for sec in range(start_second, end_second + 1):
+                     # Key: (Loc, Micro, Basename, Chan, Sec)
                      key = (loc, micro, file_basename, channel, sec)
                      MANUAL_LABELS_CACHE[key] = label_val
+                 
+                 # Optional: Log the total cache size
+                 print(f"DEBUG: MANUAL_LABELS_CACHE total keys: {len(MANUAL_LABELS_CACHE)}")
                  
                  # Return timestamp to trigger update
                  return str(time.time()), f"Saved: {label_val}", label_val

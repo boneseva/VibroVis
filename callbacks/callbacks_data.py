@@ -20,7 +20,7 @@ from dash import dcc
 
 import read_data
 import utils
-from .callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, initial_df, MANUAL_LABELS_CACHE
+from callbacks.callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, initial_df, MANUAL_LABELS_CACHE
 
 # Suppress mpg123 decoder warnings (these are non-critical)
 warnings.filterwarnings('ignore', category=UserWarning)
@@ -228,11 +228,17 @@ def register_data_callbacks(app):
             except:
                 pass
 
-        if selected_microlocations:
-            mask &= dff_base['microlocation'].isin(selected_microlocations)
+        if selected_microlocations is not None:
+            if not selected_microlocations:
+                mask &= False
+            else:
+                mask &= dff_base['microlocation'].isin(selected_microlocations)
 
-        if selected_recorders:
-            mask &= dff_base['recorder_type'].isin(selected_recorders)
+        if selected_recorders is not None:
+            if not selected_recorders:
+                mask &= False
+            else:
+                mask &= dff_base['recorder_type'].isin(selected_recorders)
 
         if selected_channels:
             mask &= dff_base['channel'].isin(selected_channels)

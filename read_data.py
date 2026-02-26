@@ -5,12 +5,16 @@ import ast
 import pandas as pd
 from tqdm import tqdm
 
+# Hardcoded data directory as requested
 BASE_DATA_DIR = "data"
+BASE_DATA_DIR = "data_multimon"
 
 DATA_DIR = os.path.abspath(os.path.join(BASE_DATA_DIR, "mp3"))
 OVERVIEW_TSV = os.path.join(BASE_DATA_DIR, "Rok_spring_summer.tsv")
 SAVE_PATH = os.path.join(BASE_DATA_DIR, "cache", "final_data.parquet")
 LABELS_SAVE_PATH = pathlib.Path(os.path.join(BASE_DATA_DIR, "cache", "saved_labels.parquet"))
+
+OVERVIEW_TSV = os.path.join(BASE_DATA_DIR, "zabe+hyla.tsv")
 
 # DEBUG: DIAGNOSE DATA PATHS
 print("--- DEBUG: DATA PATH DIAGNOSTICS ---")
@@ -31,14 +35,14 @@ print("------------------------------------")
 
 # Load the overview TSV as reference (if it exists, to avoid import-time crash)
 if os.path.exists(OVERVIEW_TSV):
-    wav_meta = pd.read_csv(OVERVIEW_TSV, sep='\t')
+    wav_meta = pd.read_csv(OVERVIEW_TSV, sep='\t', dtype={6: str})
     wav_meta['wav_file'] = wav_meta['wav_file'].apply(os.path.normpath)
 else:
     wav_meta = pd.DataFrame()
     # print(f"WARNING: Overview file not found at {OVERVIEW_TSV}")
 
 
-def load_positions_tsv_optimized(wav_meta, data_dir, save_path=SAVE_PATH):
+def load_positions_tsv_optimized(wav_meta=OVERVIEW_TSV, data_dir=DATA_DIR, save_path=SAVE_PATH):
     """
     Optimized data loading function.
     - Gathers all file paths first.
@@ -48,8 +52,10 @@ def load_positions_tsv_optimized(wav_meta, data_dir, save_path=SAVE_PATH):
     """
     all_files_to_process = []
 
+    wav_meta = pd.read_csv(wav_meta, sep='\t', dtype={6: str})
+
     # 1. Collect all file paths and their associated metadata first
-    for idx, row in wav_meta.iterrows():
+    for idx, row in tqdm(wav_meta.iterrows(), total=len(wav_meta)):
         wav_path = row['wav_file'].replace("\\", "/")
         positions_dir = os.path.join(os.path.dirname(wav_path), 'positions')
         base_name = os.path.splitext(os.path.basename(wav_path))[0]
@@ -83,7 +89,7 @@ def load_positions_tsv_optimized(wav_meta, data_dir, save_path=SAVE_PATH):
             dff[key] = value
 
         # Add cluster number from the filename
-        c = file_info['file_name'].split('.')[-3].split('_')[-1]
+        c = file_info['file_name'].split('.')[-2].split('_')[-1]
         dff['cluster_num'] = int(c) if c.isnumeric() else 10
 
         df_list.append(dff)
@@ -140,6 +146,7 @@ def load_positions_tsv_optimized(wav_meta, data_dir, save_path=SAVE_PATH):
 
     return df
 
+
 def get_initial_data_for_layout():
     """
     Loads only the columns necessary to build the initial UI layout.
@@ -165,3 +172,6 @@ def get_initial_data_for_layout():
         # Error reading initial data from Parquet file: {e}
         # Return an empty df on error to prevent app crash
         return pd.DataFrame({col: [] for col in cols_to_load})
+
+if __name__ == '__main__':
+    load_positions_tsv_optimized()

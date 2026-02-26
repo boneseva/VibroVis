@@ -19,16 +19,64 @@ body {
     display: flex;
 }
 
+/* === Simple Tab Pane Show/Hide === */
+.view-pane {
+    display: none;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.view-pane--active {
+    display: flex;
+}
+
+/* === Tab Bar === */
+#view-tab-bar {
+    display: flex;
+    align-items: center;
+    border-bottom: 2px solid #e0e0e0;
+    margin-bottom: 10px;
+    flex-shrink: 0;
+    position: relative;
+}
+
+.view-tab-btn {
+    background: transparent;
+    border: none;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+    padding: 6px 18px;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 0.95em;
+    color: #666;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.view-tab-btn:hover {
+    color: #333;
+}
+
+.view-tab-btn--active {
+    color: #2a3f5f;
+    border-bottom-color: #2a3f5f;
+    font-weight: 600;
+}
+
 /* === HORIZONTAL LAYOUT (Main Panels) === */
 #scatter-audio-container {
     flex: 1;
-    min-width: 0; /* Prevents overflow in flex items */
+    min-width: 0;
     display: flex;
     flex-direction: column;
     background: #fff;
     box-shadow: 2px 0 8px #eee;
     position: relative;
     padding: 1rem;
+    height: 100vh;
+    overflow: hidden;
 }
 
 #filter-container {
@@ -74,8 +122,8 @@ body {
 
 #audio-spectrogram-container {
     flex-shrink: 0;
-    height: 260px;
-    margin-bottom: 1em;
+    height: 300px;
+    margin-bottom: 0;
     display: flex;
     flex-direction: column;
 }
@@ -203,7 +251,7 @@ body {
     margin-bottom: 15px;
 }
 
-.spectrogram-row > *:nth-child(2) {
+.spectrogram-row>*:nth-child(2) {
     flex: 1;
     margin: 0 10px;
 }
@@ -266,14 +314,17 @@ body {
     border-left-color: #333;
 }
 
-/* === Cluster List Fixes === */
+/* === Cluster & Label List Fixes === */
 #cluster-list-container .dash-checklist label,
-#cluster-list-container .dash-checklist .dash-checkbox {
+#cluster-list-container .dash-checklist .dash-checkbox,
+#label-list-container .dash-checklist label,
+#label-list-container .dash-checklist .dash-checkbox {
     padding: 0 !important;
     margin: 0 !important;
 }
 
-#cluster-list-container input[type="color"] {
+#cluster-list-container input[type="color"],
+#label-list-container input[type="color"] {
     -webkit-appearance: none;
     appearance: none;
     width: 20px !important;
@@ -287,16 +338,17 @@ body {
     flex-shrink: 0;
 }
 
-#cluster-list-container input[type="color"]::-webkit-color-swatch-wrapper {
+#cluster-list-container input[type="color"]::-webkit-color-swatch-wrapper,
+#label-list-container input[type="color"]::-webkit-color-swatch-wrapper {
     padding: 0;
 }
 
-#cluster-list-container input[type="color"]::-webkit-color-swatch {
+#cluster-list-container input[type="color"]::-webkit-color-swatch,
+#label-list-container input[type="color"]::-webkit-color-swatch {
     border: none;
     border-radius: 2px;
 }
 
-/* === Guide / Misc === */
 .guide-div {
     display: flex;
     width: 100%;
@@ -308,4 +360,94 @@ body {
     margin-left: auto;
     font-size: 1.1rem;
     padding: 0.5rem 1rem;
+}
+
+/* === Main View Tabs (Scatter / Table) === */
+.main-view-tabs {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.main-view-tabs .tab-content {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.main-view-tab {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 0.95em;
+    padding: 6px 18px !important;
+    color: #555 !important;
+    border: none !important;
+    border-bottom: 2px solid transparent !important;
+    background: transparent !important;
+    cursor: pointer;
+}
+
+.main-view-tab--selected {
+    color: var(--color-accent, #4b8af2) !important;
+    border-bottom: 2px solid var(--color-accent, #4b8af2) !important;
+    font-weight: 600 !important;
+    background: transparent !important;
+}
+
+/* === Table View Container === */
+#table-view-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    background: #fff;
+    box-shadow: 2px 0 8px #eee;
+    padding: 1rem;
+    overflow: hidden;
+}
+
+/* === Cluster Table === */
+.cluster-table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.88em;
+    min-width: 400px;
+}
+
+.cluster-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #f5f6fa;
+}
+
+.cluster-table th {
+    padding: 8px 12px;
+    border: 1px solid #d0d4e0;
+    text-align: left;
+    font-weight: 700;
+    color: #2a3f5f;
+    white-space: nowrap;
+}
+
+.cluster-table td {
+    padding: 5px 12px;
+    border: 1px solid #e4e7ef;
+    text-align: left;
+    white-space: nowrap;
+    color: #1a1a2e;
+}
+
+.cluster-table tbody tr:hover td {
+    filter: brightness(0.88);
+}
+
+.table-row-clickable:active td {
+    filter: brightness(0.75);
+}
+
+.cluster-table th:hover {
+    background: #e8ecf5;
 }
