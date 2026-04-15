@@ -584,6 +584,21 @@ def create_layout(df):
                             ),
 
                             html.Div([
+                                dcc.Checklist(
+                                    id='priority-sampling-toggle',
+                                    options=[{'label': ' Label priority sampling ', 'value': 'on'}],
+                                    value=['on'],
+                                    style={'display': 'inline-block', 'marginRight': '5px'}
+                                ),
+                                html.Div(className="tooltip-container", children=[
+                                    html.Span("ⓘ", className="info-icon"),
+                                    html.Span(
+                                        "When on, manually labeled clips are prioritized to always be shown. When off, a completely random sample is drawn.",
+                                        className="tooltip-text")
+                                ])
+                            ], className="label-with-info", style={'marginBottom': '15px'}),
+
+                            html.Div([
                                 html.Label("Merge consecutive clips"),
                                 html.Div(className="tooltip-container", children=[
                                     html.Span(" ⓘ", className="info-icon"),

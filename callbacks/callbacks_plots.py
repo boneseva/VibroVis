@@ -73,6 +73,7 @@ def register_plot_callbacks(app):
          Input('hour-slider', 'value'),
          Input('max-points', 'value'),
          Input('resample-btn', 'n_clicks'),
+         Input('priority-sampling-toggle', 'value'),
          Input('merge-switch', 'on'),
          Input('merge-threshold', 'value'),
          Input('clip-count-threshold', 'value'),
@@ -93,8 +94,8 @@ def register_plot_callbacks(app):
     )
     def update_figure(model_ready_signal, selected_channels, selected_num_clusters,
                       cluster_checkbox_values, cluster_colors_data, cluster_names_data,
-                      selected_dates, hour_range, max_points, resample_clicks, merge_on, merge_threshold,
-                      clip_count_threshold,
+                      selected_dates, hour_range, max_points, resample_clicks, priority_sampling_on,
+                      merge_on, merge_threshold, clip_count_threshold,
                       selected_microlocations, selected_recorders, 
                       color_mode, manual_labels_trigger, label_colors_data, label_names_data,
                       label_checkbox_values,
@@ -104,8 +105,8 @@ def register_plot_callbacks(app):
         try:
             return _update_figure_impl(model_ready_signal, selected_channels, selected_num_clusters,
                       cluster_checkbox_values, cluster_colors_data, cluster_names_data,
-                      selected_dates, hour_range, max_points, resample_clicks, merge_on, merge_threshold,
-                      clip_count_threshold,
+                      selected_dates, hour_range, max_points, resample_clicks, priority_sampling_on,
+                      merge_on, merge_threshold, clip_count_threshold,
                       selected_microlocations, selected_recorders, 
                       color_mode, manual_labels_trigger, label_colors_data, label_names_data,
                       label_checkbox_values,
@@ -119,8 +120,8 @@ def register_plot_callbacks(app):
 
     def _update_figure_impl(model_ready_signal, selected_channels, selected_num_clusters,
                       cluster_checkbox_values, cluster_colors_data, cluster_names_data,
-                      selected_dates, hour_range, max_points, resample_clicks, merge_on, merge_threshold,
-                      clip_count_threshold,
+                      selected_dates, hour_range, max_points, resample_clicks, priority_sampling_on,
+                      merge_on, merge_threshold, clip_count_threshold,
                       selected_microlocations, selected_recorders, 
                       color_mode, manual_labels_trigger, label_colors_data, label_names_data,
                       label_checkbox_values,
@@ -368,6 +369,69 @@ def register_plot_callbacks(app):
         else:
             cluster_stats = {'total': 0}
 
+        # -------------------------------------------------------------------
+        # VISIBILITY FILTERING (Clusters / Labels Checkboxes)
+        # -------------------------------------------------------------------
+        # Prepare selected_clusters set based on checkbox values and IDs
+        selected_clusters = set()
+        ui_known_labels = set()
+
+        if cluster_checkbox_values and cluster_checkbox_ids:
+            for val, id_dict in zip(cluster_checkbox_values, cluster_checkbox_ids):
+                idx = id_dict['index']
+                idx_str = str(idx)
+                ui_known_labels.add(idx_str)
+                
+                if val and 'on' in val:
+                    selected_clusters.add(idx_str)
+                    try:
+                        selected_clusters.add(int(idx))
+                    except:
+                        pass
+        
+        # Prepare selected_labels set
+        selected_labels = set()
+        if label_checkbox_values and label_checkbox_ids:
+            for val, id_dict in zip(label_checkbox_values, label_checkbox_ids):
+                if val and 'on' in val:
+                    selected_labels.add(str(id_dict['index']))
+        
+        # FIX RACE CONDITION:
+        if is_manual_mode:
+            all_cached = set(MANUAL_LABELS_CACHE.values())
+            missing_from_ui = all_cached - ui_known_labels
+            for missing_lbl in missing_from_ui:
+                 selected_clusters.add(str(missing_lbl))
+
+        has_checkbox_inputs = bool(cluster_checkbox_ids) or bool(label_checkbox_ids) or (is_manual_mode and bool(MANUAL_LABELS_CACHE))
+        
+        do_filter = has_checkbox_inputs and not should_force_defaults
+        if do_filter and not selected_clusters and not selected_labels:
+            if not is_cluster_checkbox_click:
+                do_filter = False
+
+        if do_filter:
+            # Filter dff_macro BEFORE sampling so resamples pull 100% quota from visible groups
+            if not dff_macro.empty:
+                # 1. Filter by Cluster
+                if 'cluster_id' in dff_macro.columns:
+                    dff_macro = dff_macro[dff_macro['cluster_id'].astype(str).isin(selected_clusters)]
+                
+                # 2. Filter by Label
+                if label_checkbox_ids:
+                    if 'manual_label' not in dff_macro.columns:
+                        if 'clip_duration' not in dff_macro.columns: dff_macro['clip_duration'] = 5.0
+                        dff_macro = apply_manual_labels_efficiently(dff_macro)
+                    dff_macro = dff_macro[dff_macro['manual_label'].isin(selected_labels)]
+        
+        # Update filtered count to reflect the state after visibility filters
+        if not dff_macro.empty:
+            total_clips_available = dff_macro['clip_count'].sum() if 'clip_count' in dff_macro.columns else len(dff_macro)
+        else:
+            total_clips_available = 0
+            
+        # -------------------------------------------------------------------
+
         should_resample = is_fresh_load or is_resample_click or is_k_change or not stored_indices
 
         if not should_resample:
@@ -388,9 +452,13 @@ def register_plot_callbacks(app):
 
                 # Sampling logic
                 final_indices = []
+                rng_seed = None if is_resample_click else 42
                 
-                # Check for manual labels column existence (added above)
-                if 'manual_label' in dff_macro.columns:
+                # Convert checklist value to boolean
+                is_priority_on = bool(priority_sampling_on and 'on' in priority_sampling_on)
+                
+                # Check for manual labels column existence AND toggle
+                if is_priority_on and 'manual_label' in dff_macro.columns:
                      # Prioritize labeled points (everything that is not 'Unlabeled')
                      labeled_mask = dff_macro['manual_label'] != 'Unlabeled'
                      unlabeled_mask = dff_macro['manual_label'] == 'Unlabeled'
@@ -399,7 +467,6 @@ def register_plot_callbacks(app):
                      unlabeled_indices = dff_macro[unlabeled_mask].index
                      
                      # Calculate how much space labeled points take
-                     # Note: we use clip_count sum, so accurate space accounting
                      labeled_count_sum = dff_macro.loc[labeled_indices, 'clip_count'].sum()
                      
                      if labeled_count_sum <= max_points:
@@ -410,23 +477,20 @@ def register_plot_callbacks(app):
                          remaining_quota = max_points - labeled_count_sum
                          
                          if remaining_quota > 0 and len(unlabeled_indices) > 0:
-                             rng = np.random.default_rng(42)
+                             rng = np.random.default_rng(rng_seed)
                              shuffled_unlabeled = rng.permutation(unlabeled_indices)
                              
                              shuffled_counts = dff_macro.loc[shuffled_unlabeled, 'clip_count'].values
                              cumulative_counts = np.cumsum(shuffled_counts)
                              cutoff_idx = np.searchsorted(cumulative_counts, remaining_quota, side='right')
                              
-                             sampled_unlabeled = shuffled_unlabeled[:cutoff_idx]
-                             # If we picked nothing but had quota (e.g. quota < first clip count), pick at least one?
-                             # Or strict max_points? Strict is better probably.
-                             # But let's check if cutoff_idx == 0 and logic requires non-empty.
                              if cutoff_idx == 0 and remaining_quota > 0: pass 
                              
+                             sampled_unlabeled = shuffled_unlabeled[:cutoff_idx]
                              final_indices.extend(sampled_unlabeled)
                      else:
                          # Labeled points alone exceed max_points. Sample them.
-                         rng = np.random.default_rng(42)
+                         rng = np.random.default_rng(rng_seed)
                          shuffled_labeled = rng.permutation(labeled_indices)
                          
                          shuffled_counts = dff_macro.loc[shuffled_labeled, 'clip_count'].values
@@ -435,8 +499,8 @@ def register_plot_callbacks(app):
                          final_indices = shuffled_labeled[:cutoff_idx]
                 
                 else:
-                    # Standard random sampling for Cluster mode (or manual mode if column missing?)
-                    rng = np.random.default_rng(42)
+                    # Standard random sampling
+                    rng = np.random.default_rng(rng_seed)
                     shuffled_indices = rng.permutation(dff_macro.index)
                     if len(shuffled_indices) > 0:
                         shuffled_counts = dff_macro.loc[shuffled_indices, 'clip_count'].values
@@ -458,7 +522,7 @@ def register_plot_callbacks(app):
                 dff_sampled = dff_sampled.sort_values('row_idx')
 
                 if dff_sampled.empty and not dff_macro.empty:
-                    rng = np.random.default_rng(42)
+                    rng = np.random.default_rng(None if is_resample_click else 42)
                     shuffled_indices = rng.permutation(dff_macro.index)
                     if len(shuffled_indices) > 0:
                         shuffled_counts = dff_macro.loc[shuffled_indices, 'clip_count'].values
@@ -472,70 +536,6 @@ def register_plot_callbacks(app):
         else:
             new_indices_to_store = []
             dff_sampled = dff_macro
-
-        # Prepare selected_clusters set based on checkbox values and IDs
-        selected_clusters = set()
-        
-        # Track what is currently passed by the UI
-        ui_known_labels = set()
-
-        if cluster_checkbox_values and cluster_checkbox_ids:
-            for val, id_dict in zip(cluster_checkbox_values, cluster_checkbox_ids):
-                idx = id_dict['index']
-                idx_str = str(idx)
-                ui_known_labels.add(idx_str)
-                
-                if val and 'on' in val:
-                    # In manual mode, index is string (label). In cluster mode, it's int (cluster id).
-                    # We store both string and int representations to be safe forfiltering
-                    selected_clusters.add(idx_str)
-                    try:
-                        selected_clusters.add(int(idx))
-                    except:
-                        pass
-        
-        # Prepare selected_labels set
-        selected_labels = set()
-        if label_checkbox_values and label_checkbox_ids:
-            for val, id_dict in zip(label_checkbox_values, label_checkbox_ids):
-                if val and 'on' in val:
-                    selected_labels.add(str(id_dict['index']))
-        
-        # FIX RACE CONDITION:
-        # If Manual Mode, and we have labels in the cache that are NOT in ui_known_labels,
-        # it implies they are NEW labels created by `save_manual_label` but `render_cluster_controls` 
-        # hasn't updated the UI yet. We should treat them as Checked by default.
-        if is_manual_mode:
-            all_cached = set(MANUAL_LABELS_CACHE.values())
-            missing_from_ui = all_cached - ui_known_labels
-            # Add missing labels directly to selected_clusters
-            # This ensures the point color updates immediately even if the checkbox isn't rendered yet
-            for missing_lbl in missing_from_ui:
-                 selected_clusters.add(str(missing_lbl))
-
-        has_checkbox_inputs = bool(cluster_checkbox_ids) or bool(label_checkbox_ids) or (is_manual_mode and bool(MANUAL_LABELS_CACHE))
-        
-        # DEFENSIVE CHECK: On first load or sync, if selected_clusters is empty but checkboxes EXIST,
-        # it might be a race condition. Skip filtering unless it's a confirmed click.
-        do_filter = has_checkbox_inputs and not should_force_defaults
-        if do_filter and not selected_clusters and not selected_labels:
-            if not is_cluster_checkbox_click: # Only skip if not an explicit interaction
-                do_filter = False
-
-        if do_filter:
-            # ALWAYS apply visibility filters based on current checkbox state (Option B Decoupling)
-            if not dff_sampled.empty:
-                # 1. Filter by Cluster (Always applicable)
-                if 'cluster_id' in dff_sampled.columns:
-                    dff_sampled = dff_sampled[dff_sampled['cluster_id'].astype(str).isin(selected_clusters)]
-                
-                # 2. Filter by Label (Applicable if label checkboxes exist)
-                if label_checkbox_ids:
-                    # Ensure manual_label column exists
-                    if 'manual_label' not in dff_sampled.columns:
-                        if 'clip_duration' not in dff_sampled.columns: dff_sampled['clip_duration'] = 5.0
-                        dff_sampled = apply_manual_labels_efficiently(dff_sampled)
-                    dff_sampled = dff_sampled[dff_sampled['manual_label'].isin(selected_labels)]
 
         # Calculate Visibility Stats AFTER final filters
         clips_visible = dff_sampled['clip_count'].sum() if not dff_sampled.empty else 0
