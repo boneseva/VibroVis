@@ -72,6 +72,7 @@ def register_plot_callbacks(app):
          Input('date-dropdown', 'data'),
          Input('hour-slider', 'value'),
          Input('max-points', 'value'),
+         Input('resample-btn', 'n_clicks'),
          Input('merge-switch', 'on'),
          Input('merge-threshold', 'value'),
          Input('clip-count-threshold', 'value'),
@@ -92,7 +93,7 @@ def register_plot_callbacks(app):
     )
     def update_figure(model_ready_signal, selected_channels, selected_num_clusters,
                       cluster_checkbox_values, cluster_colors_data, cluster_names_data,
-                      selected_dates, hour_range, max_points, merge_on, merge_threshold,
+                      selected_dates, hour_range, max_points, resample_clicks, merge_on, merge_threshold,
                       clip_count_threshold,
                       selected_microlocations, selected_recorders, 
                       color_mode, manual_labels_trigger, label_colors_data, label_names_data,
@@ -103,7 +104,7 @@ def register_plot_callbacks(app):
         try:
             return _update_figure_impl(model_ready_signal, selected_channels, selected_num_clusters,
                       cluster_checkbox_values, cluster_colors_data, cluster_names_data,
-                      selected_dates, hour_range, max_points, merge_on, merge_threshold,
+                      selected_dates, hour_range, max_points, resample_clicks, merge_on, merge_threshold,
                       clip_count_threshold,
                       selected_microlocations, selected_recorders, 
                       color_mode, manual_labels_trigger, label_colors_data, label_names_data,
@@ -118,7 +119,7 @@ def register_plot_callbacks(app):
 
     def _update_figure_impl(model_ready_signal, selected_channels, selected_num_clusters,
                       cluster_checkbox_values, cluster_colors_data, cluster_names_data,
-                      selected_dates, hour_range, max_points, merge_on, merge_threshold,
+                      selected_dates, hour_range, max_points, resample_clicks, merge_on, merge_threshold,
                       clip_count_threshold,
                       selected_microlocations, selected_recorders, 
                       color_mode, manual_labels_trigger, label_colors_data, label_names_data,
@@ -371,7 +372,8 @@ def register_plot_callbacks(app):
 
         if not should_resample:
             other_filters = ['merge-switch', 'merge-threshold', 'date-dropdown', 'hour-slider',
-                             'microlocation-dropdown', 'color-mode-radio', 'model-data-ready-signal']
+                             'microlocation-dropdown', 'color-mode-radio', 'model-data-ready-signal',
+                             'max-points']
             if any(f in t_id for t_id in all_triggered_ids for f in other_filters):
                 should_resample = True
 

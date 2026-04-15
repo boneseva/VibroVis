@@ -571,9 +571,9 @@ def create_layout(df):
                                 ])
                             ], className="label-with-info"),
                             html.Div([
-                                dcc.Input(id='max-points', type='number', min=1, value=10000,
+                                dcc.Input(id='max-points', type='number', min=1, value=10000, debounce=False,
                                           style={'width': '80px', 'marginRight': '1em'},
-                            className='input-field'),
+                                          className='input-field'),
                                 html.Button('Resample', id='resample-btn', n_clicks=0, className='app-button'),
                             ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '5px'}),
 
