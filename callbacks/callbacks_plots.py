@@ -465,6 +465,10 @@ def register_plot_callbacks(app):
                              'max-points']
             if any(f in t_id for t_id in all_triggered_ids for f in other_filters):
                 should_resample = True
+        
+        # Check for bulk load of labels (Load Labels button triggered)
+        if not should_resample and manual_labels_trigger and isinstance(manual_labels_trigger, dict):
+            should_resample = True
 
         if max_points and dff_macro['clip_count'].sum() > max_points:
             if should_resample:
@@ -480,8 +484,8 @@ def register_plot_callbacks(app):
                 final_indices_set = set()
                 rng_seed = None if is_resample_click else 42
                 
-                # Convert checklist value to boolean
-                is_priority_on = bool(priority_sampling_on and 'on' in priority_sampling_on)
+                # Convert checklist value to boolean - robust for various value formats
+                is_priority_on = bool(priority_sampling_on and len(priority_sampling_on) > 0)
                 
                 # Check for manual labels column existence AND toggle
                 if is_priority_on and 'manual_label' in dff_macro.columns:
