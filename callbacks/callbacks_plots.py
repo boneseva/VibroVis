@@ -319,8 +319,12 @@ def register_plot_callbacks(app):
         dff_sampled = dff_macro
         new_indices_to_store = dash.no_update
 
-        # Calculate comprehensive statistics for both Cluster and Label lists
-        cluster_stats = {'total': int(total_clips_available) if not dff_macro.empty else 0}
+        # Calculate comprehensive statistics for both Cluster and Label lists.
+        # Keep a separate labeled-only denominator for manual-label percentages.
+        cluster_stats = {
+            'total': int(total_clips_available) if not dff_macro.empty else 0,
+            '__labeled_total__': 0,
+        }
         if not dff_macro.empty:
              # Always ensure we have labels for stats if possible (needed for Labels sidebar percentage)
              dff_for_stats = dff_macro.copy()
@@ -338,6 +342,8 @@ def register_plot_callbacks(app):
                  l_counts = dff_for_stats.groupby('manual_label')['clip_count'].sum().to_dict()
                  for lbl, count in l_counts.items():
                      cluster_stats[str(lbl)] = int(count)
+                 labeled_total = sum(count for lbl, count in l_counts.items() if str(lbl) != 'Unlabeled')
+                 cluster_stats['__labeled_total__'] = int(labeled_total)
 
         group_col = 'cluster_id' 
         is_manual_mode = (color_mode == 'manual')

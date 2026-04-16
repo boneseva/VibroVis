@@ -335,9 +335,10 @@ def register_cluster_callbacks(app):
                         previously_selected.add(str(id_dict['index']))
                     previously_rendered.add(str(id_dict['index']))
 
-            total_clips = 0
-            if cluster_stats and 'total' in cluster_stats:
-                total_clips = cluster_stats['total']
+            labeled_total = 0
+            if cluster_stats and '__labeled_total__' in cluster_stats:
+                labeled_total = int(cluster_stats['__labeled_total__'])
+            no_labels_applied = (labeled_total == 0)
 
             children = []
             for lbl in unique_labels:
@@ -368,10 +369,12 @@ def register_cluster_callbacks(app):
 
                 # Percentage
                 percent_str = ""
-                if cluster_stats and lbl_str in cluster_stats and total_clips > 0:
+                if cluster_stats and lbl_str in cluster_stats and lbl_str != 'Unlabeled' and labeled_total > 0:
                     count = cluster_stats[lbl_str]
-                    pct = (count / total_clips) * 100
+                    pct = (count / labeled_total) * 100
                     percent_str = f" ({pct:.1f}%)"
+                elif lbl_str == 'Unlabeled' and no_labels_applied:
+                    percent_str = " (No labels applied yet)"
 
                 row = html.Div([
                     # Checkbox
