@@ -19,6 +19,23 @@ body {
     display: flex;
 }
 
+/* Make the visible-columns dropdown menu tall enough to show all options */
+#table-column-selector .Select-menu {
+    max-height: 420px !important;
+}
+
+#table-column-selector .Select-menu-outer {
+    max-height: 420px !important;
+}
+
+#table-column-selector .react-select__menu {
+    max-height: 420px !important;
+}
+
+#table-column-selector .react-select__menu-list {
+    max-height: 420px !important;
+}
+
 /* === Simple Tab Pane Show/Hide === */
 .view-pane {
     display: none;

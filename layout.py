@@ -263,12 +263,15 @@ def create_layout(df):
                                 {'label': 'Clip Count',    'value': 'clip_count'},
                             ],
                             value=['file_name', 'date', 'recording_time',
-                                   'cluster_start', 'cluster_end', 'duration', 'cluster_id'],
+                                   'cluster_start', 'cluster_end', 'duration', 'cluster_id',
+                                   'manual_label'],
                             multi=True,
                             clearable=False,
-                            style={'flex': '1'},
+                            optionHeight=32,
+                            maxHeight=420,
+                            style={'flex': '1', 'minHeight': '60px'},
                         ),
-                    ], style={'display': 'flex', 'alignItems': 'center', 'padding': '8px 0',
+                    ], style={'display': 'flex', 'alignItems': 'flex-start', 'padding': '8px 0',
                               'borderBottom': '1px solid #e0e0e0', 'flexShrink': '0'}),
                     # Pagination bar
                     html.Div([
@@ -952,7 +955,4 @@ def create_layout(df):
         dcc.Store(id='table-total-pages-store', data=1),
         dcc.Store(id='table-sort-store', data={'col': None, 'asc': True}),
         dcc.Store(id='table-click-data-store', data=None),
-        dcc.Store(id='focused-row-store'),
-        dcc.Input(id='focused-row-trigger-input', type='text',
-                  style={'display': 'none'}, value=''),
     ], id='main-container')
