@@ -1,6 +1,6 @@
 import os
 import re
-from dash import Dash, html
+from dash import Dash
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from layout import create_layout

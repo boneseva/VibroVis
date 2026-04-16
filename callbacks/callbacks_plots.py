@@ -542,11 +542,15 @@ def register_plot_callbacks(app):
                         cutoff_idx = np.searchsorted(cumulative_counts, max_points, side='right')
                         final_indices = shuffled_indices[:cutoff_idx]
                         if final_indices.size == 0 and len(dff_macro) > 0: final_indices = shuffled_indices[:1]
-                        dff_sampled = dff_macro.loc[final_indices]
+                        dff_sampled = dff_macro[dff_macro.index.isin(final_indices)]
                         new_indices_to_store = dff_sampled['row_idx'].tolist()
 
         else:
-            new_indices_to_store = []
+            if not dff_macro.empty:
+                new_indices_to_store = dff_macro['row_idx'].tolist()
+            else:
+                new_indices_to_store = []
+            
             dff_sampled = dff_macro
 
         # Calculate Visibility Stats AFTER final filters
@@ -677,7 +681,7 @@ def register_plot_callbacks(app):
         # We achieve this by ordering the TRACES later, NOT by sorting the dataframe here,
         # which would break the visual stability of the data table.
         pass
-            
+
         # Ensure plot_id is STABLE and matches the lead row index of the clip/merged clip.
         # We NO LONGER re-assign plot_id based on positional index, as that breaks component binding.
         dff['plot_id'] = dff['row_idx']

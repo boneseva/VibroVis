@@ -80,30 +80,37 @@ DEFAULT_SORT_COLS = ["file_name", "day_dt", "start_dt", "clip_time", "channel", 
 
 def _apply_sort(df: pd.DataFrame, sort_col: str | None, sort_asc: bool) -> pd.DataFrame:
     """Sort by primary column + automatic secondary keys. Applies a default sort when sort_col is None."""
-    
+
     def sort_key(col):
         # Case-insensitive sorting for string columns to avoid splitting uppercase/lowercase
         if col.name in ["file_name", "manual_label", "microlocation", "recorder_type"]:
             return col.astype(str).str.lower()
+        # Force clip_time to be numeric to prevent string sorting ("10.0" before "2.0")
+        if col.name == "clip_time":
+            return pd.to_numeric(col, errors='coerce')
         return col
 
+    # Sanitize boolean just in case Dash passes a string state
+    is_asc = bool(sort_asc) if str(sort_asc).lower() not in ["false", "0", "none"] else False
+    df = df.copy()
+
     if not sort_col:
-        # Default: Sort by file_name, channel, and clip_time to ensure a persistent, stable view from load.
-        defaults = ['file_name', 'channel', 'clip_time']
+        # Default: Sort by file_name, channel, clip_time, and row_idx to ensure a persistent, stable view.
+        defaults = ['file_name', 'channel', 'clip_time', 'row_idx']
         available = [c for c in defaults if c in df.columns]
         return df.sort_values(available, ascending=True, key=sort_key) if available else df
+
     primary_df_col = SORT_COL_MAP.get(sort_col)
     if not primary_df_col or primary_df_col not in df.columns:
         return df
-    secondary = [c for c in SECONDARY_SORT.get(sort_col, []) if c != primary_df_col and c in df.columns]
-    
-    # Always append row_idx as a final tie-breaker to ensure bit-perfect deterministic ordering.
-    # This prevents rows from shifting based on hidden cache order/z-indexing.
-    cols = [primary_df_col] + secondary + ["row_idx"]
-    asc  = [sort_asc]       + [True] * (len(secondary) + 1)
-    
-    return df.sort_values(cols, ascending=asc, key=sort_key)
 
+    secondary = [c for c in SECONDARY_SORT.get(sort_col, []) if c != primary_df_col and c in df.columns]
+
+    # Always append row_idx as a final tie-breaker to ensure bit-perfect deterministic ordering.
+    cols = [primary_df_col] + secondary + ["row_idx"]
+    asc = [is_asc] + [True] * (len(secondary) + 1)
+
+    return df.sort_values(cols, ascending=asc, key=sort_key)
 
 # Module-level caches
 _TABLE_CACHE: dict = {}
@@ -322,6 +329,10 @@ def register_table_callbacks(app):
     def update_sort(n_clicks_list, ids, current_sort):
         if not ctx.triggered_id:
             return no_update, no_update
+
+        if not ctx.triggered or ctx.triggered[0].get('value', 0) == 0:
+            return no_update, no_update
+
         # triggered_id is a dict like {'type': 'table-header', 'index': 'cluster_id'}
         col_key = ctx.triggered_id.get("index") if isinstance(ctx.triggered_id, dict) else None
         if col_key is None:
