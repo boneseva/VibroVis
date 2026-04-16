@@ -28,13 +28,19 @@ import plotly.graph_objects as go
 def get_label_for_clip(file_basename, channel, start_time, duration):
     """
     Get the majority label for a clip based on per-second labels.
+    Uses proper rounding to prevent label bleed into adjacent clips.
     """
-    start_second = math.floor(start_time)
-    end_second = math.ceil(start_time + duration)
+    # Use round() instead of floor/ceil to only tag seconds meaningfully within bounds
+    start_second = round(start_time)
+    end_second = round(start_time + duration) - 1
+    
+    # Handle edge case where very short clips might have end_second < start_second
+    if end_second < start_second:
+        end_second = start_second
     
     labels = []
-    # Check every second covered by the clip
-    for sec in range(start_second, end_second):
+    # Check every second covered by the clip (only seconds that fall within bounds)
+    for sec in range(start_second, end_second + 1):
         key = (file_basename, int(channel), sec)
         label = MANUAL_LABELS_CACHE.get(key)
         if label and label != 'Unlabeled':
@@ -44,6 +50,7 @@ def get_label_for_clip(file_basename, channel, start_time, duration):
         return 'Unlabeled'
     
     # Majority vote
+    counts = Counter(labels)
     # most_common returns list of (element, count). 
     # taking [0][0] gets the most common element.
     # Ties are broken arbitrarily (first one encountered).
@@ -62,7 +69,8 @@ def register_plot_callbacks(app):
          Output('anim-ranges-store', 'data'),
          Output('sampling-info-display', 'children'),
          Output('cluster-stats-store', 'data'),
-         Output('scatter', 'clickData')],
+         Output('scatter', 'clickData'),
+         Output('merge-switch', 'on', allow_duplicate=True)],
         [Input('model-data-ready-signal', 'data'),
          Input('channel-checklist', 'value'),
          Input('num-cluster-dropdown', 'value'),
@@ -90,7 +98,7 @@ def register_plot_callbacks(app):
          State('last-preset-load-time', 'data'),
          State({'type': 'cluster-checkbox', 'index': ALL}, 'id'),
          State({'type': 'label-checkbox', 'index': ALL}, 'id')],
-        prevent_initial_call=False
+        prevent_initial_call='initial_duplicate'
     )
     def update_figure(model_ready_signal, selected_channels, selected_num_clusters,
                       cluster_checkbox_values, cluster_colors_data, cluster_names_data,
@@ -116,7 +124,7 @@ def register_plot_callbacks(app):
         except Exception:
             import traceback
             traceback.print_exc()
-            return (dash.no_update,) * 9
+            return (dash.no_update,) * 10
 
     def _update_figure_impl(model_ready_signal, selected_channels, selected_num_clusters,
                       cluster_checkbox_values, cluster_colors_data, cluster_names_data,
@@ -168,7 +176,7 @@ def register_plot_callbacks(app):
                 fig.update_xaxes(visible=False);
                 fig.update_yaxes(visible=False)
                 msg = "Loading data..."
-                return fig, None, 1, 100, [], None, msg, {'total': 0}, None
+                return fig, None, 1, 100, [], None, msg, {'total': 0}, None, False
 
         if dff_raw is None:
             fig = go.Figure()
@@ -180,7 +188,7 @@ def register_plot_callbacks(app):
             fig.update_xaxes(visible=False);
             fig.update_yaxes(visible=False)
             msg = "Select a model and location to begin."
-            return fig, None, 1, 100, [], None, msg, {'total': 0}, None
+            return fig, None, 1, 100, [], None, msg, {'total': 0}, None, False
 
         is_preset_active = last_preset_time and (time.time() - last_preset_time < 6.0)
         should_force_defaults = is_fresh_load and not is_preset_active
@@ -767,7 +775,7 @@ def register_plot_callbacks(app):
             print(timing_str)
 
         return fig, dff['cache_key'].iloc[
-            0], max_clip_count, max_distance, new_indices_to_store, ranges_data, sampling_text, cluster_stats, None
+            0], max_clip_count, max_distance, new_indices_to_store, ranges_data, sampling_text, cluster_stats, None, False if should_force_defaults else no_update
 
     # @app.callback(
     #     Output('spectrogram-raw-data-store', 'data'),
@@ -1280,8 +1288,13 @@ def register_plot_callbacks(app):
                     start_time = float(row['clip_time'])
                     duration = float(row.get('clip_duration', 5.0))
                     
-                    start_second = math.floor(start_time)
-                    end_second = math.ceil(start_time + duration)
+                    # Use proper rounding to prevent label bleed into adjacent clips
+                    start_second = round(start_time)
+                    end_second = round(start_time + duration) - 1
+                    
+                    # Handle edge case where very short clips might have end_second < start_second
+                    if end_second < start_second:
+                        end_second = start_second
                     
                     for sec in range(start_second, end_second + 1):
                         key = (loc, micro, file_basename, channel, sec)
@@ -1310,8 +1323,13 @@ def register_plot_callbacks(app):
                 start_time = float(row['clip_time'])
                 duration = float(row.get('clip_duration', 5.0))
                 
-                start_second = math.floor(start_time)
-                end_second = math.ceil(start_time + duration)
+                # Use proper rounding to prevent label bleed into adjacent clips
+                start_second = round(start_time)
+                end_second = round(start_time + duration) - 1
+                
+                # Handle edge case where very short clips might have end_second < start_second
+                if end_second < start_second:
+                    end_second = start_second
                 
                 for sec in range(start_second, end_second + 1):
                     key = (loc, micro, file_basename, channel, sec)

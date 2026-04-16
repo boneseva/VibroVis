@@ -108,7 +108,7 @@ def register_preset_callbacks(app):
          Output('model-dropdown', 'value', allow_duplicate=True),
          Output('num-cluster-dropdown', 'value', allow_duplicate=True),
          Output('max-points', 'value'),
-         Output('merge-switch', 'on'),
+         Output('merge-switch', 'on', allow_duplicate=True),
          Output('merge-threshold', 'value'),
          Output('clip-count-threshold', 'value', allow_duplicate=True),
          Output('frequency-scale', 'value'),

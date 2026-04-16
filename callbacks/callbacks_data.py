@@ -197,6 +197,16 @@ def _build_portable_export_payload():
 
 
 def merge_clips_vectorized(dff, merge_threshold):
+    """
+    Merge consecutive clips that share the same context (file, channel, cluster) 
+    and are within spatial and temporal thresholds.
+    
+    CRITICAL FIXES:
+    - Fixed sorting to include cluster_id (was missing!)
+    - Added floating-point tolerance for temporal continuity
+    - Fixed context field consistency (file_name vs mp3_file)
+    - Added NaN handling for spatial distance calculations
+    """
     if dff.empty:
         return dff
     if 'clip_count' not in dff.columns:
@@ -205,35 +215,59 @@ def merge_clips_vectorized(dff, merge_threshold):
     else:
         dff = dff.copy()
     
+    # Convert to category for performance
     if dff['file_name'].dtype != 'category':
         dff['file_name'] = dff['file_name'].astype('category')
     if dff['channel'].dtype != 'category':
         dff['channel'] = dff['channel'].astype('category')
     
-    dff = dff.sort_values(['file_name', 'channel', 'clip_time'])
+    # CRITICAL FIX: Add cluster_id to sort - this was missing and breaking adjacency logic!
+    dff = dff.sort_values(['file_name', 'channel', 'cluster_id', 'clip_time']).reset_index(drop=True)
     
     # Ensure numeric consistency for math
     dff['clip_time'] = pd.to_numeric(dff['clip_time'], errors='coerce').fillna(0.0)
+    
     # Handle variable clip durations (user confirmed they vary and overlap)
-    # Default to 5.0 only if widely missing, but respect existing data
     if 'clip_duration' not in dff.columns:
         dff['clip_duration'] = 5.0
     else:
         dff['clip_duration'] = pd.to_numeric(dff['clip_duration'], errors='coerce').fillna(5.0)
 
+    # FIXED: Use consistent field (file_name) in both sorting and context checks
     same_context = (
-            (dff['mp3_file'] == dff['mp3_file'].shift(1)) &
-            (dff['channel'] == dff['channel'].shift(1)) &
-            (dff['cluster_id'] == dff['cluster_id'].shift(1))
+        (dff['file_name'] == dff['file_name'].shift(1)) &
+        (dff['channel'] == dff['channel'].shift(1)) &
+        (dff['cluster_id'] == dff['cluster_id'].shift(1))
     )
+    
+    # Spatial proximity calculation with NaN handling
     prev_points = dff[['x', 'y']].shift(1).to_numpy()
     curr_points = dff[['x', 'y']].to_numpy()
-    distances = np.linalg.norm(curr_points - prev_points, axis=1)
+    
+    # Handle NaN values in first row after shift
+    valid_spatial = ~(np.isnan(prev_points).any(axis=1) | np.isnan(curr_points).any(axis=1))
+    distances = np.full(len(dff), np.inf)  # Default to infinity (no merge)
+    distances[valid_spatial] = np.linalg.norm(
+        curr_points[valid_spatial] - prev_points[valid_spatial], axis=1
+    )
     spatial_proximity = distances < merge_threshold
+    
+    # CRITICAL FIX: Add floating-point tolerance for temporal continuity
     prev_clip_end = dff['clip_time'].shift(1) + dff['clip_duration'].shift(1)
-    temporal_continuity = dff['clip_time'] < prev_clip_end
+    # Use small epsilon to handle floating-point precision issues
+    temporal_continuity = dff['clip_time'] <= (prev_clip_end + 1e-6)
+    
+    # Combine all merge conditions
     merge_mask = same_context & temporal_continuity & spatial_proximity
+    
+    # Create merge groups - clips with merge_mask=True belong to previous group
     merge_groups = (~merge_mask).cumsum()
+    
+    # Add debug validation
+    original_count = len(dff)
+    potential_merges = merge_mask.sum()
+    
+    # Create clip_end for aggregation
     dff['clip_end'] = dff['clip_time'] + dff['clip_duration']
 
     agg_dict = {
@@ -250,6 +284,18 @@ def merge_clips_vectorized(dff, merge_threshold):
         'day_dt': ('day_dt', 'first'),
         'microlocation': ('microlocation', 'first'),
     }
+    
+    grouped = dff.groupby(merge_groups).agg(**agg_dict).reset_index(drop=True)
+    grouped['clip_duration'] = grouped['clip_end'] - grouped['clip_time']
+    grouped = grouped.drop(columns=['clip_end'])
+    
+    # Debug output to verify merging is working
+    final_count = len(grouped)
+    if potential_merges > 0:
+        print(f"MERGE DEBUG: {original_count} clips -> {final_count} after merging "
+              f"({potential_merges} potential merges, threshold={merge_threshold})")
+    
+    return grouped
     grouped = dff.groupby(merge_groups).agg(**agg_dict).reset_index(drop=True)
     grouped['clip_duration'] = grouped['clip_end'] - grouped['clip_time']
     grouped = grouped.drop(columns=['clip_end'])
