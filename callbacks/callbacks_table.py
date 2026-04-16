@@ -14,7 +14,7 @@ import time
 import traceback
 
 import pandas as pd
-from dash import Input, Output, State, html, no_update, ALL, ctx
+from dash import Input, Output, State, html, dcc, no_update, ALL, ctx
 
 from callbacks.callbacks_constants import CLUSTER_COLORS, server_cache
 
@@ -75,7 +75,7 @@ SECONDARY_SORT: dict[str, list[str]] = {
 }
 
 # Default sort when no column header is clicked
-DEFAULT_SORT_COLS = ["file_name", "day_dt", "start_dt", "clip_time"]
+DEFAULT_SORT_COLS = ["file_name", "day_dt", "start_dt", "clip_time", "channel", "microlocation", "recorder_type", "row_idx"]
 
 
 def _apply_sort(df: pd.DataFrame, sort_col: str | None, sort_asc: bool) -> pd.DataFrame:
@@ -88,15 +88,20 @@ def _apply_sort(df: pd.DataFrame, sort_col: str | None, sort_asc: bool) -> pd.Da
         return col
 
     if not sort_col:
-        # Default: file → date → recording time → start time
-        defaults = [c for c in DEFAULT_SORT_COLS if c in df.columns]
-        return df.sort_values(defaults, ascending=True, key=sort_key) if defaults else df
+        # Default: Sort by file_name, channel, and clip_time to ensure a persistent, stable view from load.
+        defaults = ['file_name', 'channel', 'clip_time']
+        available = [c for c in defaults if c in df.columns]
+        return df.sort_values(available, ascending=True, key=sort_key) if available else df
     primary_df_col = SORT_COL_MAP.get(sort_col)
     if not primary_df_col or primary_df_col not in df.columns:
         return df
     secondary = [c for c in SECONDARY_SORT.get(sort_col, []) if c != primary_df_col and c in df.columns]
-    cols = [primary_df_col] + secondary
-    asc  = [sort_asc]       + [True] * len(secondary)
+    
+    # Always append row_idx as a final tie-breaker to ensure bit-perfect deterministic ordering.
+    # This prevents rows from shifting based on hidden cache order/z-indexing.
+    cols = [primary_df_col] + secondary + ["row_idx"]
+    asc  = [sort_asc]       + [True] * (len(secondary) + 1)
+    
     return df.sort_values(cols, ascending=asc, key=sort_key)
 
 
@@ -209,11 +214,26 @@ def _render_table(page_df: pd.DataFrame, visible_cols: list,
     for i in range(len(page_df)):
         # row-level index in the full merged df (page_offset + i) stored as data attr
         row_idx = page_offset + i
-        cells = [html.Td(display[c].iat[i] if c in display else "") for c in visible_cols]
+        actual_plot_id = int(page_df.index[i])
+        cells = []
+        for c in visible_cols:
+            val = display[c].iat[i] if c in display else ""
+            if c == "manual_label":
+                cells.append(html.Td(
+                    dcc.Input(
+                        type="text",
+                        value=val,
+                        id={"type": "table-inline-label", "index": actual_plot_id},
+                        debounce=True,
+                        style={"width": "100%", "boxSizing": "border-box", "border": "none", "background": "transparent", "outline": "none"}
+                    )
+                ))
+            else:
+                cells.append(html.Td(val))
         rows.append(
             html.Tr(
                 cells,
-                id={"type": "table-row", "index": row_idx},
+                id={"type": "table-row", "index": actual_plot_id},
                 n_clicks=0,
                 style={
                     "backgroundColor": bg_colors[i],
@@ -356,14 +376,14 @@ def register_table_callbacks(app):
             return no_update, no_update, no_update, "Click a point on the scatter first to load data."
 
         filtered = cached.get("df")
-        if filtered is None or filtered.empty or row_global_idx >= len(filtered):
+        if filtered is None or filtered.empty or row_global_idx not in filtered.index:
             return no_update, no_update, no_update, no_update
 
         # Apply the same sort that's currently active
         sort_info = _TABLE_CACHE.get("sort") or {}
         filtered = _apply_sort(filtered, sort_info.get("col"), sort_info.get("asc", True))
 
-        row = filtered.iloc[row_global_idx]
+        row = filtered.loc[row_global_idx]
 
         if "mp3_file" not in filtered.columns or pd.isna(row.get("mp3_file")):
             return no_update, no_update, no_update, "Audio path not available for this row."

@@ -950,6 +950,6 @@ def create_layout(df):
         dcc.Store(id='params-store'),
         dcc.Store(id='table-page-store', data=0),
         dcc.Store(id='table-total-pages-store', data=1),
-        dcc.Store(id='table-sort-store', data={'col': None, 'asc': True}),
+        dcc.Store(id='table-sort-store', data={'col': 'file_name', 'asc': True}),
         dcc.Store(id='table-click-data-store', data=None),
     ], id='main-container')

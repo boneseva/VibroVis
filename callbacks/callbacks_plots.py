@@ -391,17 +391,28 @@ def register_plot_callbacks(app):
         
         # Prepare selected_labels set
         selected_labels = set()
+        ui_known_labels_for_labels = set()
         if label_checkbox_values and label_checkbox_ids:
             for val, id_dict in zip(label_checkbox_values, label_checkbox_ids):
+                index_str = str(id_dict['index'])
+                ui_known_labels_for_labels.add(index_str)
                 if val and 'on' in val:
-                    selected_labels.add(str(id_dict['index']))
+                    selected_labels.add(index_str)
         
         # FIX RACE CONDITION:
+        # Avoid rows "disappearing" from the view before their new label checkbox spawns.
+        all_cached_labels = set(MANUAL_LABELS_CACHE.values())
+        
+        # 1. Labels filter race condition: Ensure ANY label in cache is considered "selected" if its UI checkbox is missing.
+        missing_from_ui_labels = all_cached_labels - ui_known_labels_for_labels
+        for missing_lbl in missing_from_ui_labels:
+            selected_labels.add(str(missing_lbl))
+            
+        # 2. Clusters filter race condition: In manual mode, we also add these to the cluster filter pool
         if is_manual_mode:
-            all_cached = set(MANUAL_LABELS_CACHE.values())
-            missing_from_ui = all_cached - ui_known_labels
-            for missing_lbl in missing_from_ui:
-                 selected_clusters.add(str(missing_lbl))
+            missing_from_ui_clusters = all_cached_labels - ui_known_labels
+            for missing_lbl in missing_from_ui_clusters:
+                selected_clusters.add(str(missing_lbl))
 
         has_checkbox_inputs = bool(cluster_checkbox_ids) or bool(label_checkbox_ids) or (is_manual_mode and bool(MANUAL_LABELS_CACHE))
         
@@ -450,8 +461,9 @@ def register_plot_callbacks(app):
                      dff_macro = dff_macro.copy()
                      dff_macro = apply_manual_labels_efficiently(dff_macro)
 
-                # Sampling logic
-                final_indices = []
+                # Sampling logic: We use a SET of chosen indices and then filter dff_macro
+                # to ensure the final dff_sampled maintains its stable, intrinsic order (File Name + Time).
+                final_indices_set = set()
                 rng_seed = None if is_resample_click else 42
                 
                 # Convert checklist value to boolean
@@ -471,7 +483,7 @@ def register_plot_callbacks(app):
                      
                      if labeled_count_sum <= max_points:
                          # 1. Take ALL labeled points
-                         final_indices.extend(labeled_indices)
+                         final_indices_set.update(labeled_indices)
                          
                          # 2. Fill remainder with Unlabeled
                          remaining_quota = max_points - labeled_count_sum
@@ -487,7 +499,7 @@ def register_plot_callbacks(app):
                              if cutoff_idx == 0 and remaining_quota > 0: pass 
                              
                              sampled_unlabeled = shuffled_unlabeled[:cutoff_idx]
-                             final_indices.extend(sampled_unlabeled)
+                             final_indices_set.update(sampled_unlabeled)
                      else:
                          # Labeled points alone exceed max_points. Sample them.
                          rng = np.random.default_rng(rng_seed)
@@ -496,7 +508,7 @@ def register_plot_callbacks(app):
                          shuffled_counts = dff_macro.loc[shuffled_labeled, 'clip_count'].values
                          cumulative_counts = np.cumsum(shuffled_counts)
                          cutoff_idx = np.searchsorted(cumulative_counts, max_points, side='right')
-                         final_indices = shuffled_labeled[:cutoff_idx]
+                         final_indices_set.update(shuffled_labeled[:cutoff_idx])
                 
                 else:
                     # Standard random sampling
@@ -506,20 +518,20 @@ def register_plot_callbacks(app):
                         shuffled_counts = dff_macro.loc[shuffled_indices, 'clip_count'].values
                         cumulative_counts = np.cumsum(shuffled_counts)
                         cutoff_idx = np.searchsorted(cumulative_counts, max_points, side='right')
-                        final_indices = shuffled_indices[:cutoff_idx]
+                        final_indices_set.update(shuffled_indices[:cutoff_idx])
                     
                 # Fallback: ensure at least one point if macro not empty
-                if len(final_indices) == 0 and len(dff_macro) > 0: 
-                     final_indices = dff_macro.index[:1]
+                if len(final_indices_set) == 0 and len(dff_macro) > 0: 
+                     final_indices_set.update(dff_macro.index[:1])
                 
-                dff_sampled = dff_macro.loc[final_indices]
-                # CRITICAL: Sort by row_idx to ensure consistent order regardless of sampling method
-                dff_sampled = dff_sampled.sort_values('row_idx')
+                # CRITICAL: We filter the original dff_macro to return rows in their STABLE, INTRINSIC order.
+                # Since dff_macro is sorted by File Name/Time (after merging), this is the order the user expects.
+                dff_sampled = dff_macro[dff_macro.index.isin(final_indices_set)]
                 new_indices_to_store = dff_sampled['row_idx'].tolist()
             else:
                 dff_sampled = dff_macro[dff_macro['row_idx'].isin(stored_indices)]
-                # Ensure deterministic order here too (though boolean mask usually preserves it)
-                dff_sampled = dff_sampled.sort_values('row_idx')
+                # Stable order is preserved by the stored_indices order.
+                pass
 
                 if dff_sampled.empty and not dff_macro.empty:
                     rng = np.random.default_rng(None if is_resample_click else 42)
@@ -662,17 +674,16 @@ def register_plot_callbacks(app):
         
         # REORDERING FOR Z-INDEX:
         # We want labeled points to be rendered ON TOP of Unlabeled ones.
-        # Plotly renders in order of the dataframe.
-        if is_manual_mode:
-            # Create a sort key: 0 for Unlabeled, 1 for anything else
-            dff['z_order'] = dff['manual_label'].apply(lambda l: 0 if l == 'Unlabeled' else 1)
-            # Sort stable
-            # Sort stable
-            dff = dff.sort_values('z_order', kind='mergesort')
+        # We achieve this by ordering the TRACES later, NOT by sorting the dataframe here,
+        # which would break the visual stability of the data table.
+        pass
             
-        # Reset index to avoid potential Plotly introspection issues with non-monotonic indices
-        dff = dff.reset_index(drop=True)
-        dff['plot_id'] = dff.index  # Re-assign to match the final visual order
+        # Ensure plot_id is STABLE and matches the lead row index of the clip/merged clip.
+        # We NO LONGER re-assign plot_id based on positional index, as that breaks component binding.
+        dff['plot_id'] = dff['row_idx']
+        
+        # We set the index explicitly to plot_id (which is row_idx) so that .loc calls from table-view logic work correctly.
+        dff = dff.set_index('plot_id', drop=False)
 
 
         # Map colors manually
@@ -685,6 +696,12 @@ def register_plot_callbacks(app):
         # Legend support: one trace per color category
         if not dff.empty:
             unique_groups = sorted(dff[color_col].unique())
+            
+            # Ensure 'Unlabeled' is the FIRST trace so it is rendered at the bottom (Z-order)
+            if 'Unlabeled' in unique_groups:
+                unique_groups.remove('Unlabeled')
+                unique_groups = ['Unlabeled'] + unique_groups
+            
             for group in unique_groups:
                 gp_df = dff[dff[color_col] == group]
                 if gp_df.empty: continue
@@ -893,6 +910,7 @@ def register_plot_callbacks(app):
         except KeyError:
              return no_update, no_update, "Error: Clicked point not found. Please re-filter."
 
+        print(row['mp3_file'])
         
         # 2. Compute (Standard)
         segment, samplerate = utils.load_audio_segment(
@@ -1198,14 +1216,23 @@ def register_plot_callbacks(app):
          Output('label-saved-msg', 'children'),
          Output('manual-label-input', 'value', allow_duplicate=True)],
         [Input('save-label-btn', 'n_clicks'),
-         Input('manual-label-input', 'n_submit')],
+         Input('manual-label-input', 'n_submit'),
+         Input({'type': 'table-inline-label', 'index': ALL}, 'value')],
         [State('manual-label-input', 'value'),
          State("scatter", "clickData"),
          State('filtered-data', 'data')],
         prevent_initial_call=True
     )
-    def save_manual_label(n_clicks, n_submit, label_text, clickData, filtered_data_cache_key):
-        if not label_text or not clickData or not filtered_data_cache_key:
+    def save_manual_label(n_clicks, n_submit, table_label_values, label_text, clickData, filtered_data_cache_key):
+        import json
+
+        triggered = dash.callback_context.triggered
+        if not triggered:
+            return dash.no_update, "", dash.no_update
+            
+        triggered_id_str = triggered[0]['prop_id'].split('.')[0]
+        
+        if not filtered_data_cache_key:
             return dash.no_update, "", dash.no_update
 
         dff = server_cache.get(filtered_data_cache_key)
@@ -1213,44 +1240,77 @@ def register_plot_callbacks(app):
              return dash.no_update, "Error: Data expired.", dash.no_update
 
         try:
-             point = clickData["points"][0]
-             plot_id = point.get("customdata", [])[2]
-             
-             # Locate the row
-             if plot_id in dff.index:
-                 row = dff.loc[plot_id]
-                 
-                 
-                 # Save label for every second in the clip
-                 label_val = label_text.strip()
-                 loc = row.get('location', 'Unknown')
-                 if pd.isna(loc): loc = 'Unknown'
-                 micro = row.get('microlocation', 'Unknown')
-                 if pd.isna(micro): micro = 'Unknown'
-                 channel = int(row['channel'])
-                 
-                 # Single clip fallback (now sufficient as merged clips are single-file)
-                 file_basename = os.path.basename(str(row['mp3_file']))
-                 start_time = float(row['clip_time'])
-                 duration = float(row.get('clip_duration', 5.0))
-                 
-                 start_second = math.floor(start_time)
-                 end_second = math.ceil(start_time + duration)
-                 
-                 print(f"DEBUG: Saving label '{label_val}' for seconds {start_second} to {end_second} of {file_basename}")
-                 # ADD +1 to include the end_second in the range!
-                 for sec in range(start_second, end_second + 1):
-                     # Key: (Loc, Micro, Basename, Chan, Sec)
-                     key = (loc, micro, file_basename, channel, sec)
-                     MANUAL_LABELS_CACHE[key] = label_val
-                 
-                 # Optional: Log the total cache size
-                 print(f"DEBUG: MANUAL_LABELS_CACHE total keys: {len(MANUAL_LABELS_CACHE)}")
-                 
-                 # Return timestamp to trigger update
-                 return str(time.time()), f"Saved: {label_val}", label_val
-             else:
-                 return dash.no_update, "Error: Point not found.", dash.no_update
+            # Inline Table Edit
+            if triggered_id_str.startswith('{'):
+                trig_dict = json.loads(triggered_id_str)
+                if trig_dict.get('type') == 'table-inline-label':
+                    plot_id = trig_dict.get('index')
+                    
+                    if plot_id not in dff.index:
+                        return dash.no_update, "Error: Table point not found.", dash.no_update
+                        
+                    row = dff.loc[plot_id]
+                    
+                    # The value is the trigger value
+                    val = triggered[0]['value']
+                    if val is None:
+                        return dash.no_update, dash.no_update, dash.no_update
+                        
+                    label_val = val.strip()
+                    if not label_val:
+                        label_val = 'Unlabeled'
+                    
+                    loc = row.get('location', 'Unknown')
+                    if pd.isna(loc): loc = 'Unknown'
+                    micro = row.get('microlocation', 'Unknown')
+                    if pd.isna(micro): micro = 'Unknown'
+                    channel = int(row['channel'])
+                    
+                    file_basename = os.path.basename(str(row['mp3_file']))
+                    start_time = float(row['clip_time'])
+                    duration = float(row.get('clip_duration', 5.0))
+                    
+                    start_second = math.floor(start_time)
+                    end_second = math.ceil(start_time + duration)
+                    
+                    for sec in range(start_second, end_second + 1):
+                        key = (loc, micro, file_basename, channel, sec)
+                        MANUAL_LABELS_CACHE[key] = label_val
+                        
+                    return str(time.time()), f"Saved: {label_val}", dash.no_update
+
+            # Sidebar button
+            if not label_text or not clickData:
+                return dash.no_update, "", dash.no_update
+                
+            point = clickData["points"][0]
+            plot_id = point.get("customdata", [])[2]
+            
+            if plot_id in dff.index:
+                row = dff.loc[plot_id]
+                
+                label_val = label_text.strip()
+                loc = row.get('location', 'Unknown')
+                if pd.isna(loc): loc = 'Unknown'
+                micro = row.get('microlocation', 'Unknown')
+                if pd.isna(micro): micro = 'Unknown'
+                channel = int(row['channel'])
+                
+                file_basename = os.path.basename(str(row['mp3_file']))
+                start_time = float(row['clip_time'])
+                duration = float(row.get('clip_duration', 5.0))
+                
+                start_second = math.floor(start_time)
+                end_second = math.ceil(start_time + duration)
+                
+                for sec in range(start_second, end_second + 1):
+                    key = (loc, micro, file_basename, channel, sec)
+                    MANUAL_LABELS_CACHE[key] = label_val
+                
+                return str(time.time()), f"Saved: {label_val}", label_val
+            else:
+                return dash.no_update, "Error: Point not found.", dash.no_update
+                
         except Exception as e:
              return dash.no_update, f"Error: {str(e)}", dash.no_update
 

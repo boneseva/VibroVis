@@ -7,14 +7,13 @@ from tqdm import tqdm
 
 # Hardcoded data directory as requested
 BASE_DATA_DIR = "data"
-BASE_DATA_DIR = "data_multimon"
+# BASE_DATA_DIR = "data_multimon"
 
 DATA_DIR = os.path.abspath(os.path.join(BASE_DATA_DIR, "mp3"))
 OVERVIEW_TSV = os.path.join(BASE_DATA_DIR, "Rok_spring_summer.tsv")
 SAVE_PATH = os.path.join(BASE_DATA_DIR, "cache", "final_data.parquet")
-LABELS_SAVE_PATH = pathlib.Path(os.path.join(BASE_DATA_DIR, "cache", "saved_labels.parquet"))
 
-OVERVIEW_TSV = os.path.join(BASE_DATA_DIR, "zabe+hyla.tsv")
+# OVERVIEW_TSV = os.path.join(BASE_DATA_DIR, "zabe+hyla.tsv")
 
 # DEBUG: DIAGNOSE DATA PATHS
 print("--- DEBUG: DATA PATH DIAGNOSTICS ---")
@@ -23,14 +22,14 @@ print(f"BASE_DATA_DIR: {BASE_DATA_DIR} (Absolute: {os.path.abspath(BASE_DATA_DIR
 print(f"DATA_DIR: {DATA_DIR}")
 
 if os.path.exists(BASE_DATA_DIR):
-    print(f"✅ BASE_DATA_DIR exists. Contents: {os.listdir(BASE_DATA_DIR)}")
+    print(f"OK: BASE_DATA_DIR exists. Contents: {os.listdir(BASE_DATA_DIR)}")
 else:
-    print(f"❌ BASE_DATA_DIR does NOT exist!")
+    print(f"ERROR: BASE_DATA_DIR does NOT exist!")
 
 if os.path.exists(DATA_DIR):
-    print(f"✅ DATA_DIR exists. Contents (first 5): {os.listdir(DATA_DIR)[:5]}")
+    print(f"OK: DATA_DIR exists. Contents (first 5): {os.listdir(DATA_DIR)[:5]}")
 else:
-    print(f"❌ DATA_DIR does NOT exist!")
+    print(f"ERROR: DATA_DIR does NOT exist!")
 print("------------------------------------")
 
 # Load the overview TSV as reference (if it exists, to avoid import-time crash)
@@ -53,12 +52,17 @@ def load_positions_tsv_optimized(wav_meta=OVERVIEW_TSV, data_dir=DATA_DIR, save_
     all_files_to_process = []
 
     wav_meta = pd.read_csv(wav_meta, sep='\t', dtype={6: str})
+    wav_meta['wav_file'] = wav_meta['wav_file'].apply(os.path.normpath)
+    if 'channel' in wav_meta.columns:
+        wav_meta['channel'] = wav_meta['channel'].astype(int)
+    
+    unique_wavs = wav_meta['wav_file'].unique()
 
-    # 1. Collect all file paths and their associated metadata first
-    for idx, row in tqdm(wav_meta.iterrows(), total=len(wav_meta)):
-        wav_path = row['wav_file'].replace("\\", "/")
-        positions_dir = os.path.join(os.path.dirname(wav_path), 'positions')
-        base_name = os.path.splitext(os.path.basename(wav_path))[0]
+    # 1. Collect all file paths uniquely
+    for wav_path in tqdm(unique_wavs, desc="Finding TSV files"):
+        wav_path_norm = wav_path.replace("\\", "/")
+        positions_dir = os.path.join(os.path.dirname(wav_path_norm), 'positions')
+        base_name = os.path.splitext(os.path.basename(wav_path_norm))[0]
 
         full_positions_dir = os.path.join(data_dir, positions_dir)
         if not os.path.exists(full_positions_dir):
@@ -69,7 +73,7 @@ def load_positions_tsv_optimized(wav_meta=OVERVIEW_TSV, data_dir=DATA_DIR, save_
             for file in os.listdir(full_positions_dir):
                 if pattern.match(file):
                     tsv_path = os.path.join(full_positions_dir, file)
-                    all_files_to_process.append({'path': tsv_path, 'meta': row.to_dict(), 'file_name': file})
+                    all_files_to_process.append({'path': tsv_path, 'wav_file': wav_path, 'file_name': file})
         except OSError:
             continue
 
@@ -84,21 +88,33 @@ def load_positions_tsv_optimized(wav_meta=OVERVIEW_TSV, data_dir=DATA_DIR, save_
         except Exception:
             continue
 
-        # Add metadata from the overview file to each row
-        for key, value in file_info['meta'].items():
-            dff[key] = value
+        dff['wav_file'] = file_info['wav_file']
 
-        # Add cluster number from the filename
-        c = file_info['file_name'].split('.')[-2].split('_')[-1]
-        dff['cluster_num'] = int(c) if c.isnumeric() else 10
+        # Add cluster number from the file contents if available
+        if 'num_clusters' in dff.columns:
+            # Handle potential NaNs or floats safely
+            dff['cluster_num'] = dff['num_clusters'].fillna(10).astype(int)
+        else:
+            c = file_info['file_name'].split('.')[-2].split('_')[-1]
+            dff['cluster_num'] = int(c) if c.isnumeric() else 10
 
         df_list.append(dff)
 
     if not df_list:
         return pd.DataFrame()
 
-    # 3. Concatenate everything at once
+    # 3. Concatenate everything at once and merge metadata safely by channel
     df = pd.concat(df_list, ignore_index=True)
+    if 'channel' in df.columns:
+        df['channel'] = df['channel'].astype(int)
+        
+    df.drop(columns=['day', 'start_time'], errors='ignore', inplace=True)
+    
+    # Clean up exact duplicate clustering entries caused by duplicate TSV sweeps in directory
+    if set(['wav_file', 'channel', 'clip_time', 'model_name', 'cluster_num']).issubset(df.columns):
+        df.drop_duplicates(subset=['wav_file', 'channel', 'clip_time', 'model_name', 'cluster_num'], inplace=True)
+        
+    df = df.merge(wav_meta, on=['wav_file', 'channel'], how='left')
 
     # 4. Perform all transformations in a vectorized way on the full DataFrame
     df['day_dt'] = pd.to_datetime(df['day'], format="%Y-%m-%d")
@@ -125,6 +141,7 @@ def load_positions_tsv_optimized(wav_meta=OVERVIEW_TSV, data_dir=DATA_DIR, save_
     df['day_str'] = df['day_dt'].dt.strftime('%Y-%m-%d')
 
     base_name = df['wav_file'].str.removesuffix('.wav')
+    base_name = base_name.str.removesuffix('.WAV')
     df['mp3_file'] = base_name + '_ch' + df['channel'].astype(str) + '.mp3'
     df['mp3_file'] = df['mp3_file'].apply(os.path.normpath)
 

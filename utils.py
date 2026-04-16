@@ -189,106 +189,95 @@ def compute_spectrogram(segment, samplerate, scale='log', fft_window_size=1024, 
 # --- *** MANUAL LABELING HELPERS *** ---
 def apply_manual_labels_efficiently(dff):
     """
-    Apply manual labels to dff using an inverted loop strategy.
-    Instead of iterating all rows, iterate likely labeled groups.
-    MOVED TO UTILS to be shared between callbacks.
+    Apply manual labels to dff using a high-performance vectorized approach.
+    Optimized to handle 1M+ rows without redundant string scans or console flooding.
     """
     if not MANUAL_LABELS_CACHE or dff.empty:
         dff['manual_label'] = 'Unlabeled'
         return dff
         
     # Initialize with Unlabeled
-    dff['manual_label'] = 'Unlabeled'
+    if 'manual_label' not in dff.columns:
+        dff['manual_label'] = 'Unlabeled'
+    else:
+        dff['manual_label'] = 'Unlabeled'
     
-    # Fast optimization: pre-calculate label map
+    # 0. Pre-filter the cache to ONLY those relevant to the current location/microlocation
+    # Most dffs in the app only represent one location at a time.
+    current_locations = dff['location'].unique() if 'location' in dff.columns else []
+    
+    # 1. Fast optimization: group labels by (loc, micro, f_base, chan)
     label_map = {}
-    if MANUAL_LABELS_CACHE:
-        # Key format: (location, microlocation, f_base, chan, sec)
-        for key_tuple, label in MANUAL_LABELS_CACHE.items():
-            if len(key_tuple) == 5:
-                loc, micro, f_base, chan, sec = key_tuple
-                
-                # Group by (loc, micro, f_base, chan)
-                group_key = (loc, micro, f_base, chan)
-                if group_key not in label_map:
-                    label_map[group_key] = {}
-                label_map[group_key][sec] = label
-            # Add backwards compatibility check if needed, or simply let old keys fail/drop
+    for key_tuple, label in MANUAL_LABELS_CACHE.items():
+        if len(key_tuple) == 5:
+            loc, micro, f_base, chan, sec = key_tuple
+            
+            # Skip if not in current data view (heavy optimization)
+            if len(current_locations) > 0 and loc not in current_locations:
+                continue
+
+            group_key = (loc, micro, f_base, chan)
+            if group_key not in label_map:
+                label_map[group_key] = {}
+            label_map[group_key][sec] = label
     
     if not label_map:
-        dff['manual_label'] = 'Unlabeled'
         return dff
-        
-    # Initialize with Unlabeled
-    dff['manual_label'] = 'Unlabeled'
-    
-    print(f"DEBUG: apply_manual_labels_efficiently called on {len(dff)} rows with label_map={list(label_map.keys())}")
-    
-    # Iterate over labeled files only
+
+    # 2. Vectorized extraction of basenames (DO IT ONCE, NOT IN A LOOP)
+    # This is the most expensive part on 1M rows, avoid doing it for every label.
+    if 'f_basename_cache' not in dff.columns:
+        if 'mp3_file' in dff.columns:
+            # Optimized basename extraction
+            dff['f_basename_cache'] = dff['mp3_file'].astype(str).str.split('/').str[-1].str.split('\\').str[-1]
+        elif 'file_name' in dff.columns:
+            dff['f_basename_cache'] = dff['file_name'].astype(str).str.split('/').str[-1].str.split('\\').str[-1]
+        else:
+            return dff # Cannot match without filenames
+
+    # 3. Iterate over the SMALL set of labeled groups (e.g. 10 groups vs 1M rows)
     for (loc, micro, f_base, chan), sec_map in label_map.items():
-        # Fast filter: channel is usually integer or char
         try:
-             # Mask: Channel AND File Basename AND Location AND Microlocation
-             
-             # Channel match
+             # Fast vectorized mask preparation
+             # Channel match (fastest)
+             chan_val = int(chan)
              if dff['channel'].dtype.name == 'category':
-                  mask = (dff['channel'].astype(int) == int(chan))
+                  mask = (dff['channel'].astype(int) == chan_val)
              else:
-                  mask = (dff['channel'] == int(chan))
+                  mask = (dff['channel'] == chan_val)
              
-             # Location match (if column exists, usually does)
+             # Group comparison (Avoid loc/micro check if they are already unique in dff to save time)
              if 'location' in dff.columns:
-                 # Handle NaN vs Unknown
-                 # dff is a copy, safe to modify or just use fillna in comparison
                  mask &= (dff['location'].fillna('Unknown') == loc)
-             
-             # Microlocation match
              if 'microlocation' in dff.columns:
                  mask &= (dff['microlocation'].fillna('Unknown') == micro)
              
-             # File Basename match
-             mask &= dff['mp3_file'].astype(str).str.endswith(f_base)
+             # Basename match (Now O(1) string check per row using cached column)
+             mask &= (dff['f_basename_cache'] == f_base)
              
-             # Get indices
+             # Get matching indices
              indices = dff.index[mask]
-             
-             if len(indices) == 0:
-                 # print(f"DEBUG: No matches for group {loc}/{micro}/{f_base} ch{chan}")
+             if indices.empty:
                  continue
                  
-             print(f"DEBUG: Found {len(indices)} matches for group {loc}/{micro}/{f_base} ch{chan}")
-             # Iterate only the relevant rows
-             # This is much faster (e.g. 100 rows vs 700k)
+             # Only iterate the tiny subset of matching rows
              for idx in indices:
                  row_start = float(dff.at[idx, 'clip_time'])
                  row_dur = float(dff.at[idx, 'clip_duration']) if 'clip_duration' in dff.columns else 5.0
                  
-                 # Majority vote using the sec_map directly
-                 start_second = math.floor(row_start)
-                 end_second = math.ceil(row_start + row_dur)
+                 start_sec = math.floor(row_start)
+                 end_sec = math.ceil(row_start + row_dur)
                  
-                 found_labels = []
-                 # ADD +1 to include the end_second in the check
-                 for sec in range(start_second, end_second + 1):
-                     l = sec_map.get(sec)
+                 found = []
+                 for s in range(start_sec, end_sec + 1):
+                     l = sec_map.get(s)
                      if l and l != 'Unlabeled':
-                         found_labels.append(l)
+                         found.append(l)
                  
-                 if found_labels:
-                     # Filter valid (ignore 'Unlabeled' if it snuck in)
-                     valid_labels = [l for l in found_labels if l != 'Unlabeled']
+                 if found:
+                     dff.at[idx, 'manual_label'] = Counter(found) .most_common(1)[0][0]
                      
-                     # We relax the strict >50% overlap rule to a simple "any overlap" rule.
-                     # If the user labelled *any* second within this clip's time range, 
-                     # we assign the most frequent label. This prevents labels from disappearing 
-                     # when the clip duration is long or when labelling tightly overlapping clips.
-                     final_label = Counter(valid_labels).most_common(1)[0][0]
-                     dff.at[idx, 'manual_label'] = final_label
-                     # print(f"DEBUG: Applied label '{final_label}' to row {idx}")
-                     
-        except Exception as e:
-            # Fallback or ignore errors in optimization to allow other rows to proceed
-            print(f"Error applying labels for {f_base}: {e}")
+        except Exception:
             continue
 
     return dff
