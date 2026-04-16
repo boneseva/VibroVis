@@ -369,12 +369,14 @@ def register_cluster_callbacks(app):
 
                 # Percentage
                 percent_str = ""
-                if cluster_stats and lbl_str in cluster_stats and lbl_str != 'Unlabeled' and labeled_total > 0:
-                    count = cluster_stats[lbl_str]
+                count = int(cluster_stats.get(lbl_str, 0)) if cluster_stats else 0
+                if lbl_str != 'Unlabeled' and labeled_total > 0:
                     pct = (count / labeled_total) * 100
-                    percent_str = f" ({pct:.1f}%)"
+                    percent_str = f" ({count:,}, {pct:.1f}%)"
                 elif lbl_str == 'Unlabeled' and no_labels_applied:
                     percent_str = " (No labels applied yet)"
+                elif lbl_str == 'Unlabeled' and count > 0:
+                    percent_str = f" ({count:,})"
 
                 row = html.Div([
                     # Checkbox
@@ -419,7 +421,8 @@ def register_cluster_callbacks(app):
             return []
 
     @app.callback(
-        Output('label-name-store', 'data'),
+        [Output('label-name-store', 'data'),
+         Output('manual-labels-store', 'data', allow_duplicate=True)],
         Input({'type': 'label-name-input', 'index': ALL}, 'value'),
         State({'type': 'label-name-input', 'index': ALL}, 'id'),
         State('label-name-store', 'data'),
@@ -428,15 +431,56 @@ def register_cluster_callbacks(app):
     def sync_label_names(new_names, ids, current_store):
         if current_store is None:
             current_store = {}
-        updated_store = current_store.copy()
+
+        triggered_id = dash.callback_context.triggered_id
+        if not isinstance(triggered_id, dict) or triggered_id.get('type') != 'label-name-input':
+            return dash.no_update, dash.no_update
+
+        old_label_name = str(triggered_id.get('index'))
+        if old_label_name == 'Unlabeled':
+            # Protect origin category from rename/delete.
+            return dash.no_update, dash.no_update
+
+        # Resolve the edited value for the triggered label input.
+        new_label_name = None
         for name_val, id_dict in zip(new_names, ids):
-            idx_str = str(id_dict['index'])
-            if name_val and name_val.strip() != "" and name_val != idx_str:
-                updated_store[idx_str] = name_val
+            if str(id_dict.get('index')) == old_label_name:
+                new_label_name = (name_val or '').strip()
+                break
+
+        if new_label_name is None:
+            return dash.no_update, dash.no_update
+
+        updated_store = current_store.copy()
+
+        # Keep display-name store behavior for non-rename custom names.
+        if new_label_name and new_label_name != old_label_name:
+            updated_store[old_label_name] = new_label_name
+        else:
+            updated_store.pop(old_label_name, None)
+
+        # Empty or unchanged text does not perform cache relabel operations.
+        if not new_label_name or new_label_name == old_label_name:
+            return updated_store, dash.no_update
+
+        changed = False
+        for cache_key, cache_label in list(MANUAL_LABELS_CACHE.items()):
+            if cache_label != old_label_name:
+                continue
+
+            changed = True
+            if new_label_name == 'Unlabeled':
+                # Delete label assignment by removing per-second keys.
+                MANUAL_LABELS_CACHE.pop(cache_key, None)
             else:
-                if idx_str in updated_store:
-                    del updated_store[idx_str]
-        return updated_store
+                # Rename/merge (case-sensitive by design).
+                MANUAL_LABELS_CACHE[cache_key] = new_label_name
+
+        if not changed:
+            return updated_store, dash.no_update
+
+        # Timestamp token is enough to trigger dependent callbacks.
+        return updated_store, str(time.time())
 
     @app.callback(
         Output('label-color-store', 'data'),

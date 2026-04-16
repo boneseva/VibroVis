@@ -525,13 +525,14 @@ def register_table_callbacks(app):
         Output("table-total-pages-store", "data", allow_duplicate=True),
         Input("main-view-tabs", "data"),
         Input("filtered-data", "data"),
+        Input('manual-labels-store', 'data'),
         Input("table-column-selector", "value"),
         Input("table-page-store", "data"),
         Input("table-sort-store", "data"),
         Input("color-mode-radio", "value"),
         prevent_initial_call=True,
     )
-    def update_table(active_tab, filtered_data_key, visible_cols, page,
+    def update_table(active_tab, filtered_data_key, manual_labels_trigger, visible_cols, page,
                      sort_state, color_mode):
 
         if active_tab != "table-tab":
@@ -550,13 +551,15 @@ def register_table_callbacks(app):
                                  style={"padding": "2rem", "color": "#888"}),
                         "0 rows", 1)
 
+            # Never mutate the cached dataframe directly.
+            dff = dff.copy()
+
             if not visible_cols:
                 visible_cols = DEFAULT_VISIBLE_COLS
 
-            # Ensure manual_label column exists for the Label column
-            if "manual_label" not in dff.columns:
-                dff = dff.copy()
-                dff["manual_label"] = "Unlabeled"
+            # Always remap labels from MANUAL_LABELS_CACHE so rename/merge/delete
+            # is reflected immediately in the table.
+            dff = utils.apply_manual_labels_efficiently(dff)
 
             # Store for row-click callback
             _TABLE_CACHE["entry"] = {"df": dff}
