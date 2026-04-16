@@ -665,60 +665,99 @@ def create_layout(df):
                     html.Details([
                         html.Summary("Labeling", className='section-title'),
                         html.Div(children=[
-                            # Row 1: Input and Apply
+                            # Apply Labels - Primary action
                             html.Div([
-                                 dcc.Input(id='manual-label-input', type='text', placeholder='Enter label...', list='manual-label-datalist', className='input-field', style={'flex': '1', 'marginRight': '5px'}),
-                                 html.Datalist(id='manual-label-datalist'),
-                                 html.Button('Apply', id='save-label-btn', n_clicks=0, className='app-button'),
-                            ], style={'display': 'flex', 'marginBottom': '10px'}),
+                                html.Label("Apply label to selected clip:", style={'fontSize': '0.9em', 'marginBottom': '5px'}),
+                                html.Div([
+                                    dcc.Input(id='manual-label-input', type='text', placeholder='Enter label...', list='manual-label-datalist', className='input-field', style={'flex': '1', 'marginRight': '5px'}),
+                                    html.Datalist(id='manual-label-datalist'),
+                                    html.Button('Apply', id='save-label-btn', n_clicks=0, className='app-button'),
+                                ], style={'display': 'flex'}),
+                            ], style={'marginBottom': '15px', 'paddingBottom': '10px', 'borderBottom': '1px solid #eee'}),
 
-                            # Row 2: Load (Dropdown + Button)
-                            html.Div([
-                                dcc.Dropdown(
-                                    id='label-load-dropdown',
-                                    options=[],
-                                    placeholder="Load labels...",
-                                    style={'flex': '1', 'minWidth': '100px', 'fontSize': '0.9em'},
-                                    clearable=False
-                                ),
-                                html.Button(
-                                    'Load',
-                                    id='label-load-btn',
-                                    className='app-button',
-                                    style={'marginLeft': '5px', 'padding': '2px 10px', 'height': '36px'}
-                                ),
-                            ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '5px'}),
-
-                            # Row 3: Save (Input + Button)
+                            # Label Sets - All save/load operations
                             html.Details([
-                                html.Summary("Save current labels...", style={
-                                    'fontSize': '0.85em', 'color': '#888', 'cursor': 'pointer', 'marginBottom': '5px',
+                                html.Summary("Manage Label Sets", style={
+                                    'fontSize': '0.9em', 'cursor': 'pointer', 'marginBottom': '8px',
                                     'userSelect': 'none'
                                 }),
                                 html.Div([
-                                    dcc.Input(
-                                        id='label-save-name',
-                                        type='text',
-                                        placeholder='Label set name...',
-                                        className='input-field',
-                                        style={'flex': '1', 'marginRight': '5px'}
-                                    ),
-                                    html.Button('Save', id='label-save-btn-server', className='app-button'),
-                                ], style={'display': 'flex', 'marginBottom': '5px'}),
-                                html.Div(id='label-save-message', style={'fontSize': '0.8em', 'color': '#666'}),
-                            ], style={'marginBottom': '10px', 'borderBottom': '1px solid #eee', 'paddingBottom': '5px'}),
-                            
-                            # Row 4: Reset
-                            html.Div([
-                                 html.Button('Reset Labels', id='btn-reset-labels', className='app-button', style={'width': '80%', 'backgroundColor': '#d9534f', 'color': 'white'}),
-                                 dcc.ConfirmDialog(
-                                      id='confirm-reset-labels',
-                                      message='Are you sure you want to RESET all manual labels?\n\nThis will clear all labels from memory.\nMake sure you have saved your labels if you want to keep them.',
-                                 ),
-                            ], style={'marginBottom': '5px'}),
+                                    # Server-based sets
+                                    html.Div([
+                                        html.Label("Saved label sets:", style={'fontSize': '0.85em', 'color': '#666', 'marginBottom': '3px'}),
+                                        html.Div([
+                                            dcc.Dropdown(
+                                                id='label-load-dropdown',
+                                                options=[],
+                                                placeholder="Load from server...",
+                                                style={'flex': '1', 'minWidth': '100px', 'fontSize': '0.9em'},
+                                                clearable=False
+                                            ),
+                                            html.Button('Load', id='label-load-btn', className='app-button', style={'marginLeft': '5px', 'padding': '2px 8px', 'height': '36px'}),
+                                        ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '8px'}),
+                                        
+                                        html.Div([
+                                            dcc.Input(
+                                                id='label-save-name',
+                                                type='text',
+                                                placeholder='Save as new set...',
+                                                className='input-field',
+                                                style={'flex': '1', 'marginRight': '5px'}
+                                            ),
+                                            html.Button('Save', id='label-save-btn-server', className='app-button'),
+                                        ], style={'display': 'flex', 'marginBottom': '8px'}),
+                                        html.Div(id='label-save-message', style={'fontSize': '0.8em', 'color': '#666', 'marginBottom': '10px'}),
+                                    ]),
+                                    
+                                    # File import/export
+                                    html.Div([
+                                        html.Label("Import/Export files:", style={'fontSize': '0.85em', 'color': '#666', 'marginBottom': '3px'}),
+                                        html.Div([
+                                            html.Button('Export to File', id='download-labels-btn', className='app-button', style={'flex': '1', 'marginRight': '5px'}),
+                                            dcc.Upload(
+                                                id='upload-labels-json',
+                                                children=html.Button('Import from File', className='app-button', style={'flex': '1'}),
+                                                multiple=False,
+                                                style={'flex': '1'}
+                                            ),
+                                        ], style={'display': 'flex', 'marginBottom': '5px'}),
+                                        dcc.Download(id='download-labels-json'),
+                                    ]),
+                                ], style={'padding': '8px', 'backgroundColor': '#f8f9fa', 'borderRadius': '4px'})
+                            ], style={'marginBottom': '15px'}),
 
-                            # Status Message
-                            html.Div(id='label-saved-msg', style={'color':'#28a745', 'fontSize':'0.9em', 'fontWeight': 'bold', 'textAlign': 'center', 'minHeight': '1.2em'})
+                            # Browser Backup - Automatic safety feature
+                            html.Div([
+                                html.Label("Browser Backup:", style={'fontSize': '0.9em', 'marginBottom': '5px'}),
+                                html.Div(id='label-backup-msg', style={'color': '#6c757d', 'fontSize': '0.8em', 'marginBottom': '5px', 'minHeight': '1.1em'}),
+                                html.Button('Restore from Browser Backup', id='restore-local-labels-btn', className='app-button', style={'width': '100%'}),
+                            ], style={'marginBottom': '15px', 'paddingBottom': '10px', 'borderBottom': '1px solid #eee'}),
+
+                            # Conflict resolution panel (shown only when needed)
+                            html.Div([
+                                 html.Div(id='label-conflict-text', style={'fontSize': '0.82em', 'marginBottom': '6px'}),
+                                 html.Div([
+                                      html.Button('Keep Current', id='label-conflict-keep-btn', className='app-button', style={'marginRight': '5px'}),
+                                      html.Button('Use Incoming', id='label-conflict-use-btn', className='app-button')
+                                 ], style={'display': 'flex', 'marginBottom': '5px'}),
+                                 html.Div([
+                                      html.Button('Keep All Remaining', id='label-conflict-keep-all-btn', className='app-button', style={'marginRight': '5px'}),
+                                      html.Button('Use All Remaining', id='label-conflict-use-all-btn', className='app-button')
+                                 ], style={'display': 'flex', 'marginBottom': '5px'}),
+                                 html.Button('Cancel Import', id='label-conflict-cancel-btn', className='app-button', style={'width': '100%', 'backgroundColor': '#f0ad4e', 'color': 'white'}),
+                            ], id='label-conflict-panel', style={'display': 'none', 'border': '2px solid #ffc107', 'borderRadius': '4px', 'padding': '8px', 'marginBottom': '15px', 'backgroundColor': '#fff8e1'}),
+
+                            # Reset - Destructive action
+                            html.Div([
+                                html.Button('Reset All Labels', id='btn-reset-labels', className='app-button', style={'width': '100%', 'backgroundColor': '#dc3545', 'color': 'white'}),
+                                dcc.ConfirmDialog(
+                                    id='confirm-reset-labels',
+                                    message='Are you sure you want to RESET all manual labels?\n\nThis will clear all labels from memory.\nMake sure you have saved your labels if you want to keep them.',
+                                ),
+                            ], style={'marginBottom': '10px'}),
+
+                            # Status messages
+                            html.Div(id='label-saved-msg', style={'color':'#28a745', 'fontSize':'0.9em', 'textAlign': 'center', 'minHeight': '1.2em', 'padding': '5px', 'borderRadius': '3px'})
 
                         ], style={'padding': '10px'})
                     ], open=True),
@@ -947,6 +986,8 @@ def create_layout(df):
         dcc.Store(id='cluster-stats-store'),
         dcc.Store(id='last-preset-load-time', data=0),
         dcc.Store(id='manual-labels-store', data={}),
+        dcc.Store(id='local-labels-store', storage_type='local'),
+        dcc.Store(id='label-import-session-store', data=None),
         dcc.Store(id='label-color-store', data={}),
         dcc.Store(id='label-name-store', data={}),
         dcc.Store(id='label-last-action'),

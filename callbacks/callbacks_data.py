@@ -4,6 +4,7 @@ Data loading, caching, and audio serving callbacks.
 import time
 import os
 import sys
+import hashlib
 import flask
 import soundfile as sf
 import io
@@ -24,6 +25,175 @@ from callbacks.callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, i
 
 # Suppress mpg123 decoder warnings (these are non-critical)
 warnings.filterwarnings('ignore', category=UserWarning)
+
+LOCAL_LABELS_SCHEMA_VERSION = 1
+LOCAL_LABELS_SOFT_LIMIT_BYTES = 4_000_000
+
+
+def _key_tuple_to_string(key_tuple):
+    return "||".join(str(x) for x in key_tuple)
+
+
+def _string_to_key_tuple(key_str):
+    parts = str(key_str).split('||')
+    if len(parts) != 5:
+        return None
+    try:
+        return parts[0], parts[1], parts[2], int(parts[3]), int(parts[4])
+    except (TypeError, ValueError):
+        return None
+
+
+def _entry_to_key_tuple(entry):
+    if not isinstance(entry, (list, tuple)) or len(entry) < 6:
+        return None
+    try:
+        return str(entry[0]), str(entry[1]), str(entry[2]), int(entry[3]), int(entry[4])
+    except (TypeError, ValueError):
+        return None
+
+
+def _build_local_labels_payload():
+    entries = []
+    for (loc, micro, f_base, chan, sec), label in MANUAL_LABELS_CACHE.items():
+        entries.append([str(loc), str(micro), str(f_base), int(chan), int(sec), str(label)])
+    entries.sort(key=lambda x: (x[0], x[1], x[2], x[3], x[4]))
+    payload: dict[str, object] = {
+        'v': LOCAL_LABELS_SCHEMA_VERSION,
+        'e': entries,
+        'n': len(entries)
+    }
+    payload_raw = json.dumps(payload, separators=(',', ':'), ensure_ascii=True)
+    payload['h'] = hashlib.md5(payload_raw.encode('utf-8')).hexdigest()
+    payload['b'] = len(payload_raw.encode('utf-8'))
+    return payload
+
+
+def _deserialize_labels_payload(payload):
+    result = {}
+    if not isinstance(payload, dict):
+        return result
+
+    # Compact local-storage schema
+    if isinstance(payload.get('e'), list):
+        for entry in payload['e']:
+            key_tuple = _entry_to_key_tuple(entry)
+            if key_tuple is None:
+                continue
+            result[key_tuple] = str(entry[5])
+        return result
+
+    # Portable export schema
+    labels_obj = payload.get('labels')
+    if isinstance(labels_obj, dict):
+        for key_str, label in labels_obj.items():
+            key_tuple = _string_to_key_tuple(key_str)
+            if key_tuple is None:
+                continue
+            result[key_tuple] = str(label)
+        return result
+
+    # Legacy flat schema: {"loc||micro||file||chan||sec": "label"}
+    reserved = {'v', 'e', 'n', 'h', 'b', 'format', 'version', 'created_at', 'labels'}
+    for key_str, label in payload.items():
+        if key_str in reserved:
+            continue
+        key_tuple = _string_to_key_tuple(key_str)
+        if key_tuple is None:
+            continue
+        result[key_tuple] = str(label)
+
+    return result
+
+
+def _build_import_session(incoming_labels, source_name):
+    non_conflicts = []
+    conflicts = []
+
+    for key_tuple, incoming_label in incoming_labels.items():
+        key_entry = [key_tuple[0], key_tuple[1], key_tuple[2], key_tuple[3], key_tuple[4], str(incoming_label)]
+        current_label = MANUAL_LABELS_CACHE.get(key_tuple)
+
+        if current_label is None or str(current_label) == str(incoming_label):
+            non_conflicts.append(key_entry)
+        else:
+            conflicts.append([
+                key_tuple[0], key_tuple[1], key_tuple[2], key_tuple[3], key_tuple[4],
+                str(current_label), str(incoming_label)
+            ])
+
+    return {
+        'source': source_name,
+        'incoming_total': len(incoming_labels),
+        'non_conflicts': non_conflicts,
+        'conflicts': conflicts,
+        'resolutions': [None] * len(conflicts),
+        'cursor': 0,
+    }
+
+
+def _next_unresolved_index(resolutions, start_idx=0):
+    for idx in range(max(0, int(start_idx)), len(resolutions)):
+        if resolutions[idx] is None:
+            return idx
+    return None
+
+
+def _format_conflict_text(session):
+    conflicts = session.get('conflicts', [])
+    resolutions = session.get('resolutions', [])
+    cursor = _next_unresolved_index(resolutions, session.get('cursor', 0))
+    if cursor is None or cursor >= len(conflicts):
+        return ""
+
+    loc, micro, f_base, chan, sec, current_label, incoming_label = conflicts[cursor]
+    total = len(conflicts)
+    return (
+        f"Conflict {cursor + 1}/{total} | {f_base} ch{chan} @ {sec}s | "
+        f"Location: {loc}/{micro} | Current: '{current_label}' | Incoming: '{incoming_label}'"
+    )
+
+
+def _apply_import_session(session):
+    applied_count = 0
+    kept_conflicts = 0
+    used_conflicts = 0
+
+    for entry in session.get('non_conflicts', []):
+        key_tuple = _entry_to_key_tuple(entry)
+        if key_tuple is None:
+            continue
+        MANUAL_LABELS_CACHE[key_tuple] = str(entry[5])
+        applied_count += 1
+
+    conflicts = session.get('conflicts', [])
+    resolutions = session.get('resolutions', [])
+    for idx, conflict in enumerate(conflicts):
+        resolution = resolutions[idx] if idx < len(resolutions) else 'keep'
+        if resolution != 'use':
+            kept_conflicts += 1
+            continue
+
+        key_tuple = (str(conflict[0]), str(conflict[1]), str(conflict[2]), int(conflict[3]), int(conflict[4]))
+        MANUAL_LABELS_CACHE[key_tuple] = str(conflict[6])
+        applied_count += 1
+        used_conflicts += 1
+
+    return applied_count, used_conflicts, kept_conflicts
+
+
+def _build_portable_export_payload():
+    labels = {}
+    for key_tuple, label in sorted(MANUAL_LABELS_CACHE.items(), key=lambda kv: kv[0]):
+        labels[_key_tuple_to_string(key_tuple)] = str(label)
+
+    return {
+        'format': 'vibrovis-manual-labels',
+        'version': 1,
+        'created_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        'labels': labels,
+        'count': len(labels)
+    }
 
 
 def merge_clips_vectorized(dff, merge_threshold):
@@ -505,6 +675,191 @@ def register_data_callbacks(app):
         except Exception as e:
             print(f"Error loading manual labels: {e}")
             return dash.no_update, f"Error: {str(e)}"
+
+    @app.callback(
+        Output('label-backup-msg', 'children'),
+        [Input('local-labels-store', 'data'),
+         Input('manual-labels-store', 'data')],
+        prevent_initial_call=False
+    )
+    def update_local_backup_hint(local_payload, _manual_store_trigger):
+        if MANUAL_LABELS_CACHE:
+            return ""
+        parsed = _deserialize_labels_payload(local_payload)
+        if not parsed:
+            return ""
+        return f"Browser backup found ({len(parsed)} labels). Use 'Restore from Browser Backup' to import it."
+
+    @app.callback(
+        Output('local-labels-store', 'data'),
+        Input('manual-labels-store', 'data'),
+        State('local-labels-store', 'data'),
+        prevent_initial_call=True
+    )
+    def backup_manual_labels_to_browser(trigger_data, existing_local_payload):
+        # Avoid startup wipe: skip empty cache writes unless this was an explicit reset.
+        is_explicit_clear = isinstance(trigger_data, dict) and bool(trigger_data.get('cleared'))
+        if not MANUAL_LABELS_CACHE and not is_explicit_clear:
+            return dash.no_update
+
+        payload = _build_local_labels_payload()
+        if payload.get('b', 0) > LOCAL_LABELS_SOFT_LIMIT_BYTES:
+            print(f"[labels-backup] skipped local backup: payload too large ({payload.get('b')} bytes)")
+            return dash.no_update
+
+        if isinstance(existing_local_payload, dict) and existing_local_payload.get('h') == payload.get('h'):
+            return dash.no_update
+
+        payload['saved_at'] = time.time()
+        return payload
+
+    @app.callback(
+        [Output('download-labels-json', 'data'),
+         Output('label-saved-msg', 'children', allow_duplicate=True)],
+        Input('download-labels-btn', 'n_clicks'),
+        prevent_initial_call=True
+    )
+    def download_manual_labels_json(n_clicks):
+        if not n_clicks:
+            return dash.no_update, dash.no_update
+        if not MANUAL_LABELS_CACHE:
+            return dash.no_update, "No labels to download."
+
+        payload = _build_portable_export_payload()
+        file_name = f"manual_labels_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        return dcc.send_string(json.dumps(payload, indent=2), file_name), f"Downloaded {payload['count']} labels."
+
+    @app.callback(
+        [Output('manual-labels-store', 'data', allow_duplicate=True),
+         Output('label-saved-msg', 'children', allow_duplicate=True),
+         Output('label-import-session-store', 'data'),
+         Output('label-conflict-panel', 'style'),
+         Output('label-conflict-text', 'children')],
+        [Input('restore-local-labels-btn', 'n_clicks'),
+         Input('upload-labels-json', 'contents')],
+        [State('local-labels-store', 'data'),
+         State('upload-labels-json', 'filename')],
+        prevent_initial_call=True
+    )
+    def start_restore_or_upload(restore_clicks, upload_contents, local_payload, upload_filename):
+        triggered = callback_context.triggered
+        if not triggered:
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+        trigger_id = triggered[0]['prop_id'].split('.')[0]
+        incoming = {}
+        source_name = ""
+
+        if trigger_id == 'restore-local-labels-btn':
+            if not restore_clicks:
+                return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            incoming = _deserialize_labels_payload(local_payload)
+            source_name = 'browser backup'
+
+        elif trigger_id == 'upload-labels-json':
+            if not upload_contents:
+                return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            try:
+                _, content_string = upload_contents.split(',', 1)
+                decoded = base64.b64decode(content_string)
+                upload_json = json.loads(decoded.decode('utf-8'))
+            except Exception as ex:
+                return dash.no_update, f"Upload failed: {str(ex)}", None, {'display': 'none'}, ""
+
+            incoming = _deserialize_labels_payload(upload_json)
+            source_name = f"uploaded file '{upload_filename or 'labels.json'}'"
+
+        if not incoming:
+            return dash.no_update, f"No valid labels found in {source_name or 'source'}.", None, {'display': 'none'}, ""
+
+        session = _build_import_session(incoming, source_name)
+        conflict_count = len(session.get('conflicts', []))
+
+        if conflict_count == 0:
+            applied_count, _, _ = _apply_import_session(session)
+            msg = f"Imported {applied_count} labels from {source_name}."
+            return (
+                {'updated_at': time.time(), 'source': 'labels-import'},
+                msg,
+                None,
+                {'display': 'none'},
+                ""
+            )
+
+        session['cursor'] = 0
+        conflict_text = _format_conflict_text(session)
+        msg = f"Found {conflict_count} conflicts from {source_name}. Resolve them below."
+        return (
+            dash.no_update,
+            msg,
+            session,
+            {'display': 'block', 'border': '1px solid #ddd', 'borderRadius': '4px', 'padding': '8px', 'marginBottom': '8px'},
+            conflict_text
+        )
+
+    @app.callback(
+        [Output('manual-labels-store', 'data', allow_duplicate=True),
+         Output('label-saved-msg', 'children', allow_duplicate=True),
+         Output('label-import-session-store', 'data', allow_duplicate=True),
+         Output('label-conflict-panel', 'style', allow_duplicate=True),
+         Output('label-conflict-text', 'children', allow_duplicate=True)],
+        [Input('label-conflict-keep-btn', 'n_clicks'),
+         Input('label-conflict-use-btn', 'n_clicks'),
+         Input('label-conflict-keep-all-btn', 'n_clicks'),
+         Input('label-conflict-use-all-btn', 'n_clicks'),
+         Input('label-conflict-cancel-btn', 'n_clicks')],
+        State('label-import-session-store', 'data'),
+        prevent_initial_call=True
+    )
+    def resolve_label_conflicts(keep_clicks, use_clicks, keep_all_clicks, use_all_clicks, cancel_clicks, session):
+        if not session or not isinstance(session, dict):
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+        triggered = callback_context.triggered
+        if not triggered:
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+        trigger_id = triggered[0]['prop_id'].split('.')[0]
+
+        conflicts = session.get('conflicts', [])
+        resolutions = session.get('resolutions', [])
+        if len(resolutions) != len(conflicts):
+            resolutions = [None] * len(conflicts)
+            session['resolutions'] = resolutions
+
+        if trigger_id == 'label-conflict-cancel-btn':
+            return dash.no_update, "Restore/import canceled.", None, {'display': 'none'}, ""
+
+        cursor = _next_unresolved_index(resolutions, session.get('cursor', 0))
+        if cursor is None:
+            applied_count, used_conflicts, kept_conflicts = _apply_import_session(session)
+            msg = f"Import complete: {applied_count} labels applied ({used_conflicts} replaced, {kept_conflicts} kept)."
+            return {'updated_at': time.time(), 'source': 'labels-conflict-resolved'}, msg, None, {'display': 'none'}, ""
+
+        if trigger_id == 'label-conflict-keep-btn':
+            resolutions[cursor] = 'keep'
+        elif trigger_id == 'label-conflict-use-btn':
+            resolutions[cursor] = 'use'
+        elif trigger_id == 'label-conflict-keep-all-btn':
+            for idx in range(cursor, len(resolutions)):
+                if resolutions[idx] is None:
+                    resolutions[idx] = 'keep'
+        elif trigger_id == 'label-conflict-use-all-btn':
+            for idx in range(cursor, len(resolutions)):
+                if resolutions[idx] is None:
+                    resolutions[idx] = 'use'
+        else:
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+        next_idx = _next_unresolved_index(resolutions, cursor + 1)
+        if next_idx is None:
+            applied_count, used_conflicts, kept_conflicts = _apply_import_session(session)
+            msg = f"Import complete: {applied_count} labels applied ({used_conflicts} replaced, {kept_conflicts} kept)."
+            return {'updated_at': time.time(), 'source': 'labels-conflict-resolved'}, msg, None, {'display': 'none'}, ""
+
+        session['cursor'] = next_idx
+        session['resolutions'] = resolutions
+        return dash.no_update, f"Resolved {next_idx}/{len(conflicts)} conflicts.", session, {'display': 'block', 'border': '1px solid #ddd', 'borderRadius': '4px', 'padding': '8px', 'marginBottom': '8px'}, _format_conflict_text(session)
 
     @app.callback(
         Output('confirm-reset-labels', 'displayed'),
