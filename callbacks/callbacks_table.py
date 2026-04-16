@@ -264,6 +264,22 @@ def _render_table(page_df: pd.DataFrame, visible_cols: list,
 # ---------------------------------------------------------------------------
 def register_table_callbacks(app):
 
+    # -- Tab-focus → focused-row-store (clientside, no server round-trip) --
+    app.clientside_callback(
+        """
+        function(triggerVal) {
+            if (!triggerVal) return window.dash_clientside.no_update;
+            var parts = triggerVal.split('_');
+            var idx = parseInt(parts[0], 10);
+            if (isNaN(idx)) return window.dash_clientside.no_update;
+            return {index: idx, ts: Date.now()};
+        }
+        """,
+        Output('focused-row-store', 'data'),
+        Input('focused-row-trigger-input', 'value'),
+        prevent_initial_call=True,
+    )
+
     # -- Tab switching (clientside, instant) --
     app.clientside_callback(
         """
@@ -353,6 +369,7 @@ def register_table_callbacks(app):
         Output('table-click-data-store', 'data'),
         Output('fft-warning', 'children', allow_duplicate=True),
         Input({'type': 'table-row', 'index': ALL}, 'n_clicks'),
+        Input('focused-row-store', 'data'),
         State({'type': 'table-row', 'index': ALL}, 'id'),
         State('frequency-scale', 'value'),
         State('fft-window-size', 'value'),
@@ -366,21 +383,29 @@ def register_table_callbacks(app):
         State('color-mode-radio', 'value'),
         prevent_initial_call=True,
     )
-    def table_row_click(n_clicks_list, ids,
+    def table_row_click(n_clicks_list, focused_row_data, ids,
                         frequency_scale, fft_window_size, window_overlap,
                         window_type, min_freq, max_freq, num_bins, colormap, db_floor,
                         color_mode):
         import plotly.graph_objects as go
-        if not ctx.triggered_id or not isinstance(ctx.triggered_id, dict):
-            return no_update, no_update, no_update, no_update
 
-        # Ignore fires caused by component re-render (n_clicks==0, not a real click)
-        if not ctx.triggered or ctx.triggered[0].get('value', 0) == 0:
-            return no_update, no_update, no_update, no_update
+        # Determine which input triggered and resolve row_global_idx
+        triggered_prop = (ctx.triggered[0].get('prop_id', '') if ctx.triggered else '')
 
-        row_global_idx = ctx.triggered_id.get("index")
-        if row_global_idx is None:
-            return no_update, no_update, no_update, no_update
+        if triggered_prop == 'focused-row-store.data':
+            # Tab-to-Load path
+            if not focused_row_data or focused_row_data.get('index') is None:
+                return no_update, no_update, no_update, no_update
+            row_global_idx = focused_row_data['index']
+        else:
+            # Row-click path — original guards
+            if not ctx.triggered_id or not isinstance(ctx.triggered_id, dict):
+                return no_update, no_update, no_update, no_update
+            if not ctx.triggered or ctx.triggered[0].get('value', 0) == 0:
+                return no_update, no_update, no_update, no_update
+            row_global_idx = ctx.triggered_id.get("index")
+            if row_global_idx is None:
+                return no_update, no_update, no_update, no_update
 
         cached = _TABLE_CACHE.get("entry")
         if cached is None:
