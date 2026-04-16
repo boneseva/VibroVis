@@ -532,21 +532,40 @@ def register_table_callbacks(app):
         Input("color-mode-radio", "value"),
         prevent_initial_call=True,
     )
-    def update_table(active_tab, filtered_data_key, manual_labels_trigger, visible_cols, page,
+    def update_table(active_tab, filtered_data_payload, manual_labels_trigger, visible_cols, page,
                      sort_state, color_mode):
 
         if active_tab != "table-tab":
             return no_update, no_update, no_update
 
         try:
-            if not filtered_data_key:
+            if not filtered_data_payload:
                 return (html.Div("No data loaded. Select a location and model.",
                                  style={"padding": "2rem", "color": "#888"}),
                         "", 1)
 
+            # Extract cache key from lightweight payload (OPTIMIZATION #1)
+            if isinstance(filtered_data_payload, dict):
+                filtered_data_key = filtered_data_payload.get('cache_key')
+                total_rows_info = filtered_data_payload.get('total_rows', 0)
+                if not filtered_data_key:
+                    return (html.Div("No cache key in data payload.",
+                                     style={"padding": "2rem", "color": "#888"}),
+                            f"0 rows (no cache key)", 1)
+                print(f"[TABLE] Using cache key: {filtered_data_key} ({total_rows_info} total rows)")
+            else:
+                # Fallback for old cache key format (for backward compatibility)
+                filtered_data_key = filtered_data_payload
+                total_rows_info = "unknown"
+                print(f"[TABLE] Using legacy cache key format: {filtered_data_key}")
+
             # Read the exact same data the scatter plot is displaying
             dff = server_cache.get(filtered_data_key)
-            if dff is None or dff.empty:
+            if dff is None:
+                return (html.Div("Cache entry not found. Data may have expired.",
+                                 style={"padding": "2rem", "color": "#888"}),
+                        f"0 rows (cache miss)", 1)
+            if dff.empty:
                 return (html.Div("No data to display.",
                                  style={"padding": "2rem", "color": "#888"}),
                         "0 rows", 1)

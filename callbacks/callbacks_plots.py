@@ -598,7 +598,14 @@ def register_plot_callbacks(app):
             else:
                 fig.update_xaxes(visible=False);
                 fig.update_yaxes(visible=False)
-            return fig, None, 1, max_distance, new_indices_to_store, None, sampling_text, cluster_stats, None
+
+            # Return lightweight data structure even for empty case
+            empty_lightweight_data = {
+                'cache_key': str(uuid.uuid4()),
+                'plot_data': [],
+                'total_rows': 0
+            }
+            return fig, empty_lightweight_data, 1, max_distance, new_indices_to_store, None, sampling_text, cluster_stats, None
 
         t_last = checkpoint('sampling') or t_last
         dff = dff_sampled.reset_index(drop=True).copy()
@@ -762,12 +769,56 @@ def register_plot_callbacks(app):
             fig.update_yaxes(visible=False)
 
         max_clip_count = int(dff['clip_count'].max()) if not dff.empty else 1
-        server_cache[dff['cache_key'].iloc[0]] = dff
+        
+        # Store full DataFrame in server cache for table/audio operations
+        cache_key = dff['cache_key'].iloc[0]
+        server_cache[cache_key] = dff
 
-        min_h = dff['start_hour_float'].min()
-        max_h = dff['start_hour_float'].max()
-        min_d = dff['day_int'].min()
-        max_d = dff['day_int'].max()
+        # Create lightweight payload for filtered-data store (OPTIMIZATION #1)
+        # Only send essential columns to browser instead of full DataFrame
+        if not dff.empty:
+            essential_cols = ['x', 'y', 'plot_id', 'cluster_id', 'manual_label', 
+                            'file_name', 'clip_time', 'clip_duration', 'channel', 
+                            'day_dt', 'start_hour_float', 'clip_count', 'marker_size',
+                            'color_col_content', 'mapped_color']
+            
+            # Ensure all essential columns exist
+            missing_cols = [col for col in essential_cols if col not in dff.columns]
+            for col in missing_cols:
+                if col == 'manual_label':
+                    dff[col] = 'Unlabeled'
+                elif col == 'marker_size':
+                    dff[col] = 10
+                elif col == 'color_col_content':
+                    dff[col] = dff.get('cluster_id_str', 'Unknown')
+                elif col == 'mapped_color':
+                    dff[col] = '#888888'
+                else:
+                    dff[col] = None
+                    
+            # Calculate data reduction for performance monitoring
+            total_cols = len(dff.columns)
+            essential_cols_count = len(essential_cols)
+            reduction_pct = ((total_cols - essential_cols_count) / total_cols) * 100
+            
+            lightweight_data = {
+                'cache_key': cache_key,
+                'plot_data': dff[essential_cols].to_dict('records'),
+                'total_rows': len(dff)
+            }
+            
+            print(f"[OPTIMIZATION #1] Data reduction: {total_cols} → {essential_cols_count} columns ({reduction_pct:.1f}% reduction)")
+        else:
+            lightweight_data = {
+                'cache_key': cache_key,
+                'plot_data': [],
+                'total_rows': 0
+            }
+
+        min_h = dff['start_hour_float'].min() if not dff.empty else 0
+        max_h = dff['start_hour_float'].max() if not dff.empty else 24
+        min_d = dff['day_int'].min() if not dff.empty else 1
+        max_d = dff['day_int'].max() if not dff.empty else 365
         ranges_data = {'daily': [min_h, max_h], 'yearly': [min_d, max_d]}
         t_last = checkpoint('final') or t_last
 
@@ -778,8 +829,7 @@ def register_plot_callbacks(app):
                 timing_str += f"{name}={segment_time:.1f}ms "
             print(timing_str)
 
-        return fig, dff['cache_key'].iloc[
-            0], max_clip_count, max_distance, new_indices_to_store, ranges_data, sampling_text, cluster_stats, None, False if should_force_defaults else no_update
+        return fig, lightweight_data, max_clip_count, max_distance, new_indices_to_store, ranges_data, sampling_text, cluster_stats, None, False if should_force_defaults else no_update
 
     # @app.callback(
     #     Output('spectrogram-raw-data-store', 'data'),
