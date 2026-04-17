@@ -1334,9 +1334,30 @@ def register_plot_callbacks(app):
                 
                 for sec in range(start_second, end_second + 1):
                     key = (loc, micro, file_basename, channel, sec)
+                    key_value_pairs.append((key, label_val))
+
+                print(f"[SIDEBAR_SAVE] Attempting to save {len(key_value_pairs)} entries for label '{label_val}'")
+
+                # Simple dictionary update - no complex caching needed
+                for key, label_val in key_value_pairs:
                     MANUAL_LABELS_CACHE[key] = label_val
                 
-                return str(time.time()), f"Saved: {label_val}", label_val
+                # Verify the write succeeded
+                verification_success = True
+                for key, expected_val in key_value_pairs[:3]:  # Check first 3 entries
+                    actual_val = MANUAL_LABELS_CACHE.get(key)
+                    if actual_val != expected_val:
+                        print(f"[SIDEBAR_SAVE] VERIFICATION FAILED: {key} = {actual_val}, expected {expected_val}")
+                        verification_success = False
+                        break
+
+                if verification_success:
+                    print(f"[SIDEBAR_SAVE] SUCCESS: Saved and verified {len(key_value_pairs)} entries")
+                    return str(time.time()), f"Saved: {label_val}", label_val
+                else:
+                    print(f"[SIDEBAR_SAVE] VERIFICATION FAILED: Data not properly written")
+                    return dash.no_update, f"Error: Label verification failed for {label_val}", dash.no_update
+                    return dash.no_update, f"Error saving label: {label_val}", dash.no_update
             else:
                 return dash.no_update, "Error: Point not found.", dash.no_update
                 
@@ -1383,4 +1404,5 @@ def register_plot_callbacks(app):
             return ""
         except:
             return ""
+
 

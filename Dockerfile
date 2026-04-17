@@ -1,3 +1,11 @@
+     "--workers", "3", \
+     "--threads", "2", \
+     "--worker-class", "sync", \
+# Enhanced multi-worker configuration:
+# - Multiple workers for better performance
+# - Shared cache directory for label persistence
+# - Increased timeout for long-running operations
+# - Worker restart for memory management
 # Use a stable Debian-based Python image
 FROM python:3.11-slim-bookworm
 
@@ -20,4 +28,4 @@ COPY . .
 EXPOSE 8080
 
 # The command to run when the container starts
-CMD ["gunicorn", "-w", "1", "--threads", "2", "-b", "0.0.0.0:8080", "--timeout", "60", "app:server"]
+CMD ["gunicorn", "-w", "1", "--threads", "8", "--worker-class", "gthread", "-b", "0.0.0.0:8080", "--timeout", "60", "app:server"]

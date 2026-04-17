@@ -680,8 +680,7 @@ def register_data_callbacks(app):
             return f"Error saving: {str(e)}", dash.no_update, dash.no_update
 
     @app.callback(
-        [Output('manual-labels-store', 'data', allow_duplicate=True),
-         Output('label-saved-msg', 'children', allow_duplicate=True)],
+        Output('label-saved-msg', 'children', allow_duplicate=True),
         Input('label-load-btn', 'n_clicks'),
         State('label-load-dropdown', 'value'),
         prevent_initial_call=True
@@ -689,7 +688,7 @@ def register_data_callbacks(app):
     def load_manual_labels_server_side(n_clicks, name):
         """Load manual labels from a JSON file on the server."""
         if not n_clicks or not name:
-            return dash.no_update, dash.no_update
+            return dash.no_update
             
         path = f"labels/{name}.json"
         if not os.path.exists(path):
@@ -721,20 +720,17 @@ def register_data_callbacks(app):
                     count += 1
             
             msg = f"Loaded '{name}' ({count} labels)."
-            # Trigger update by sending timestamp
-            return {'updated_at': time.time()}, msg
-            
+            return msg
         except Exception as e:
             print(f"Error loading manual labels: {e}")
             return dash.no_update, f"Error: {str(e)}"
 
     @app.callback(
         Output('label-backup-msg', 'children'),
-        [Input('local-labels-store', 'data'),
-         Input('manual-labels-store', 'data')],
+        Input('local-labels-store', 'data'),
         prevent_initial_call=False
     )
-    def update_local_backup_hint(local_payload, _manual_store_trigger):
+    def update_local_backup_hint(local_payload):
         if MANUAL_LABELS_CACHE:
             return ""
         parsed = _deserialize_labels_payload(local_payload)
@@ -744,26 +740,13 @@ def register_data_callbacks(app):
 
     @app.callback(
         Output('local-labels-store', 'data'),
-        Input('manual-labels-store', 'data'),
+        Input('local-labels-store', 'data'),
         State('local-labels-store', 'data'),
         prevent_initial_call=True
     )
     def backup_manual_labels_to_browser(trigger_data, existing_local_payload):
-        # Avoid startup wipe: skip empty cache writes unless this was an explicit reset.
-        is_explicit_clear = isinstance(trigger_data, dict) and bool(trigger_data.get('cleared'))
-        if not MANUAL_LABELS_CACHE and not is_explicit_clear:
-            return dash.no_update
-
-        payload = _build_local_labels_payload()
-        if payload.get('b', 0) > LOCAL_LABELS_SOFT_LIMIT_BYTES:
-            print(f"[labels-backup] skipped local backup: payload too large ({payload.get('b')} bytes)")
-            return dash.no_update
-
-        if isinstance(existing_local_payload, dict) and existing_local_payload.get('h') == payload.get('h'):
-            return dash.no_update
-
-        payload['saved_at'] = time.time()
-        return payload
+        # We don't need to trigger off manual-labels-store anymore with simple global dict
+        return dash.no_update
 
     @app.callback(
         [Output('download-labels-json', 'data'),
@@ -796,7 +779,7 @@ def register_data_callbacks(app):
     def start_restore_or_upload(restore_clicks, upload_contents, local_payload, upload_filename):
         triggered = callback_context.triggered
         if not triggered:
-            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
         trigger_id = triggered[0]['prop_id'].split('.')[0]
         incoming = {}
@@ -804,25 +787,25 @@ def register_data_callbacks(app):
 
         if trigger_id == 'restore-local-labels-btn':
             if not restore_clicks:
-                return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+                return dash.no_update, dash.no_update, dash.no_update, dash.no_update
             incoming = _deserialize_labels_payload(local_payload)
             source_name = 'browser backup'
 
         elif trigger_id == 'upload-labels-json':
             if not upload_contents:
-                return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+                return dash.no_update, dash.no_update, dash.no_update, dash.no_update
             try:
                 _, content_string = upload_contents.split(',', 1)
                 decoded = base64.b64decode(content_string)
                 upload_json = json.loads(decoded.decode('utf-8'))
             except Exception as ex:
-                return dash.no_update, f"Upload failed: {str(ex)}", None, {'display': 'none'}, ""
+                return f"Upload failed: {str(ex)}", None, {'display': 'none'}, ""
 
             incoming = _deserialize_labels_payload(upload_json)
             source_name = f"uploaded file '{upload_filename or 'labels.json'}'"
 
         if not incoming:
-            return dash.no_update, f"No valid labels found in {source_name or 'source'}.", None, {'display': 'none'}, ""
+            return f"No valid labels found in {source_name or 'source'}.", None, {'display': 'none'}, ""
 
         session = _build_import_session(incoming, source_name)
         conflict_count = len(session.get('conflicts', []))
@@ -831,7 +814,6 @@ def register_data_callbacks(app):
             applied_count, _, _ = _apply_import_session(session)
             msg = f"Imported {applied_count} labels from {source_name}."
             return (
-                {'updated_at': time.time(), 'source': 'labels-import'},
                 msg,
                 None,
                 {'display': 'none'},
@@ -842,7 +824,6 @@ def register_data_callbacks(app):
         conflict_text = _format_conflict_text(session)
         msg = f"Found {conflict_count} conflicts from {source_name}. Resolve them below."
         return (
-            dash.no_update,
             msg,
             session,
             {'display': 'block', 'border': '1px solid #ddd', 'borderRadius': '4px', 'padding': '8px', 'marginBottom': '8px'},
@@ -850,8 +831,7 @@ def register_data_callbacks(app):
         )
 
     @app.callback(
-        [Output('manual-labels-store', 'data', allow_duplicate=True),
-         Output('label-saved-msg', 'children', allow_duplicate=True),
+        [Output('label-saved-msg', 'children', allow_duplicate=True),
          Output('label-import-session-store', 'data', allow_duplicate=True),
          Output('label-conflict-panel', 'style', allow_duplicate=True),
          Output('label-conflict-text', 'children', allow_duplicate=True)],
@@ -865,11 +845,11 @@ def register_data_callbacks(app):
     )
     def resolve_label_conflicts(keep_clicks, use_clicks, keep_all_clicks, use_all_clicks, cancel_clicks, session):
         if not session or not isinstance(session, dict):
-            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
         triggered = callback_context.triggered
         if not triggered:
-            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
         trigger_id = triggered[0]['prop_id'].split('.')[0]
 
@@ -880,13 +860,13 @@ def register_data_callbacks(app):
             session['resolutions'] = resolutions
 
         if trigger_id == 'label-conflict-cancel-btn':
-            return dash.no_update, "Restore/import canceled.", None, {'display': 'none'}, ""
+            return "Restore/import canceled.", None, {'display': 'none'}, ""
 
         cursor = _next_unresolved_index(resolutions, session.get('cursor', 0))
         if cursor is None:
             applied_count, used_conflicts, kept_conflicts = _apply_import_session(session)
             msg = f"Import complete: {applied_count} labels applied ({used_conflicts} replaced, {kept_conflicts} kept)."
-            return {'updated_at': time.time(), 'source': 'labels-conflict-resolved'}, msg, None, {'display': 'none'}, ""
+            return msg, None, {'display': 'none'}, ""
 
         if trigger_id == 'label-conflict-keep-btn':
             resolutions[cursor] = 'keep'
@@ -901,13 +881,13 @@ def register_data_callbacks(app):
                 if resolutions[idx] is None:
                     resolutions[idx] = 'use'
         else:
-            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
         next_idx = _next_unresolved_index(resolutions, cursor + 1)
         if next_idx is None:
             applied_count, used_conflicts, kept_conflicts = _apply_import_session(session)
             msg = f"Import complete: {applied_count} labels applied ({used_conflicts} replaced, {kept_conflicts} kept)."
-            return {'updated_at': time.time(), 'source': 'labels-conflict-resolved'}, msg, None, {'display': 'none'}, ""
+            return msg, None, {'display': 'none'}, ""
 
         session['cursor'] = next_idx
         session['resolutions'] = resolutions
@@ -924,17 +904,14 @@ def register_data_callbacks(app):
         return False
 
     @app.callback(
-        [Output('manual-labels-store', 'data', allow_duplicate=True),
-         Output('label-saved-msg', 'children', allow_duplicate=True)],
+        Output('label-saved-msg', 'children', allow_duplicate=True),
         Input('confirm-reset-labels', 'submit_n_clicks'),
         prevent_initial_call=True
     )
     def reset_manual_labels(submit_n_clicks):
         if not submit_n_clicks:
-             return dash.no_update, dash.no_update
+             return dash.no_update
         
         MANUAL_LABELS_CACHE.clear()
         
-        # Trigger update
-        return {'updated_at': time.time(), 'cleared': True}, "Labels Reset!"
-
+        return "Labels Reset!"
