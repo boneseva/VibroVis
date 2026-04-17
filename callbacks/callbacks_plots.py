@@ -605,7 +605,7 @@ def register_plot_callbacks(app):
                 'plot_data': [],
                 'total_rows': 0
             }
-            return fig, empty_lightweight_data, 1, max_distance, new_indices_to_store, None, sampling_text, cluster_stats, None
+            return fig, empty_lightweight_data, 1, max_distance, new_indices_to_store, None, sampling_text, cluster_stats, None, False
 
         t_last = checkpoint('sampling') or t_last
         dff = dff_sampled.reset_index(drop=True).copy()
@@ -944,7 +944,7 @@ def register_plot_callbacks(app):
          Input('colormap', 'value'),
          Input('db-floor', 'value')], 
         prevent_initial_call=True)
-    def compute_spectrogram_data(clickData, filtered_data_cache_key,
+    def compute_spectrogram_data(clickData, filtered_data_store,
                                  frequency_scale, fft_window_size, window_overlap,
                                  window_type, min_freq, max_freq, num_bins,
                                  colormap, db_floor): # Added arguments
@@ -962,8 +962,15 @@ def register_plot_callbacks(app):
             yaxis={'visible': False}
         )
 
-        if not filtered_data_cache_key:
+        if not filtered_data_store:
              return no_update, no_update, ""
+             
+        # Extract cache key from the filtered data store dictionary
+        if isinstance(filtered_data_store, dict) and 'cache_key' in filtered_data_store:
+            filtered_data_cache_key = filtered_data_store['cache_key']
+        else:
+            # Fallback for old format (direct string)
+            filtered_data_cache_key = filtered_data_store
 
         dff = server_cache.get(filtered_data_cache_key)
         if dff is None:
@@ -1124,7 +1131,7 @@ def register_plot_callbacks(app):
          Input('table-click-data-store', 'data'),
          State('filtered-data', 'data')])
     def show_histogram_for_clicked_cluster(clickData, hist_type, time_scale, cluster_colors, label_colors, label_names, color_mode,
-                                           table_click_data, filtered_data_cache_key):
+                                           table_click_data, filtered_data_store):
         print("\n--- HISTOGRAM CALLBACK TRIGGERED ---")
 
         # Determine the effective clickData source
@@ -1140,7 +1147,7 @@ def register_plot_callbacks(app):
             effective_click = None
 
         try:
-            if not effective_click or not filtered_data_cache_key:
+            if not effective_click or not filtered_data_store:
                 print("Abort Histogram: No clickData or cache key")
                 fig = go.Figure()
                 title = "Time of Day" if time_scale == 'daily' else "Week of Year"
@@ -1155,6 +1162,13 @@ def register_plot_callbacks(app):
                          "font": {"size": 14}}]
                 )
                 return fig
+
+            # Extract cache key from the filtered data store dictionary
+            if isinstance(filtered_data_store, dict) and 'cache_key' in filtered_data_store:
+                filtered_data_cache_key = filtered_data_store['cache_key']
+            else:
+                # Fallback for old format (direct string)
+                filtered_data_cache_key = filtered_data_store
 
             dff = server_cache.get(filtered_data_cache_key)
             if dff is None: return go.Figure().update_layout(title_text="Error: Data not found in cache.")
@@ -1295,7 +1309,7 @@ def register_plot_callbacks(app):
          State('filtered-data', 'data')],
         prevent_initial_call=True
     )
-    def save_manual_label(n_clicks, n_submit, table_label_values, label_text, clickData, filtered_data_cache_key):
+    def save_manual_label(n_clicks, n_submit, table_label_values, label_text, clickData, filtered_data_store):
         import json
 
         triggered = dash.callback_context.triggered
@@ -1304,8 +1318,15 @@ def register_plot_callbacks(app):
             
         triggered_id_str = triggered[0]['prop_id'].split('.')[0]
         
-        if not filtered_data_cache_key:
+        if not filtered_data_store:
             return dash.no_update, "", dash.no_update
+            
+        # Extract cache key from the filtered data store dictionary
+        if isinstance(filtered_data_store, dict) and 'cache_key' in filtered_data_store:
+            filtered_data_cache_key = filtered_data_store['cache_key']
+        else:
+            # Fallback for old format (direct string)
+            filtered_data_cache_key = filtered_data_store
 
         dff = server_cache.get(filtered_data_cache_key)
         if dff is None:
@@ -1413,9 +1434,16 @@ def register_plot_callbacks(app):
         State('filtered-data', 'data'),
         prevent_initial_call=True
     )
-    def update_label_input_on_click(clickData, filtered_data_cache_key):
-        if not clickData or not filtered_data_cache_key:
+    def update_label_input_on_click(clickData, filtered_data_store):
+        if not clickData or not filtered_data_store:
             return ""
+            
+        # Extract cache key from the filtered data store dictionary
+        if isinstance(filtered_data_store, dict) and 'cache_key' in filtered_data_store:
+            filtered_data_cache_key = filtered_data_store['cache_key']
+        else:
+            # Fallback for old format (direct string)
+            filtered_data_cache_key = filtered_data_store
 
         dff = server_cache.get(filtered_data_cache_key)
         if dff is None: return ""
