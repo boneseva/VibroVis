@@ -14,7 +14,7 @@ import pandas as pd
 import uuid
 
 import utils
-from callbacks.callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, server_cache, initial_df, CLUSTER_COLORS, MANUAL_LABELS_CACHE
+from callbacks.callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, server_cache, initial_df, CLUSTER_COLORS, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK
 from utils import apply_manual_labels_efficiently
 
 # Performance profiling
@@ -337,7 +337,7 @@ def register_plot_callbacks(app):
              # Always ensure we have labels for stats if possible (needed for Labels sidebar percentage)
              dff_for_stats = dff_macro.copy()
              if 'clip_duration' not in dff_for_stats.columns: dff_for_stats['clip_duration'] = 5.0
-             dff_for_stats = apply_manual_labels_efficiently(dff_for_stats)
+             dff_for_stats = apply_manual_labels_efficiently(dff_for_stats, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK)
              
              # 1. Cluster Stats
              if 'cluster_id' in dff_for_stats.columns:
@@ -357,8 +357,9 @@ def register_plot_callbacks(app):
         is_manual_mode = (color_mode == 'manual')
         
         # Always compute manual labels if cache is not empty, for sampling priority
-        has_manual_labels = bool(MANUAL_LABELS_CACHE)
-            
+        with MANUAL_LABELS_LOCK:
+            has_manual_labels = bool(MANUAL_LABELS_CACHE)
+
         # CRITICAL FIX: If is_manual_mode is True, we MUST return a df with 'manual_label' column
         # even if the cache is empty. apply_manual_labels_efficiently handles empty cache by 
         # setting everything to 'Unlabeled'.
@@ -370,7 +371,7 @@ def register_plot_callbacks(app):
              if 'clip_duration' not in dff_macro.columns:
                  dff_macro['clip_duration'] = 5.0
 
-             dff_macro = apply_manual_labels_efficiently(dff_macro)
+             dff_macro = apply_manual_labels_efficiently(dff_macro, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK)
 
         if is_manual_mode:
             group_col = 'manual_label'
@@ -446,7 +447,7 @@ def register_plot_callbacks(app):
                 if label_checkbox_ids:
                     if 'manual_label' not in dff_macro.columns:
                         if 'clip_duration' not in dff_macro.columns: dff_macro['clip_duration'] = 5.0
-                        dff_macro = apply_manual_labels_efficiently(dff_macro)
+                        dff_macro = apply_manual_labels_efficiently(dff_macro, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK)
                     dff_macro = dff_macro[dff_macro['manual_label'].isin(selected_labels)]
         
         # Update filtered count to reflect the state after visibility filters
@@ -473,7 +474,7 @@ def register_plot_callbacks(app):
                 if is_manual_mode:
                      # Ensure we work on a copy to avoid SettingWithCopyWarning
                      dff_macro = dff_macro.copy()
-                     dff_macro = apply_manual_labels_efficiently(dff_macro)
+                     dff_macro = apply_manual_labels_efficiently(dff_macro, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK)
 
                 # Sampling logic: We use a SET of chosen indices and then filter dff_macro
                 # to ensure the final dff_sampled maintains its stable, intrinsic order (File Name + Time).
@@ -594,7 +595,7 @@ def register_plot_callbacks(app):
             else:
                 fig.update_xaxes(visible=False);
                 fig.update_yaxes(visible=False)
-            return fig, None, 1, max_distance, new_indices_to_store, None, sampling_text, cluster_stats, None
+            return fig, None, 1, max_distance, new_indices_to_store, None, sampling_text, cluster_stats, None, False
 
         t_last = checkpoint('sampling') or t_last
         dff = dff_sampled.reset_index(drop=True).copy()
@@ -635,7 +636,7 @@ def register_plot_callbacks(app):
             # Using list comprehension which is generally faster than apply for simple tuple creation
             # Use optimized helper
             if 'clip_duration' not in dff.columns: dff['clip_duration'] = 5.0
-            dff = apply_manual_labels_efficiently(dff)
+            dff = apply_manual_labels_efficiently(dff, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK)
             color_col = 'manual_label'
             
         if is_manual_mode:
@@ -1114,7 +1115,7 @@ def register_plot_callbacks(app):
                  
                  if 'manual_label' not in dff.columns:
                      if 'clip_duration' not in dff.columns: dff['clip_duration'] = 5.0
-                     dff = apply_manual_labels_efficiently(dff)
+                     dff = apply_manual_labels_efficiently(dff, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK)
                  
                  cluster_df = dff[dff['manual_label'] == clicked_label].copy()
                  target_id_for_color = clicked_label

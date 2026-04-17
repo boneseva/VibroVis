@@ -21,7 +21,7 @@ from dash import dcc
 
 import read_data
 import utils
-from callbacks.callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, initial_df, MANUAL_LABELS_CACHE
+from callbacks.callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, initial_df, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK
 
 # Suppress mpg123 decoder warnings (these are non-critical)
 warnings.filterwarnings('ignore', category=UserWarning)
@@ -658,7 +658,9 @@ def register_data_callbacks(app):
         if not name:
              return "Please enter a name.", dash.no_update, dash.no_update
         
-        if not MANUAL_LABELS_CACHE:
+        with MANUAL_LABELS_LOCK:
+            has_labels_to_save = bool(MANUAL_LABELS_CACHE)
+        if not has_labels_to_save:
              return "No labels to save.", dash.no_update, dash.no_update
             
         # Convert tuple keys to string keys for JSON serialization
@@ -732,7 +734,9 @@ def register_data_callbacks(app):
         prevent_initial_call=False
     )
     def update_local_backup_hint(local_payload):
-        if MANUAL_LABELS_CACHE:
+        with MANUAL_LABELS_LOCK:
+            has_manual_labels = bool(MANUAL_LABELS_CACHE)
+        if has_manual_labels:
             return ""
         parsed = _deserialize_labels_payload(local_payload)
         if not parsed:
@@ -758,7 +762,9 @@ def register_data_callbacks(app):
     def download_manual_labels_json(n_clicks):
         if not n_clicks:
             return dash.no_update, dash.no_update
-        if not MANUAL_LABELS_CACHE:
+        with MANUAL_LABELS_LOCK:
+            has_labels_to_download = bool(MANUAL_LABELS_CACHE)
+        if not has_labels_to_download:
             return dash.no_update, "No labels to download."
 
         payload = _build_portable_export_payload()
