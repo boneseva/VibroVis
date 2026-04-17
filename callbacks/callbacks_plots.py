@@ -415,8 +415,8 @@ def register_plot_callbacks(app):
         
         # FIX RACE CONDITION:
         # Avoid rows "disappearing" from the view before their new label checkbox spawns.
-        all_cached_labels = set(MANUAL_LABELS_CACHE.values())
-        
+        all_cached_labels = set(MANUAL_LABELS_CACHE[key] for key in MANUAL_LABELS_CACHE)
+
         # 1. Labels filter race condition: Ensure ANY label in cache is considered "selected" if its UI checkbox is missing.
         missing_from_ui_labels = all_cached_labels - ui_known_labels_for_labels
         for missing_lbl in missing_from_ui_labels:
@@ -1139,7 +1139,7 @@ def register_plot_callbacks(app):
             if bar_color == '#CCCCCC':
                 try:
                     if is_manual:
-                         all_known_labels = sorted(set(MANUAL_LABELS_CACHE.values()))
+                         all_known_labels = sorted(set(MANUAL_LABELS_CACHE[key] for key in MANUAL_LABELS_CACHE))
                          if 'Unlabeled' not in all_known_labels: all_known_labels.append('Unlabeled')
                          if 'Unlabeled' in all_known_labels:
                              all_known_labels.remove('Unlabeled')
@@ -1348,7 +1348,7 @@ def register_plot_callbacks(app):
     )
     def update_manual_label_datalist(store_trigger):
         try:
-            unique_labels = sorted(set(MANUAL_LABELS_CACHE.values()))
+            unique_labels = sorted(set(MANUAL_LABELS_CACHE[key] for key in MANUAL_LABELS_CACHE))
             return [html.Option(value=label) for label in unique_labels]
         except Exception:
              return []

@@ -316,7 +316,7 @@ def register_cluster_callbacks(app):
                             label_to_color_seed[lbl] = cluster_colors_data[cid_str]
 
             # unique_labels from cache
-            unique_labels = sorted(set(MANUAL_LABELS_CACHE.values()))
+            unique_labels = sorted(set(MANUAL_LABELS_CACHE[key] for key in MANUAL_LABELS_CACHE))
             if 'Unlabeled' not in unique_labels:
                 unique_labels.append('Unlabeled')
             
@@ -464,7 +464,8 @@ def register_cluster_callbacks(app):
             return updated_store, dash.no_update
 
         changed = False
-        for cache_key, cache_label in list(MANUAL_LABELS_CACHE.items()):
+        for cache_key in list(MANUAL_LABELS_CACHE):
+            cache_label = MANUAL_LABELS_CACHE[cache_key]
             if cache_label != old_label_name:
                 continue
 

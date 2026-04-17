@@ -11,5 +11,6 @@ numba
 soundfile
 
 tqdm
+diskcache
 
 gunicorn

@@ -208,7 +208,8 @@ def apply_manual_labels_efficiently(dff):
     
     # 1. Fast optimization: group labels by (loc, micro, f_base, chan)
     label_map = {}
-    for key_tuple, label in MANUAL_LABELS_CACHE.items():
+    for key_tuple in MANUAL_LABELS_CACHE:
+        label = MANUAL_LABELS_CACHE[key_tuple]
         if len(key_tuple) == 5:
             loc, micro, f_base, chan, sec = key_tuple
             

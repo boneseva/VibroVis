@@ -55,7 +55,9 @@ def _entry_to_key_tuple(entry):
 
 def _build_local_labels_payload():
     entries = []
-    for (loc, micro, f_base, chan, sec), label in MANUAL_LABELS_CACHE.items():
+    for key_tuple in MANUAL_LABELS_CACHE:
+        label = MANUAL_LABELS_CACHE[key_tuple]
+        loc, micro, f_base, chan, sec = key_tuple
         entries.append([str(loc), str(micro), str(f_base), int(chan), int(sec), str(label)])
     entries.sort(key=lambda x: (x[0], x[1], x[2], x[3], x[4]))
     payload: dict[str, object] = {
@@ -184,7 +186,10 @@ def _apply_import_session(session):
 
 def _build_portable_export_payload():
     labels = {}
-    for key_tuple, label in sorted(MANUAL_LABELS_CACHE.items(), key=lambda kv: kv[0]):
+    # Sort the cache keys for consistent ordering
+    sorted_keys = sorted(MANUAL_LABELS_CACHE)
+    for key_tuple in sorted_keys:
+        label = MANUAL_LABELS_CACHE[key_tuple]
         labels[_key_tuple_to_string(key_tuple)] = str(label)
 
     return {
@@ -658,7 +663,8 @@ def register_data_callbacks(app):
         # Convert tuple keys to string keys for JSON serialization
         # Key format: (loc, micro, f_base, chan, sec)
         json_data = {}
-        for k, v in MANUAL_LABELS_CACHE.items():
+        for k in MANUAL_LABELS_CACHE:
+            v = MANUAL_LABELS_CACHE[k]
             # k is tuple
             key_str = "||".join(str(x) for x in k)
             json_data[key_str] = v
