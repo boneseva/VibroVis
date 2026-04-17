@@ -594,7 +594,7 @@ def register_plot_callbacks(app):
             else:
                 fig.update_xaxes(visible=False);
                 fig.update_yaxes(visible=False)
-            return fig, None, 1, max_distance, new_indices_to_store, None, sampling_text, cluster_stats, None
+            return fig, None, 1, max_distance, new_indices_to_store, None, sampling_text, cluster_stats, None, False
 
         t_last = checkpoint('sampling') or t_last
         dff = dff_sampled.reset_index(drop=True).copy()
@@ -775,8 +775,7 @@ def register_plot_callbacks(app):
                 timing_str += f"{name}={segment_time:.1f}ms "
             print(timing_str)
 
-        return fig, dff['cache_key'].iloc[
-            0], max_clip_count, max_distance, new_indices_to_store, ranges_data, sampling_text, cluster_stats, None, False if should_force_defaults else no_update
+        return fig, dff['cache_key'].iloc[0], max_clip_count, max_distance, new_indices_to_store, ranges_data, sampling_text, cluster_stats, None, False if should_force_defaults else no_update
 
     # @app.callback(
     #     Output('spectrogram-raw-data-store', 'data'),
