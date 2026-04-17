@@ -347,14 +347,20 @@ def register_cluster_callbacks(app):
                 # Determine color
                 # Priority: 1. label_colors_data, 2. cluster-seed, 3. hash
                 if lbl == 'Unlabeled':
-                    default_color = '#999999'
+                    default_color = '#D9D9D9'  # Locked to gray
                 elif label_colors_data and lbl_str in label_colors_data:
                     default_color = label_colors_data[lbl_str]
                 elif lbl in label_to_color_seed:
                     default_color = label_to_color_seed[lbl]
                 else:
-                    hash_val = int(hashlib.md5(lbl_str.encode('utf-8')).hexdigest(), 16)
-                    default_color = CLUSTER_COLORS[hash_val % len(CLUSTER_COLORS)]
+                    # Use deterministic color assignment from CLUSTER_COLORS
+                    sorted_labels = [l for l in unique_labels if l != 'Unlabeled']
+                    sorted_labels = sorted(sorted_labels)
+                    try:
+                        color_index = sorted_labels.index(lbl) % len(CLUSTER_COLORS)
+                        default_color = CLUSTER_COLORS[color_index]
+                    except:
+                        default_color = CLUSTER_COLORS[0]
 
                 color_val = default_color
 
@@ -391,8 +397,11 @@ def register_cluster_callbacks(app):
                         id={'type': 'label-color-picker', 'index': lbl},
                         type='color',
                         value=color_val,
-                        style={'width': '40px', 'height': '24px', 'padding': '0', 'border': 'none', 'cursor': 'pointer',
-                               'marginLeft': '5px', 'backgroundColor': 'transparent', 'flexShrink': 0}
+                        disabled=(lbl == 'Unlabeled'),  # Lock Unlabeled color
+                        style={'width': '40px', 'height': '24px', 'padding': '0', 'border': 'none', 
+                               'cursor': 'pointer' if lbl != 'Unlabeled' else 'not-allowed',
+                               'marginLeft': '5px', 'backgroundColor': 'transparent', 'flexShrink': 0,
+                               'opacity': 0.6 if lbl == 'Unlabeled' else 1.0}
                     ),
                     # Name Input
                     dcc.Input(
@@ -485,14 +494,50 @@ def register_cluster_callbacks(app):
 
     @app.callback(
         Output('label-color-store', 'data'),
-        Input({'type': 'label-color-picker', 'index': ALL}, 'value'),
-        State({'type': 'label-color-picker', 'index': ALL}, 'id'),
+        [Input({'type': 'label-color-picker', 'index': ALL}, 'value'),
+         Input('manual-labels-store', 'data')],
+        [State({'type': 'label-color-picker', 'index': ALL}, 'id'),
+         State('label-color-store', 'data')],
         prevent_initial_call=True
     )
-    def sync_label_colors(colors, ids):
-        color_map = {}
-        for color, id_dict in zip(colors, ids):
-            idx = id_dict['index']
-            color_map[str(idx)] = color
+    def sync_label_colors(colors, manual_labels_trigger, ids, current_color_store):
+        """
+        Single Source of Truth for label colors.
+        Auto-assigns colors from CLUSTER_COLORS palette and locks 'Unlabeled' to gray.
+        """
+        color_map = current_color_store.copy() if current_color_store else {}
+        
+        # Get all current labels from cache
+        all_labels = sorted(set(MANUAL_LABELS_CACHE[key] for key in MANUAL_LABELS_CACHE))
+        if 'Unlabeled' not in all_labels:
+            all_labels.append('Unlabeled')
+        
+        # Sort labels alphabetically, but put "Unlabeled" at the end
+        sorted_labels = [lbl for lbl in all_labels if lbl != 'Unlabeled']
+        sorted_labels = sorted(sorted_labels)
+        if 'Unlabeled' in all_labels:
+            sorted_labels.append('Unlabeled')
+        
+        # Auto-assign colors for new labels using CLUSTER_COLORS
+        for i, label in enumerate(sorted_labels):
+            label_str = str(label)
+            if label == 'Unlabeled':
+                # IRONCLAD RULE: Unlabeled is always gray
+                color_map[label_str] = '#D9D9D9'
+            elif label_str not in color_map:
+                # Assign from CLUSTER_COLORS palette using deterministic index
+                color_index = i % len(CLUSTER_COLORS)
+                color_map[label_str] = CLUSTER_COLORS[color_index]
+        
+        # Handle user color picker changes
+        if colors and ids:
+            for color, id_dict in zip(colors, ids):
+                label_str = str(id_dict['index'])
+                if label_str != 'Unlabeled':  # Protect "Unlabeled" from user changes
+                    color_map[label_str] = color
+                else:
+                    # Force Unlabeled back to gray if user tries to change it
+                    color_map[label_str] = '#D9D9D9'
+        
         return color_map
 

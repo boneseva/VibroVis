@@ -639,30 +639,31 @@ def register_plot_callbacks(app):
             color_col = 'manual_label'
             
         if is_manual_mode:
-            # Priority: 1. label_colors_data (Store), 2. cluster_colors_data (Seed), 3. Hash
+            # SINGLE SOURCE OF TRUTH: Only use label_colors_data (label-color-store)
+            # No more MD5 hash fallbacks - all colors must come from the store
             
-            # Seed from clusters if available
-            label_seed_colors = {}
-            if cluster_colors_data:
-                tmp = dff[['cluster_id_str', 'manual_label']].drop_duplicates()
-                for _, row in tmp.iterrows():
-                    cid = row['cluster_id_str']
-                    lbl = row['manual_label']
-                    if cid in cluster_colors_data and lbl not in label_seed_colors:
-                        label_seed_colors[lbl] = cluster_colors_data[cid]
-
             unique_labels = sorted(dff['manual_label'].unique())
             for lbl in unique_labels:
                 lbl_str = str(lbl)
                 if lbl == 'Unlabeled':
-                    final_color_map[lbl_str] = '#dddddd'
+                    # Hardcoded protection for Unlabeled
+                    final_color_map[lbl_str] = '#D9D9D9'
                 elif label_colors_data and lbl_str in label_colors_data:
+                    # Use color from single source of truth
                     final_color_map[lbl_str] = label_colors_data[lbl_str]
-                elif lbl in label_seed_colors:
-                    final_color_map[lbl_str] = label_seed_colors[lbl]
                 else:
-                    hash_val = int(hashlib.md5(lbl_str.encode('utf-8')).hexdigest(), 16)
-                    final_color_map[lbl_str] = CLUSTER_COLORS[hash_val % len(CLUSTER_COLORS)]
+                    # Fallback: this should rarely happen since label-color-store auto-initializes
+                    # But just in case, use CLUSTER_COLORS with deterministic index
+                    sorted_all_labels = [l for l in unique_labels if l != 'Unlabeled']
+                    sorted_all_labels = sorted(sorted_all_labels)
+                    if 'Unlabeled' in unique_labels:
+                        sorted_all_labels.append('Unlabeled')
+                    
+                    try:
+                        color_index = sorted_all_labels.index(lbl) % len(CLUSTER_COLORS)
+                        final_color_map[lbl_str] = CLUSTER_COLORS[color_index]
+                    except:
+                        final_color_map[lbl_str] = CLUSTER_COLORS[0]
         else:
             # Cluster mode color mapping
             # Priority: 1. cluster_colors_data (Store), 2. Default color logic

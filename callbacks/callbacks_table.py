@@ -137,19 +137,13 @@ def _hex_to_rgba(hex_color: str, alpha: float = 0.18) -> str:
     return f"rgba({r},{g},{b},{alpha})"
 
 
-def _label_color(label: str) -> str:
-    """Consistent per-label color using MD5-stable palette index."""
-    idx = int(hashlib.md5(str(label).encode()).hexdigest()[:4], 16) % len(CLUSTER_COLORS)
-    return CLUSTER_COLORS[idx]
-
-
 # ---------------------------------------------------------------------------
 # Render one page of the table with sortable headers
 # ---------------------------------------------------------------------------
 def _render_table(page_df: pd.DataFrame, visible_cols: list,
                   sort_col: str | None = None, sort_asc: bool = True,
                   page_offset: int = 0,
-                  color_mode: str = "cluster") -> html.Div:
+                  color_mode: str = "cluster", label_colors_data: dict = None) -> html.Div:
     if page_df.empty:
         return html.Div("No data to display.", style={"padding": "1rem", "color": "#888"})
 
@@ -212,7 +206,19 @@ def _render_table(page_df: pd.DataFrame, visible_cols: list,
 
     # Row background colors — by manual_label in manual mode, by cluster_id otherwise
     if color_mode == "manual" and "manual_label" in page_df.columns:
-        bg_colors = [_hex_to_rgba(_label_color(lbl)) for lbl in page_df["manual_label"].fillna("Unlabeled")]
+        def get_label_color(label):
+            """Get color for label from single source of truth (label-color-store)"""
+            label_str = str(label)
+            if label == 'Unlabeled':
+                return '#D9D9D9'  # Hardcoded protection
+            elif label_colors_data and label_str in label_colors_data:
+                return label_colors_data[label_str]
+            else:
+                # Fallback to CLUSTER_COLORS if not in store (rare edge case)
+                hash_val = int(hashlib.md5(label_str.encode('utf-8')).hexdigest(), 16)
+                return CLUSTER_COLORS[hash_val % len(CLUSTER_COLORS)]
+        
+        bg_colors = [_hex_to_rgba(get_label_color(lbl)) for lbl in page_df["manual_label"].fillna("Unlabeled")]
     else:
         cluster_ids = page_df["cluster_id"].astype(int)
         bg_colors = [_hex_to_rgba(CLUSTER_COLORS[cid % len(CLUSTER_COLORS)]) for cid in cluster_ids]
@@ -526,14 +532,15 @@ def register_table_callbacks(app):
         Input("main-view-tabs", "data"),
         Input("filtered-data", "data"),
         Input('manual-labels-store', 'data'),
+        Input('label-color-store', 'data'),
         Input("table-column-selector", "value"),
         Input("table-page-store", "data"),
         Input("table-sort-store", "data"),
         Input("color-mode-radio", "value"),
         prevent_initial_call=True,
     )
-    def update_table(active_tab, filtered_data_key, manual_labels_trigger, visible_cols, page,
-                     sort_state, color_mode):
+    def update_table(active_tab, filtered_data_key, manual_labels_trigger, label_colors_data,
+                     visible_cols, page, sort_state, color_mode):
 
         if active_tab != "table-tab":
             return no_update, no_update, no_update
@@ -580,7 +587,7 @@ def register_table_callbacks(app):
 
             t0 = time.time()
             result = _render_table(page_df, visible_cols, sort_col, sort_asc, page_offset,
-                                   color_mode=color_mode or "cluster")
+                                   color_mode=color_mode or "cluster", label_colors_data=label_colors_data)
             print(f"[TABLE] page {page+1}/{total_pages} rendered in {time.time()-t0:.3f}s")
 
             return result, page_info, total_pages
