@@ -9,7 +9,6 @@ import math
 from collections import Counter
 import read_data  # Import read_data to access DATA_DIR
 import librosa  # Make sure librosa is imported
-from callbacks.callbacks_constants import MANUAL_LABELS_CACHE
 
 
 # --- *** NEW, MEMORY-EFFICIENT FUNCTION *** ---
@@ -187,14 +186,28 @@ def compute_spectrogram(segment, samplerate, scale='log', fft_window_size=1024, 
 
 
 # --- *** MANUAL LABELING HELPERS *** ---
-def apply_manual_labels_efficiently(dff):
+def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels_lock=None):
     """
     Apply manual labels to dff using a high-performance vectorized approach.
     Optimized to handle 1M+ rows without redundant string scans or console flooding.
     """
-    if not MANUAL_LABELS_CACHE or dff.empty:
-        dff['manual_label'] = 'Unlabeled'
-        return dff
+    # Import here to avoid circular dependency
+    if manual_labels_cache is None:
+        from callbacks.callbacks_constants import MANUAL_LABELS_CACHE
+        manual_labels_cache = MANUAL_LABELS_CACHE
+    
+    if manual_labels_lock is None:
+        from callbacks.callbacks_constants import MANUAL_LABELS_LOCK
+        manual_labels_lock = MANUAL_LABELS_LOCK
+    
+    # THREAD SAFETY: Use lock to prevent concurrent access during read
+    with manual_labels_lock:
+        if not manual_labels_cache or dff.empty:
+            dff['manual_label'] = 'Unlabeled'
+            return dff
+        
+        # Create a snapshot of the cache to work with outside the lock
+        cache_snapshot = dict(manual_labels_cache)
         
     # Initialize with Unlabeled
     if 'manual_label' not in dff.columns:
@@ -208,8 +221,8 @@ def apply_manual_labels_efficiently(dff):
     
     # 1. Fast optimization: group labels by (loc, micro, f_base, chan)
     label_map = {}
-    for key_tuple in MANUAL_LABELS_CACHE:
-        label = MANUAL_LABELS_CACHE[key_tuple]
+    for key_tuple in cache_snapshot:
+        label = cache_snapshot[key_tuple]
         if len(key_tuple) == 5:
             loc, micro, f_base, chan, sec = key_tuple
             

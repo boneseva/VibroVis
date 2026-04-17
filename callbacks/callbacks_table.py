@@ -238,6 +238,8 @@ def _render_table(page_df: pd.DataFrame, visible_cols: list,
                         value=val,
                         id={"type": "table-inline-label", "index": actual_plot_id},
                         debounce=True,
+                        persistence=True,  # Persist value across re-renders
+                        persistence_type="memory",  # Store in memory only
                         style={"width": "100%", "boxSizing": "border-box", "border": "none", "background": "transparent", "outline": "none"}
                     )
                 ))
@@ -545,6 +547,24 @@ def register_table_callbacks(app):
         if active_tab != "table-tab":
             return no_update, no_update, no_update
 
+        # RACE CONDITION FIX: Check if this update was triggered by an inline table input
+        # If so, skip the re-render to prevent overwriting the user's input
+        triggered_prop_id = ctx.triggered[0]['prop_id'] if ctx.triggered else ""
+        
+        # If triggered by manual-labels-store, check if we should skip the update
+        if triggered_prop_id == 'manual-labels-store.data':
+            # Look for recent inline table input activity by checking timestamp
+            try:
+                current_time = time.time()
+                # If manual_labels_trigger is a timestamp string from within last 100ms,
+                # this was likely triggered by an inline input - skip to prevent race
+                if isinstance(manual_labels_trigger, str):
+                    trigger_time = float(manual_labels_trigger)
+                    if current_time - trigger_time < 0.1:  # 100ms window
+                        return no_update, no_update, no_update
+            except (ValueError, TypeError):
+                pass
+
         try:
             if not filtered_data_key:
                 return (html.Div("No data loaded. Select a location and model.",
@@ -597,3 +617,51 @@ def register_table_callbacks(app):
             return (html.Div("Error building table — check the server console.",
                              style={"padding": "2rem", "color": "red"}),
                     "error", 1)
+
+    # -- RACE CONDITION FIX: Clientside callback to update individual input values --
+    # This prevents full table re-renders from interfering with user typing
+    app.clientside_callback(
+        """
+        function(manual_labels_trigger, filtered_data_key) {
+            // Skip if no trigger or data
+            if (!manual_labels_trigger || !filtered_data_key) {
+                return window.dash_clientside.no_update;
+            }
+            
+            // Check if this is a recent inline input change (within 200ms)
+            try {
+                var triggerTime = parseFloat(manual_labels_trigger);
+                var currentTime = Date.now() / 1000;
+                if (currentTime - triggerTime < 0.2) {
+                    // Recent inline change - preserve current input states
+                    var inputs = document.querySelectorAll('[id*="table-inline-label"]');
+                    var preservedValues = {};
+                    inputs.forEach(function(input) {
+                        if (input.id && input.value !== undefined) {
+                            preservedValues[input.id] = input.value;
+                        }
+                    });
+                    
+                    // Return preserved values to prevent overwrite
+                    setTimeout(function() {
+                        Object.keys(preservedValues).forEach(function(inputId) {
+                            var input = document.getElementById(inputId);
+                            if (input && input.value !== preservedValues[inputId]) {
+                                input.value = preservedValues[inputId];
+                            }
+                        });
+                    }, 50);
+                }
+            } catch (e) {
+                // Ignore parsing errors
+            }
+            
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output('table-race-condition-fix', 'data', allow_duplicate=True),
+        Input('manual-labels-store', 'data'),
+        State('filtered-data', 'data'),
+        prevent_initial_call=True
+    )
+

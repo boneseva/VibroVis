@@ -4,6 +4,7 @@ Shared constants used across callback modules.
 import pandas as pd
 import math
 import os
+import threading
 from collections import Counter
 
 # Global data stores
@@ -12,8 +13,9 @@ MODEL_DATA_CACHE = {'df': None}
 MERGED_DATA_CACHE = {'df': None, 'key': None}
 server_cache = {}
 
-# Simple global manual labels cache
+# Simple global manual labels cache with thread safety
 MANUAL_LABELS_CACHE = {}
+MANUAL_LABELS_LOCK = threading.RLock()  # Reentrant lock for thread safety
 
 # Cluster color palette
 CLUSTER_COLORS = ['#4E79A7', '#F28E2B', '#E15759', '#76B7B2', '#EDC948', '#B07AA1', '#FF9DA7', '#A6A377', '#F2C894',

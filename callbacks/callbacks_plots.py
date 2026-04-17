@@ -14,7 +14,7 @@ import pandas as pd
 import uuid
 
 import utils
-from callbacks.callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, server_cache, initial_df, CLUSTER_COLORS, MANUAL_LABELS_CACHE
+from callbacks.callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, server_cache, initial_df, CLUSTER_COLORS, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK
 from utils import apply_manual_labels_efficiently
 
 # Performance profiling
@@ -1244,6 +1244,7 @@ def register_plot_callbacks(app):
     )
     def save_manual_label(n_clicks, n_submit, table_label_values, label_text, clickData, filtered_data_cache_key):
         import json
+        import time
 
         triggered = dash.callback_context.triggered
         if not triggered:
@@ -1253,6 +1254,10 @@ def register_plot_callbacks(app):
         
         if not filtered_data_cache_key:
             return dash.no_update, "", dash.no_update
+
+        # RACE CONDITION FIX: Add small delay for inline table inputs to ensure DOM stability
+        if triggered_id_str.startswith('{'):
+            time.sleep(0.05)  # 50ms delay for table inputs
 
         dff = server_cache.get(filtered_data_cache_key)
         if dff is None:
@@ -1297,10 +1302,12 @@ def register_plot_callbacks(app):
                     if end_second < start_second:
                         end_second = start_second
                     
-                    for sec in range(start_second, end_second + 1):
-                        key = (loc, micro, file_basename, channel, sec)
-                        MANUAL_LABELS_CACHE[key] = label_val
-                        
+                    # THREAD SAFETY: Use lock to prevent concurrent access from other threads
+                    with MANUAL_LABELS_LOCK:
+                        for sec in range(start_second, end_second + 1):
+                            key = (loc, micro, file_basename, channel, sec)
+                            MANUAL_LABELS_CACHE[key] = label_val
+
                     return str(time.time()), f"Saved: {label_val}", dash.no_update
 
             # Sidebar button
