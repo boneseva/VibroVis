@@ -102,26 +102,45 @@ def safe_cache_batch_write(key_value_pairs, max_retries=3):
     if not key_value_pairs:
         return True
     
+    print(f"[CACHE] Starting batch write of {len(key_value_pairs)} items. Cache size before: {len(MANUAL_LABELS_CACHE)}")
+    
     for attempt in range(max_retries):
         try:
             with MANUAL_LABELS_CACHE.transact():
                 for key, value in key_value_pairs:
                     MANUAL_LABELS_CACHE[key] = value
-            return True
-        except Exception as e:
-            if attempt < max_retries - 1:
-                delay = (2 ** attempt) + random.uniform(0, 1)
-                print(f"Batch cache write retry {attempt + 1}/{max_retries} after {delay:.2f}s: {e}")
-                time.sleep(delay)
+            
+            # Verify the write immediately
+            print(f"[CACHE] Batch write completed. Cache size after: {len(MANUAL_LABELS_CACHE)}")
+            verification_failed = 0
+            for key, expected_value in key_value_pairs[:5]:  # Check first 5 entries
+                actual_value = MANUAL_LABELS_CACHE.get(key)
+                if actual_value != expected_value:
+                    verification_failed += 1
+            
+            if verification_failed == 0:
+                print(f"[CACHE] Verification successful: all {min(5, len(key_value_pairs))} checked entries match")
+                return True
             else:
-                print(f"Batch cache write failed after {max_retries} attempts: {e}")
-                # Fallback: write individually
-                success_count = 0
-                for key, value in key_value_pairs:
-                    if safe_cache_write(key, value, max_retries=1):
-                        success_count += 1
-                print(f"Fallback individual writes: {success_count}/{len(key_value_pairs)} succeeded")
-                return success_count == len(key_value_pairs)
+                print(f"[CACHE] Verification failed: {verification_failed} mismatches detected")
+                # Continue to retry logic
+                
+        except Exception as e:
+            print(f"[CACHE] Batch write attempt {attempt + 1} failed: {e}")
+            
+        if attempt < max_retries - 1:
+            delay = (2 ** attempt) + random.uniform(0, 1)
+            print(f"[CACHE] Retrying batch write in {delay:.2f}s...")
+            time.sleep(delay)
+        else:
+            print(f"[CACHE] Batch write failed after {max_retries} attempts, trying individual writes")
+            # Fallback: write individually
+            success_count = 0
+            for key, value in key_value_pairs:
+                if safe_cache_write(key, value, max_retries=1):
+                    success_count += 1
+            print(f"[CACHE] Individual writes: {success_count}/{len(key_value_pairs)} succeeded")
+            return success_count == len(key_value_pairs)
     return False
 
 # Cluster color palette

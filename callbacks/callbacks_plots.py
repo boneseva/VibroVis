@@ -874,9 +874,9 @@ def register_plot_callbacks(app):
     #         return {'x': [], 'y': [], 'z': [], 'info': f'Error: {e}', 'audio_path': '', '_rev': time.time_ns()}, f"Critical Error: {e}"
 
     @app.callback(
-        Output('spectrogram-raw-data-store', 'data'),
-        Output('spectrogram-plot', 'figure'),
-        Output('fft-warning', 'children'),
+        Output('spectrogram-raw-data-store', 'data', allow_duplicate=True),
+        Output('spectrogram-plot', 'figure', allow_duplicate=True),
+        Output('fft-warning', 'children', allow_duplicate=True),
         [Input("scatter", "clickData"),
          Input('filtered-data', 'data'),
          Input('frequency-scale', 'value'),
@@ -1230,7 +1230,7 @@ def register_plot_callbacks(app):
         return 'yearly' if current_scale == 'daily' else 'daily'
 
     @app.callback(
-        [Output('manual-labels-store', 'data'),
+        [Output('manual-labels-store', 'data', allow_duplicate=True),
          Output('label-saved-msg', 'children'),
          Output('manual-label-input', 'value', allow_duplicate=True)],
         [Input('save-label-btn', 'n_clicks'),
@@ -1303,9 +1303,26 @@ def register_plot_callbacks(app):
                         key_value_pairs.append((key, label_val))
                     
                     from callbacks.callbacks_constants import safe_cache_batch_write
+                    print(f"[LABEL_SAVE] Attempting to save {len(key_value_pairs)} entries for label '{label_val}'")
+                    
                     if safe_cache_batch_write(key_value_pairs):
-                        return str(time.time()), f"Saved: {label_val}", dash.no_update
+                        # Verify the write succeeded
+                        verification_success = True
+                        for key, expected_val in key_value_pairs[:3]:  # Check first 3 entries
+                            actual_val = MANUAL_LABELS_CACHE.get(key)
+                            if actual_val != expected_val:
+                                print(f"[LABEL_SAVE] VERIFICATION FAILED: {key} = {actual_val}, expected {expected_val}")
+                                verification_success = False
+                                break
+                        
+                        if verification_success:
+                            print(f"[LABEL_SAVE] SUCCESS: Saved and verified {len(key_value_pairs)} entries")
+                            return str(time.time()), f"Saved: {label_val}", dash.no_update
+                        else:
+                            print(f"[LABEL_SAVE] VERIFICATION FAILED: Data not properly written")
+                            return dash.no_update, f"Error: Label verification failed for {label_val}", dash.no_update
                     else:
+                        print(f"[LABEL_SAVE] BATCH WRITE FAILED")
                         return dash.no_update, f"Error saving label: {label_val}", dash.no_update
 
             # Sidebar button
@@ -1344,9 +1361,26 @@ def register_plot_callbacks(app):
                     key_value_pairs.append((key, label_val))
                 
                 from callbacks.callbacks_constants import safe_cache_batch_write
+                print(f"[SIDEBAR_SAVE] Attempting to save {len(key_value_pairs)} entries for label '{label_val}'")
+                
                 if safe_cache_batch_write(key_value_pairs):
-                    return str(time.time()), f"Saved: {label_val}", label_val
+                    # Verify the write succeeded
+                    verification_success = True
+                    for key, expected_val in key_value_pairs[:3]:  # Check first 3 entries
+                        actual_val = MANUAL_LABELS_CACHE.get(key)
+                        if actual_val != expected_val:
+                            print(f"[SIDEBAR_SAVE] VERIFICATION FAILED: {key} = {actual_val}, expected {expected_val}")
+                            verification_success = False
+                            break
+                    
+                    if verification_success:
+                        print(f"[SIDEBAR_SAVE] SUCCESS: Saved and verified {len(key_value_pairs)} entries")
+                        return str(time.time()), f"Saved: {label_val}", label_val
+                    else:
+                        print(f"[SIDEBAR_SAVE] VERIFICATION FAILED: Data not properly written")
+                        return dash.no_update, f"Error: Label verification failed for {label_val}", dash.no_update
                 else:
+                    print(f"[SIDEBAR_SAVE] BATCH WRITE FAILED")
                     return dash.no_update, f"Error saving label: {label_val}", dash.no_update
             else:
                 return dash.no_update, "Error: Point not found.", dash.no_update
