@@ -263,7 +263,7 @@ def create_layout(df):
                                 {'label': 'Clip Count',    'value': 'clip_count'},
                             ],
                             value=['file_name', 'date', 'recording_time',
-                                   'cluster_start', 'cluster_end', 'duration', 'cluster_id',
+                                   'cluster_start', 'cluster_id',
                                    'manual_label'],
                             multi=True,
                             clearable=False,

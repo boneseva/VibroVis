@@ -3,6 +3,7 @@
 
 import soundfile as sf
 import numpy as np
+import pandas as pd  # Added pandas import
 import os
 from scipy.signal import spectrogram
 import math

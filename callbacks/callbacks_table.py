@@ -29,10 +29,10 @@ ALL_COLUMNS = [
     ("date",           "Date",             True),
     ("recording_time", "Recording Time",   True),
     ("cluster_start",  "Start Time",       True),
-    ("cluster_end",    "End Time",         True),
-    ("duration",       "Duration",         True),
+    ("cluster_end",    "End Time",         False),  # Removed from default view
+    ("duration",       "Duration",         False),  # Removed from default view
     ("cluster_id",     "Cluster",          True),
-    ("manual_label",   "Label",            False),  # shown in manual mode
+    ("manual_label",   "Label",            True),   # Added back to default view
     ("channel",        "Channel",          False),
     ("microlocation",  "Microlocation",    False),
     ("recorder_type",  "Recorder",         False),
@@ -263,6 +263,16 @@ def _render_table(page_df: pd.DataFrame, visible_cols: list,
 # Register callbacks
 # ---------------------------------------------------------------------------
 def register_table_callbacks(app):
+
+    # Initialize table column selector with proper defaults to override browser cache
+    @app.callback(
+        Output('table-column-selector', 'value'),
+        Input('model-data-ready-signal', 'data'),
+        prevent_initial_call=False  # Allow this to run on startup
+    )
+    def initialize_table_columns(_):
+        """Ensure table columns start with the correct defaults, overriding browser cache."""
+        return DEFAULT_VISIBLE_COLS
 
     # -- Tab-focus → focused-row-store (clientside, no server round-trip) --
     app.clientside_callback(
