@@ -1297,11 +1297,17 @@ def register_plot_callbacks(app):
                     if end_second < start_second:
                         end_second = start_second
                     
+                    # Batch write for better performance and consistency
+                    key_value_pairs = []
                     for sec in range(start_second, end_second + 1):
                         key = (loc, micro, file_basename, channel, sec)
-                        MANUAL_LABELS_CACHE[key] = label_val
-                        
-                    return str(time.time()), f"Saved: {label_val}", dash.no_update
+                        key_value_pairs.append((key, label_val))
+                    
+                    from callbacks.callbacks_constants import safe_cache_batch_write
+                    if safe_cache_batch_write(key_value_pairs):
+                        return str(time.time()), f"Saved: {label_val}", dash.no_update
+                    else:
+                        return dash.no_update, f"Error saving label: {label_val}", dash.no_update
 
             # Sidebar button
             if not label_text or not clickData:
@@ -1332,11 +1338,17 @@ def register_plot_callbacks(app):
                 if end_second < start_second:
                     end_second = start_second
                 
+                # Batch write for better performance and consistency
+                key_value_pairs = []
                 for sec in range(start_second, end_second + 1):
                     key = (loc, micro, file_basename, channel, sec)
-                    MANUAL_LABELS_CACHE[key] = label_val
+                    key_value_pairs.append((key, label_val))
                 
-                return str(time.time()), f"Saved: {label_val}", label_val
+                from callbacks.callbacks_constants import safe_cache_batch_write
+                if safe_cache_batch_write(key_value_pairs):
+                    return str(time.time()), f"Saved: {label_val}", label_val
+                else:
+                    return dash.no_update, f"Error saving label: {label_val}", dash.no_update
             else:
                 return dash.no_update, "Error: Point not found.", dash.no_update
                 

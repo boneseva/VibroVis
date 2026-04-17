@@ -473,6 +473,9 @@ def register_cluster_callbacks(app):
             return updated_store, dash.no_update
 
         changed = False
+        cache_updates = []  # Collect updates for batch operation
+        cache_deletions = []  # Collect deletions for batch operation
+        
         for cache_key in list(MANUAL_LABELS_CACHE):
             cache_label = MANUAL_LABELS_CACHE[cache_key]
             if cache_label != old_label_name:
@@ -481,13 +484,22 @@ def register_cluster_callbacks(app):
             changed = True
             if new_label_name == 'Unlabeled':
                 # Delete label assignment by removing per-second keys.
-                MANUAL_LABELS_CACHE.pop(cache_key, None)
+                cache_deletions.append(cache_key)
             else:
                 # Rename/merge (case-sensitive by design).
-                MANUAL_LABELS_CACHE[cache_key] = new_label_name
+                cache_updates.append((cache_key, new_label_name))
 
         if not changed:
             return updated_store, dash.no_update
+
+        # Apply cache changes with safe operations
+        from callbacks.callbacks_constants import safe_cache_batch_write, safe_cache_delete
+        
+        if cache_updates:
+            safe_cache_batch_write(cache_updates)
+        
+        for key in cache_deletions:
+            safe_cache_delete(key)
 
         # Timestamp token is enough to trigger dependent callbacks.
         return updated_store, str(time.time())

@@ -160,14 +160,17 @@ def _apply_import_session(session):
     applied_count = 0
     kept_conflicts = 0
     used_conflicts = 0
+    batch_updates = []
 
+    # Collect non-conflict entries
     for entry in session.get('non_conflicts', []):
         key_tuple = _entry_to_key_tuple(entry)
         if key_tuple is None:
             continue
-        MANUAL_LABELS_CACHE[key_tuple] = str(entry[5])
+        batch_updates.append((key_tuple, str(entry[5])))
         applied_count += 1
 
+    # Collect conflict resolutions
     conflicts = session.get('conflicts', [])
     resolutions = session.get('resolutions', [])
     for idx, conflict in enumerate(conflicts):
@@ -177,9 +180,14 @@ def _apply_import_session(session):
             continue
 
         key_tuple = (str(conflict[0]), str(conflict[1]), str(conflict[2]), int(conflict[3]), int(conflict[4]))
-        MANUAL_LABELS_CACHE[key_tuple] = str(conflict[6])
+        batch_updates.append((key_tuple, str(conflict[6])))
         applied_count += 1
         used_conflicts += 1
+
+    # Apply all updates in a single batch operation
+    if batch_updates:
+        from callbacks.callbacks_constants import safe_cache_batch_write
+        safe_cache_batch_write(batch_updates)
 
     return applied_count, used_conflicts, kept_conflicts
 
@@ -716,11 +724,19 @@ def register_data_callbacks(app):
                     chan = int(parts[3])
                     sec = int(parts[4])
                     
-                    # Store in cache
-                    MANUAL_LABELS_CACHE[(loc, micro, f_base, chan, sec)] = label
+                    labels.append([(loc, micro, f_base, chan, sec), label])
                     count += 1
             
-            msg = f"Loaded '{name}' ({count} labels)."
+            # Use batch write for better performance and consistency
+            from callbacks.callbacks_constants import safe_cache_batch_write
+            if labels:
+                if safe_cache_batch_write(labels):
+                    msg = f"Loaded '{name}' ({count} labels)."
+                else:
+                    msg = f"Partially loaded '{name}' ({count} labels) - some writes may have failed."
+            else:
+                msg = f"No valid labels found in '{name}'."
+            
             # Trigger update by sending timestamp
             return {'updated_at': time.time()}, msg
             

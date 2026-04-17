@@ -16,8 +16,27 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of your application code into the container
 COPY . .
 
+# Create the cache directory with proper permissions
+RUN mkdir -p /app/cache/manual_labels && \
+    chmod 777 /app/cache/manual_labels
+
 # Tell Docker that the container listens on port 8080
 EXPOSE 8080
 
-# The command to run when the container starts
-CMD ["gunicorn", "-w", "1", "--threads", "2", "-b", "0.0.0.0:8080", "--timeout", "60", "app:server"]
+# Enhanced multi-worker configuration:
+# - Multiple workers for better performance
+# - Shared cache directory for label persistence
+# - Increased timeout for long-running operations
+# - Worker restart for memory management
+CMD ["gunicorn", \
+     "--workers", "3", \
+     "--threads", "2", \
+     "--worker-class", "sync", \
+     "--max-requests", "1000", \
+     "--max-requests-jitter", "50", \
+     "--preload", \
+     "--bind", "0.0.0.0:8080", \
+     "--timeout", "120", \
+     "--keep-alive", "5", \
+     "--log-level", "info", \
+     "app:server"]
