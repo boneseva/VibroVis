@@ -357,8 +357,7 @@ def register_plot_callbacks(app):
         is_manual_mode = (color_mode == 'manual')
         
         # Always compute manual labels if cache is not empty, for sampling priority
-        with MANUAL_LABELS_LOCK:
-            has_manual_labels = bool(MANUAL_LABELS_CACHE)
+        has_manual_labels = bool(MANUAL_LABELS_CACHE)
 
         # CRITICAL FIX: If is_manual_mode is True, we MUST return a df with 'manual_label' column
         # even if the cache is empty. apply_manual_labels_efficiently handles empty cache by 
@@ -1298,11 +1297,21 @@ def register_plot_callbacks(app):
                     if end_second < start_second:
                         end_second = start_second
                     
-                    for sec in range(start_second, end_second + 1):
-                        key = (loc, micro, file_basename, channel, sec)
-                        MANUAL_LABELS_CACHE[key] = label_val
+                    # Thread-safe cache updates for inline table labeling
+                    with MANUAL_LABELS_LOCK:
+                        for sec in range(start_second, end_second + 1):
+                            key = (loc, micro, file_basename, channel, sec)
+                            MANUAL_LABELS_CACHE[key] = label_val
 
-                    return str(time.time()), f"Saved: {label_val}", dash.no_update
+                    # Verify the update was successful for production reliability
+                    with MANUAL_LABELS_LOCK:
+                        verification_key = (loc, micro, file_basename, channel, start_second)
+                        if MANUAL_LABELS_CACHE.get(verification_key) == label_val:
+                            # Create a unique trigger to force UI updates across all threads
+                            unique_trigger = f"{time.time()}_{hash(label_val)}_{len(MANUAL_LABELS_CACHE)}"
+                            return unique_trigger, f"Saved: {label_val}", dash.no_update
+                        else:
+                            return dash.no_update, f"Error: Failed to save {label_val}", dash.no_update
 
             # Sidebar button
             if not label_text or not clickData:
@@ -1339,26 +1348,28 @@ def register_plot_callbacks(app):
 
                 print(f"[SIDEBAR_SAVE] Attempting to save {len(key_value_pairs)} entries for label '{label_val}'")
 
-                # Simple dictionary update - no complex caching needed
-                for key, label_val in key_value_pairs:
-                    MANUAL_LABELS_CACHE[key] = label_val
+                # Thread-safe dictionary update with verification
+                with MANUAL_LABELS_LOCK:
+                    for key, label_val in key_value_pairs:
+                        MANUAL_LABELS_CACHE[key] = label_val
 
-                # Verify the write succeeded
-                verification_success = True
-                for key, expected_val in key_value_pairs[:3]:  # Check first 3 entries
-                    actual_val = MANUAL_LABELS_CACHE.get(key)
-                    if actual_val != expected_val:
-                        print(f"[SIDEBAR_SAVE] VERIFICATION FAILED: {key} = {actual_val}, expected {expected_val}")
-                        verification_success = False
-                        break
+                    # Verify the write succeeded within the same lock
+                    verification_success = True
+                    for key, expected_val in key_value_pairs[:3]:  # Check first 3 entries
+                        actual_val = MANUAL_LABELS_CACHE.get(key)
+                        if actual_val != expected_val:
+                            print(f"[SIDEBAR_SAVE] VERIFICATION FAILED: {key} = {actual_val}, expected {expected_val}")
+                            verification_success = False
+                            break
 
                 if verification_success:
                     print(f"[SIDEBAR_SAVE] SUCCESS: Saved and verified {len(key_value_pairs)} entries")
-                    return str(time.time()), f"Saved: {label_val}", label_val
+                    # Create unique trigger for production reliability
+                    unique_trigger = f"{time.time()}_{hash(label_val)}_{len(key_value_pairs)}"
+                    return unique_trigger, f"Saved: {label_val}", label_val
                 else:
                     print(f"[SIDEBAR_SAVE] VERIFICATION FAILED: Data not properly written")
                     return dash.no_update, f"Error: Label verification failed for {label_val}", dash.no_update
-                    return dash.no_update, f"Error saving label: {label_val}", dash.no_update
             else:
                 return dash.no_update, "Error: Point not found.", dash.no_update
                 

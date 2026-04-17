@@ -7,7 +7,7 @@ from dash import Input, Output, State, html, dcc, ALL
 import pandas as pd
 import hashlib # Added for stable coloring
 
-from callbacks.callbacks_constants import MODEL_DATA_CACHE, initial_df, CLUSTER_COLORS, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK
+from callbacks.callbacks_constants import MODEL_DATA_CACHE, initial_df, CLUSTER_COLORS, MANUAL_LABELS_CACHE
 from utils import apply_manual_labels_efficiently
 
 
@@ -58,9 +58,7 @@ def register_cluster_callbacks(app):
 
             # Build cluster → majority-label map (for coloring in manual mode)
             cluster_to_label: dict = {}
-            with MANUAL_LABELS_LOCK:
-                manual_cache_has_data = bool(MANUAL_LABELS_CACHE)
-            if is_manual and manual_cache_has_data and 'cluster_id' in dff.columns:
+            if is_manual and MANUAL_LABELS_CACHE and 'cluster_id' in dff.columns:
                 from collections import Counter
                 # Build a lookup: (location, microlocation, file_name, channel, clip_time) → label
                 # Vectorized: create key tuples for each row, map to label, then groupby cluster_id
@@ -318,8 +316,7 @@ def register_cluster_callbacks(app):
                             label_to_color_seed[lbl] = cluster_colors_data[cid_str]
 
             # unique_labels from cache
-            with MANUAL_LABELS_LOCK:
-                unique_labels = sorted(set(MANUAL_LABELS_CACHE[key] for key in list(MANUAL_LABELS_CACHE)))
+            unique_labels = sorted(set(MANUAL_LABELS_CACHE[key] for key in MANUAL_LABELS_CACHE))
             if 'Unlabeled' not in unique_labels:
                 unique_labels.append('Unlabeled')
             
@@ -525,8 +522,7 @@ def register_cluster_callbacks(app):
         color_map = current_color_store.copy() if current_color_store else {}
         
         # Get all current labels from cache
-        with MANUAL_LABELS_LOCK:
-            all_labels = sorted(set(MANUAL_LABELS_CACHE[key] for key in list(MANUAL_LABELS_CACHE)))
+        all_labels = sorted(set(MANUAL_LABELS_CACHE[key] for key in MANUAL_LABELS_CACHE))
         if 'Unlabeled' not in all_labels:
             all_labels.append('Unlabeled')
         
