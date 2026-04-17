@@ -1,11 +1,3 @@
-     "--workers", "3", \
-     "--threads", "2", \
-     "--worker-class", "sync", \
-# Enhanced multi-worker configuration:
-# - Multiple workers for better performance
-# - Shared cache directory for label persistence
-# - Increased timeout for long-running operations
-# - Worker restart for memory management
 # Use a stable Debian-based Python image
 FROM python:3.11-slim-bookworm
 
