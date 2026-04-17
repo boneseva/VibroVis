@@ -289,7 +289,8 @@ def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels
                          found.append(l)
                  
                  if found:
-                     dff.at[idx, 'manual_label'] = Counter(found) .most_common(1)[0][0]
+                     final_label = Counter(found).most_common(1)[0][0]
+                     dff.at[idx, 'manual_label'] = final_label
                      
         except Exception:
             continue
