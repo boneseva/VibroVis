@@ -1,56 +1,65 @@
 # Updated utils.py
-# (This file now has a memory-efficient audio loader)
+# Optimized for Random Access - Selective segment loading without full-file caching
 
 import soundfile as sf
 import numpy as np
 import os
 from scipy.signal import spectrogram
-import math
 from collections import Counter
 import read_data  # Import read_data to access DATA_DIR
 import librosa  # Make sure librosa is imported
 
 
-# --- *** NEW, MEMORY-EFFICIENT FUNCTION *** ---
+# --- *** OPTIMIZED SELECTIVE AUDIO LOADING *** ---
 def load_audio_segment(mp3_file_relative_path, clip_time, clip_duration, channel=0, padding_s=1.0):
     """
-    Loads a specific audio segment from a file *without* loading the
-    entire file into memory.
+    Loads a specific audio segment using optimized selective loading.
+    Perfect for random access across many different files.
+    Uses soundfile/librosa offset parameters to skip file decoding.
     """
     mp3_file_relative_path = mp3_file_relative_path.replace("\\", "/")
     full_path = os.path.join(read_data.DATA_DIR, mp3_file_relative_path)
+    
     if not os.path.exists(full_path):
         print(f"Warning: Audio file not found at {full_path}")
         return None, None
 
     try:
-        # Suppress stderr from mpg123 decoder (redirects to devnull)
-        with open(os.devnull, 'w') as devnull:
-            # Note: direct C-level stderr redirection requires more complex handling (os.dup2)
-            # but this might catch Python-level propagated errors or if library uses sys.stderr
-            # For pure C libraries like libmpg123, we often need C-level redirection.
-            # However, we'll restore the previous user attempt first.
-            from contextlib import redirect_stderr
-            with redirect_stderr(devnull):
-                 # 1. Get file info without loading data
-                info = sf.info(full_path)
-                samplerate = info.samplerate
-                total_frames = info.frames
-                num_channels = info.channels
+        # Suppress stderr from mpg123 decoder to prevent console clutter
+        import sys
+        import contextlib
+        
+        @contextlib.contextmanager
+        def suppress_stderr():
+            with open(os.devnull, "w") as devnull:
+                old_stderr = sys.stderr
+                sys.stderr = devnull
+                try:
+                    yield
+                finally:
+                    sys.stderr = old_stderr
 
-                # 2. Calculate start and end samples with padding
-                start_sample = int(max(0, (clip_time - padding_s)) * samplerate)
-                end_sample = int(min(total_frames, (clip_time + clip_duration + padding_s) * samplerate))
+        with suppress_stderr():
+            # OPTIMIZED: Get file info without loading data
+            info = sf.info(full_path)
+            samplerate = info.samplerate
+            total_frames = info.frames
+            num_channels = info.channels
 
-                # 3. Read *only* the required segment from disk
-                # We read as float32 for consistency with librosa
-                segment, _ = sf.read(full_path, start=start_sample, stop=end_sample, dtype='float32')
+            # Calculate start and end samples with padding
+            start_sample = int(max(0, (clip_time - padding_s) * samplerate))
+            end_sample = int(min(total_frames, (clip_time + clip_duration + padding_s) * samplerate))
 
-        # 4. Handle mono vs multi-channel *after* loading the small segment
+            # EFFICIENCY TWEAK: Use start/stop parameters for selective loading
+            # This allows the C-engine to skip decoding most of the file
+            segment, _ = sf.read(full_path, start=start_sample, stop=end_sample, dtype='float32')
+
+        # Handle mono vs multi-channel after loading the small segment
         if segment.ndim > 1:
             if channel < num_channels:
                 channel_data = segment[:, channel]
-            else:  # Fallback to first channel
+            else:
+                # Fallback to first channel
                 channel_data = segment[:, 0]
         else:
             channel_data = segment
@@ -58,38 +67,31 @@ def load_audio_segment(mp3_file_relative_path, clip_time, clip_duration, channel
         return channel_data, samplerate
 
     except Exception as e:
-        print(f"Error loading with soundfile: {e}. Trying librosa...")
+        # Fallback to librosa with selective loading
         try:
-             # Fallback to librosa (loads entire file, slower but more robust)
-             # librosa.load returns (y, sr)
-             # We load with original sr to match behavior, or just let librosa decide
-             y, sr = librosa.load(full_path, sr=None) 
-             
-             # Calculate samples
-             start_sample = int(max(0, (clip_time - padding_s)) * sr)
-             end_sample = int(min(len(y), (clip_time + clip_duration + padding_s) * sr))
-             
-             segment = y[start_sample:end_sample]
-             
-             # Handle multi-channel if librosa loaded it (librosa usually loads mono by default unless mono=False)
-             # Let's force load as mono for simplicity in fallback, or handle channels if needed.
-             # VibroVis seems to rely on channels, so let's try reading multi-channel.
-             y_multi, sr_multi = librosa.load(full_path, sr=None, mono=False)
-             
-             if y_multi.ndim > 1:
-                  if channel < y_multi.shape[0]:
-                       segment = y_multi[channel, start_sample:end_sample]
-                  else:
-                       segment = y_multi[0, start_sample:end_sample]
-             else:
-                  segment = y_multi[start_sample:end_sample]
-                  
-             return segment, sr_multi
-
+            with suppress_stderr():
+                # Calculate offset and duration for librosa
+                offset_seconds = max(0, clip_time - padding_s)
+                duration_seconds = clip_duration + (2 * padding_s)
+                
+                # EFFICIENCY TWEAK: Use offset and duration for selective loading
+                y, sr = librosa.load(full_path, sr=None, offset=offset_seconds, 
+                                   duration=duration_seconds, mono=False)
+                
+                # Handle multi-channel selection
+                if y.ndim > 1:
+                    if channel < y.shape[0]:
+                        segment = y[channel, :]
+                    else:
+                        segment = y[0, :]  # Fallback to first channel
+                else:
+                    segment = y
+                    
+                return segment, sr
+                
         except Exception as e2:
-             print(f"Error loading audio segment from {full_path} with librosa: {e2}")
-             return None, None
-# --- *** END OF NEW FUNCTION *** ---
+            print(f"Error loading audio segment from {full_path}: {e2}")
+            return None, None
 
 
 def compute_spectrogram(segment, samplerate, scale='log', fft_window_size=1024, window_overlap=0.5,
@@ -228,18 +230,18 @@ def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels
         dff['manual_label'] = 'Unlabeled'
     else:
         dff['manual_label'] = 'Unlabeled'
-    
+
     # 0. Pre-filter the cache to ONLY those relevant to the current location/microlocation
     # Most dffs in the app only represent one location at a time.
     current_locations = dff['location'].unique() if 'location' in dff.columns else []
-    
+
     # 1. Fast optimization: group labels by (loc, micro, f_base, chan)
     label_map = {}
     for key_tuple in cache_snapshot:
         label = cache_snapshot[key_tuple]
         if len(key_tuple) == 5:
             loc, micro, f_base, chan, sec = key_tuple
-            
+
             # Skip if not in current data view (heavy optimization)
             if len(current_locations) > 0 and loc not in current_locations:
                 continue
@@ -248,7 +250,7 @@ def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels
             if group_key not in label_map:
                 label_map[group_key] = {}
             label_map[group_key][sec] = label
-    
+
     if not label_map:
         return dff
 
@@ -273,44 +275,44 @@ def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels
                   mask = (dff['channel'].astype(int) == chan_val)
              else:
                   mask = (dff['channel'] == chan_val)
-             
+
              # Group comparison (Avoid loc/micro check if they are already unique in dff to save time)
              if 'location' in dff.columns:
                  mask &= (dff['location'].fillna('Unknown') == loc)
              if 'microlocation' in dff.columns:
                  mask &= (dff['microlocation'].fillna('Unknown') == micro)
-             
+
              # Basename match (Now O(1) string check per row using cached column)
              mask &= (dff['f_basename_cache'] == f_base)
-             
+
              # Get matching indices
              indices = dff.index[mask]
              if indices.empty:
                  continue
-                 
+
              # Only iterate the tiny subset of matching rows
              for idx in indices:
                  row_start = float(dff.at[idx, 'clip_time'])
                  row_dur = float(dff.at[idx, 'clip_duration']) if 'clip_duration' in dff.columns else 5.0
-                 
+
                  # CRITICAL FIX: Use round() to match callbacks_plots.py key generation
                  start_sec = round(row_start)
                  end_sec = round(row_start + row_dur) - 1
-                 
+
                  # Handle edge case where very short clips might have end_sec < start_sec
                  if end_sec < start_sec:
                      end_sec = start_sec
-                 
+
                  found = []
                  for s in range(start_sec, end_sec + 1):
                      l = sec_map.get(int(s))  # Ensure int type for key consistency
                      if l and l != 'Unlabeled':
                          found.append(l)
-                 
+
                  if found:
                      final_label = Counter(found).most_common(1)[0][0]
                      dff.at[idx, 'manual_label'] = final_label
-                     
+
         except Exception:
             continue
 

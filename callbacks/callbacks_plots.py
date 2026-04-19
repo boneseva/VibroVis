@@ -337,7 +337,7 @@ def register_plot_callbacks(app):
              dff_for_stats = dff_macro.copy()
              if 'clip_duration' not in dff_for_stats.columns: dff_for_stats['clip_duration'] = 5.0
              dff_for_stats = apply_manual_labels_efficiently(dff_for_stats)
-             
+
              # 1. Cluster Stats
              if 'cluster_id' in dff_for_stats.columns:
                  c_counts = dff_for_stats.groupby('cluster_id')['clip_count'].sum().to_dict()
@@ -353,19 +353,19 @@ def register_plot_callbacks(app):
                  labeled_total = sum(count for lbl, count in l_counts.items() if str(lbl) != 'Unlabeled')
                  cluster_stats['__labeled_total__'] = int(labeled_total)
 
-        group_col = 'cluster_id' 
+        group_col = 'cluster_id'
         is_manual_mode = (color_mode == 'manual')
-        
+
         # Always compute manual labels if cache is not empty, for sampling priority
         has_manual_labels = bool(MANUAL_LABELS_CACHE)
 
         # CRITICAL FIX: If is_manual_mode is True, we MUST return a df with 'manual_label' column
-        # even if the cache is empty. apply_manual_labels_efficiently handles empty cache by 
+        # even if the cache is empty. apply_manual_labels_efficiently handles empty cache by
         # setting everything to 'Unlabeled'.
         if has_manual_labels or is_manual_mode:
              # Use optimized helper
              dff_macro = dff_macro.copy() # Avoid SettingWithCopy
-             
+
              # Ensure duration exists
              if 'clip_duration' not in dff_macro.columns:
                  dff_macro['clip_duration'] = 5.0
@@ -626,7 +626,7 @@ def register_plot_callbacks(app):
         if 'start_hour_float' not in dff.columns:
             dff['start_hour_float'] = 0
             dff = apply_manual_labels_efficiently(dff, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK)
-        
+
         # Ensure day_int is always available for plotting
         if 'day_dt' in dff.columns:
             dff['day_int'] = pd.to_datetime(dff['day_dt']).dt.dayofyear
@@ -1006,10 +1006,10 @@ def register_plot_callbacks(app):
         info = f"{row['file_name']} at {start_time:.2f}s (cluster {row['cluster_id']})"
 
         store_data = {
-            'x': t.tolist(), 
-            'y': f.tolist(), 
-            'z': Sxx_db.tolist(), 
-            'audio_path': audio_path, 
+            'x': t.tolist(),
+            'y': f.tolist(),
+            'z': Sxx_db.tolist(),
+            'audio_path': audio_path,
             'info': info,
             '_rev': time.time_ns()
         }
