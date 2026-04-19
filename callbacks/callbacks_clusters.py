@@ -7,7 +7,7 @@ from dash import Input, Output, State, html, dcc, ALL
 import pandas as pd
 import hashlib # Added for stable coloring
 
-from callbacks.callbacks_constants import MODEL_DATA_CACHE, initial_df, CLUSTER_COLORS, MANUAL_LABELS_CACHE
+from callbacks.callbacks_constants import MODEL_DATA_CACHE, initial_df, CLUSTER_COLORS, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK
 from utils import apply_manual_labels_efficiently
 
 
@@ -316,7 +316,17 @@ def register_cluster_callbacks(app):
                             label_to_color_seed[lbl] = cluster_colors_data[cid_str]
 
             # unique_labels from cache
-            unique_labels = sorted(set(MANUAL_LABELS_CACHE[key] for key in MANUAL_LABELS_CACHE))
+            with MANUAL_LABELS_LOCK:
+                cache_keys = list(MANUAL_LABELS_CACHE.iterkeys())
+                unique_labels = []
+                for key in cache_keys:
+                    try:
+                        label = MANUAL_LABELS_CACHE[key]
+                        unique_labels.append(label)
+                    except KeyError:
+                        # Key was deleted during iteration, skip it
+                        continue
+                unique_labels = sorted(set(unique_labels))
             if 'Unlabeled' not in unique_labels:
                 unique_labels.append('Unlabeled')
             
@@ -522,7 +532,17 @@ def register_cluster_callbacks(app):
         color_map = current_color_store.copy() if current_color_store else {}
         
         # Get all current labels from cache
-        all_labels = sorted(set(MANUAL_LABELS_CACHE[key] for key in MANUAL_LABELS_CACHE))
+        with MANUAL_LABELS_LOCK:
+            cache_keys = list(MANUAL_LABELS_CACHE.iterkeys())
+            all_labels = []
+            for key in cache_keys:
+                try:
+                    label = MANUAL_LABELS_CACHE[key]
+                    all_labels.append(label)
+                except KeyError:
+                    # Key was deleted during iteration, skip it
+                    continue
+            all_labels = sorted(set(all_labels))
         if 'Unlabeled' not in all_labels:
             all_labels.append('Unlabeled')
         

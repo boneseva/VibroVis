@@ -2,19 +2,22 @@
 Shared constants used across callback modules.
 """
 import pandas as pd
-import math
+import diskcache as dc
 import os
 import threading
-from collections import Counter
 
 # Global data stores
 initial_df = pd.DataFrame()
 MODEL_DATA_CACHE = {'df': None}
 MERGED_DATA_CACHE = {'df': None, 'key': None}
+
+# Server-side cache for filtered data (used by scatter plot and table)
 server_cache = {}
 
-# Simple global manual labels cache with thread safety
-MANUAL_LABELS_CACHE = {}
+# Thread-safe manual labels cache using diskcache for Gunicorn production
+# This ensures all threads see the same state immediately
+cache_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'cache', 'manual_labels')
+MANUAL_LABELS_CACHE = dc.Cache(cache_dir)
 MANUAL_LABELS_LOCK = threading.RLock()  # Reentrant lock for thread safety
 
 # Cluster color palette

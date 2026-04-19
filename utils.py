@@ -207,8 +207,22 @@ def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels
             return dff
         
         # Create a snapshot of the cache to work with outside the lock
-        cache_snapshot = dict(manual_labels_cache)
-        
+        # For diskcache, we need to safely iterate and handle missing keys
+        cache_snapshot = {}
+        try:
+            # Use list() to create a snapshot of keys first to avoid concurrent modification
+            cache_keys = list(manual_labels_cache.iterkeys())
+            for key in cache_keys:
+                try:
+                    cache_snapshot[key] = manual_labels_cache[key]
+                except KeyError:
+                    # Key was deleted during iteration, skip it
+                    continue
+        except Exception:
+            # If anything fails, return the dataframe with unlabeled entries
+            dff['manual_label'] = 'Unlabeled'
+            return dff
+
     # Initialize with Unlabeled
     if 'manual_label' not in dff.columns:
         dff['manual_label'] = 'Unlabeled'
@@ -242,10 +256,10 @@ def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels
     # This is the most expensive part on 1M rows, avoid doing it for every label.
     if 'f_basename_cache' not in dff.columns:
         if 'mp3_file' in dff.columns:
-            # Optimized basename extraction
-            dff['f_basename_cache'] = dff['mp3_file'].astype(str).str.split('/').str[-1].str.split('\\').str[-1]
+            # Cross-platform basename extraction
+            dff['f_basename_cache'] = dff['mp3_file'].astype(str).str.replace('\\', '/').str.split('/').str[-1]
         elif 'file_name' in dff.columns:
-            dff['f_basename_cache'] = dff['file_name'].astype(str).str.split('/').str[-1].str.split('\\').str[-1]
+            dff['f_basename_cache'] = dff['file_name'].astype(str).str.replace('\\', '/').str.split('/').str[-1]
         else:
             return dff # Cannot match without filenames
 
@@ -279,12 +293,17 @@ def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels
                  row_start = float(dff.at[idx, 'clip_time'])
                  row_dur = float(dff.at[idx, 'clip_duration']) if 'clip_duration' in dff.columns else 5.0
                  
-                 start_sec = math.floor(row_start)
-                 end_sec = math.ceil(row_start + row_dur)
+                 # CRITICAL FIX: Use round() to match callbacks_plots.py key generation
+                 start_sec = round(row_start)
+                 end_sec = round(row_start + row_dur) - 1
+                 
+                 # Handle edge case where very short clips might have end_sec < start_sec
+                 if end_sec < start_sec:
+                     end_sec = start_sec
                  
                  found = []
                  for s in range(start_sec, end_sec + 1):
-                     l = sec_map.get(s)
+                     l = sec_map.get(int(s))  # Ensure int type for key consistency
                      if l and l != 'Unlabeled':
                          found.append(l)
                  

@@ -25,7 +25,7 @@ import numpy as np
 import plotly.graph_objects as go
 
 
-def get_label_for_clip(file_basename, channel, start_time, duration):
+def get_label_for_clip(loc, micro, file_basename, channel, start_time, duration):
     """
     Get the majority label for a clip based on per-second labels.
     Uses proper rounding to prevent label bleed into adjacent clips.
@@ -41,7 +41,7 @@ def get_label_for_clip(file_basename, channel, start_time, duration):
     labels = []
     # Check every second covered by the clip (only seconds that fall within bounds)
     for sec in range(start_second, end_second + 1):
-        key = (file_basename, int(channel), sec)
+        key = (loc, micro, file_basename, int(channel), int(sec))  # Ensure int types
         label = MANUAL_LABELS_CACHE.get(key)
         if label and label != 'Unlabeled':
             labels.append(label)
@@ -314,8 +314,7 @@ def register_plot_callbacks(app):
         
         # dff_macro is now ready for sampling
         total_clips_at_location = len(dff_raw) 
-        if active_k is not None and 'cluster_num' in dff_raw.columns:
-             total_clips_at_location = len(dff_raw[dff_raw['cluster_num'] == active_k])
+        total_clips_at_location = len(dff_raw[dff_raw['cluster_num'] == active_k])
         
         # Calculate max distance for slider
         max_distance = 100
@@ -337,7 +336,7 @@ def register_plot_callbacks(app):
              # Always ensure we have labels for stats if possible (needed for Labels sidebar percentage)
              dff_for_stats = dff_macro.copy()
              if 'clip_duration' not in dff_for_stats.columns: dff_for_stats['clip_duration'] = 5.0
-             dff_for_stats = apply_manual_labels_efficiently(dff_for_stats, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK)
+             dff_for_stats = apply_manual_labels_efficiently(dff_for_stats)
              
              # 1. Cluster Stats
              if 'cluster_id' in dff_for_stats.columns:
@@ -347,6 +346,7 @@ def register_plot_callbacks(app):
              
              # 2. Label Stats
              if 'manual_label' in dff_for_stats.columns:
+                 dff_macro = apply_manual_labels_efficiently(dff_macro, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK)
                  l_counts = dff_for_stats.groupby('manual_label')['clip_count'].sum().to_dict()
                  for lbl, count in l_counts.items():
                      cluster_stats[str(lbl)] = int(count)
@@ -370,7 +370,7 @@ def register_plot_callbacks(app):
              if 'clip_duration' not in dff_macro.columns:
                  dff_macro['clip_duration'] = 5.0
 
-             dff_macro = apply_manual_labels_efficiently(dff_macro, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK)
+             dff_macro = apply_manual_labels_efficiently(dff_macro)
 
         if is_manual_mode:
             group_col = 'manual_label'
@@ -415,7 +415,20 @@ def register_plot_callbacks(app):
         
         # FIX RACE CONDITION:
         # Avoid rows "disappearing" from the view before their new label checkbox spawns.
-        all_cached_labels = set(MANUAL_LABELS_CACHE[key] for key in MANUAL_LABELS_CACHE)
+        with MANUAL_LABELS_LOCK:
+            all_cached_labels = set()
+            try:
+                cache_keys = list(MANUAL_LABELS_CACHE.iterkeys())
+                for key in cache_keys:
+                    try:
+                        label = MANUAL_LABELS_CACHE[key]
+                        all_cached_labels.add(label)
+                    except KeyError:
+                        # Key was deleted during iteration, skip it
+                        continue
+            except Exception:
+                # If anything fails, use empty set
+                all_cached_labels = set()
 
         # 1. Labels filter race condition: Ensure ANY label in cache is considered "selected" if its UI checkbox is missing.
         missing_from_ui_labels = all_cached_labels - ui_known_labels_for_labels
@@ -423,10 +436,10 @@ def register_plot_callbacks(app):
             selected_labels.add(str(missing_lbl))
             
         # 2. Clusters filter race condition: In manual mode, we also add these to the cluster filter pool
-        if is_manual_mode:
-            missing_from_ui_clusters = all_cached_labels - ui_known_labels
-            for missing_lbl in missing_from_ui_clusters:
-                selected_clusters.add(str(missing_lbl))
+        dff_macro = apply_manual_labels_efficiently(dff_macro, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK)
+        missing_from_ui_clusters = all_cached_labels - ui_known_labels
+        for missing_lbl in missing_from_ui_clusters:
+            selected_clusters.add(str(missing_lbl))
 
         has_checkbox_inputs = bool(cluster_checkbox_ids) or bool(label_checkbox_ids) or (is_manual_mode and bool(MANUAL_LABELS_CACHE))
         
@@ -446,11 +459,11 @@ def register_plot_callbacks(app):
                 if label_checkbox_ids:
                     if 'manual_label' not in dff_macro.columns:
                         if 'clip_duration' not in dff_macro.columns: dff_macro['clip_duration'] = 5.0
-                        dff_macro = apply_manual_labels_efficiently(dff_macro, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK)
+                        dff_macro = apply_manual_labels_efficiently(dff_macro)
                     dff_macro = dff_macro[dff_macro['manual_label'].isin(selected_labels)]
-        
-        # Update filtered count to reflect the state after visibility filters
-        if not dff_macro.empty:
+            
+            # Update filtered count to reflect the state after visibility filters
+            dff_macro = apply_manual_labels_efficiently(dff_macro, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK)
             total_clips_available = dff_macro['clip_count'].sum() if 'clip_count' in dff_macro.columns else len(dff_macro)
         else:
             total_clips_available = 0
@@ -473,7 +486,7 @@ def register_plot_callbacks(app):
                 if is_manual_mode:
                      # Ensure we work on a copy to avoid SettingWithCopyWarning
                      dff_macro = dff_macro.copy()
-                     dff_macro = apply_manual_labels_efficiently(dff_macro, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK)
+                     dff_macro = apply_manual_labels_efficiently(dff_macro)
 
                 # Sampling logic: We use a SET of chosen indices and then filter dff_macro
                 # to ensure the final dff_sampled maintains its stable, intrinsic order (File Name + Time).
@@ -612,11 +625,13 @@ def register_plot_callbacks(app):
 
         if 'start_hour_float' not in dff.columns:
             dff['start_hour_float'] = 0
-        if 'day_int' not in dff.columns:
-            if 'day_dt' in dff.columns:
-                dff['day_int'] = pd.to_datetime(dff['day_dt']).dt.dayofyear
-            else:
-                dff['day_int'] = 1
+            dff = apply_manual_labels_efficiently(dff, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK)
+        
+        # Ensure day_int is always available for plotting
+        if 'day_dt' in dff.columns:
+            dff['day_int'] = pd.to_datetime(dff['day_dt']).dt.dayofyear
+        else:
+            dff['day_int'] = 1
         
         if 'day_dt' in dff.columns and 'start_hour_float' in dff.columns:
             dff['date_time_str'] = pd.to_datetime(dff['day_dt']).dt.strftime('%d-%m-%Y') + ' ' + \
@@ -635,7 +650,7 @@ def register_plot_callbacks(app):
             # Using list comprehension which is generally faster than apply for simple tuple creation
             # Use optimized helper
             if 'clip_duration' not in dff.columns: dff['clip_duration'] = 5.0
-            dff = apply_manual_labels_efficiently(dff, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK)
+            dff = apply_manual_labels_efficiently(dff)
             color_col = 'manual_label'
             
         if is_manual_mode:
@@ -1091,7 +1106,7 @@ def register_plot_callbacks(app):
                 print("Abort Histogram: No clickData or cache key")
                 fig = go.Figure()
                 title = "Time of Day" if time_scale == 'daily' else "Week of Year"
-                rng = [0, 1440] if time_scale == 'daily' else [1, 53]
+                dff = apply_manual_labels_efficiently(dff, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK)
                 fig.update_layout(
                     xaxis=dict(title=title, range=rng),
                     yaxis_title="Count", showlegend=False,
@@ -1114,7 +1129,7 @@ def register_plot_callbacks(app):
                  
                  if 'manual_label' not in dff.columns:
                      if 'clip_duration' not in dff.columns: dff['clip_duration'] = 5.0
-                     dff = apply_manual_labels_efficiently(dff, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK)
+                     dff = apply_manual_labels_efficiently(dff)
                  
                  cluster_df = dff[dff['manual_label'] == clicked_label].copy()
                  target_id_for_color = clicked_label
@@ -1262,6 +1277,9 @@ def register_plot_callbacks(app):
             # Inline Table Edit
             if triggered_id_str.startswith('{'):
                 trig_dict = json.loads(triggered_id_str)
+            # Inline Table Edit
+            if triggered_id_str.startswith('{'):
+                trig_dict = json.loads(triggered_id_str)
                 if trig_dict.get('type') == 'table-inline-label':
                     plot_id = trig_dict.get('index')
                     
@@ -1274,22 +1292,22 @@ def register_plot_callbacks(app):
                     val = triggered[0]['value']
                     if val is None:
                         return dash.no_update, dash.no_update, dash.no_update
-                        
-                    label_val = val.strip()
-                    if not label_val:
-                        label_val = 'Unlabeled'
                     
+                    label_val = val.strip() if val else 'Unlabeled'
+                    
+                    # Extract row data with proper handling
                     loc = row.get('location', 'Unknown')
                     if pd.isna(loc): loc = 'Unknown'
                     micro = row.get('microlocation', 'Unknown')
                     if pd.isna(micro): micro = 'Unknown'
                     channel = int(row['channel'])
                     
-                    file_basename = os.path.basename(str(row['mp3_file']))
+                    # CRITICAL: Use cross-platform file path extraction
+                    file_basename = str(row['mp3_file']).replace('\\', '/').split('/')[-1]
                     start_time = float(row['clip_time'])
                     duration = float(row.get('clip_duration', 5.0))
                     
-                    # Use proper rounding to prevent label bleed into adjacent clips
+                    # CRITICAL: Use round() to match utils.py key generation
                     start_second = round(start_time)
                     end_second = round(start_time + duration) - 1
                     
@@ -1300,12 +1318,12 @@ def register_plot_callbacks(app):
                     # Thread-safe cache updates for inline table labeling
                     with MANUAL_LABELS_LOCK:
                         for sec in range(start_second, end_second + 1):
-                            key = (loc, micro, file_basename, channel, sec)
+                            key = (loc, micro, file_basename, int(channel), int(sec))  # Ensure int types
                             MANUAL_LABELS_CACHE[key] = label_val
-
+                    
                     # Verify the update was successful for production reliability
                     with MANUAL_LABELS_LOCK:
-                        verification_key = (loc, micro, file_basename, channel, start_second)
+                        verification_key = (loc, micro, file_basename, int(channel), int(start_second))
                         if MANUAL_LABELS_CACHE.get(verification_key) == label_val:
                             # Create a unique trigger to force UI updates across all threads
                             unique_trigger = f"{time.time()}_{hash(label_val)}_{len(MANUAL_LABELS_CACHE)}"
@@ -1330,11 +1348,12 @@ def register_plot_callbacks(app):
                 if pd.isna(micro): micro = 'Unknown'
                 channel = int(row['channel'])
                 
-                file_basename = os.path.basename(str(row['mp3_file']))
+                # CRITICAL: Use cross-platform file path extraction
+                file_basename = str(row['mp3_file']).replace('\\', '/').split('/')[-1]
                 start_time = float(row['clip_time'])
                 duration = float(row.get('clip_duration', 5.0))
                 
-                # Use proper rounding to prevent label bleed into adjacent clips
+                # CRITICAL: Use round() to match utils.py key generation
                 start_second = round(start_time)
                 end_second = round(start_time + duration) - 1
                 
@@ -1342,8 +1361,10 @@ def register_plot_callbacks(app):
                 if end_second < start_second:
                     end_second = start_second
                 
+                # Build key-value pairs for all seconds covered by this clip
+                key_value_pairs = []
                 for sec in range(start_second, end_second + 1):
-                    key = (loc, micro, file_basename, channel, sec)
+                    key = (loc, micro, file_basename, int(channel), int(sec))  # Ensure int types
                     key_value_pairs.append((key, label_val))
 
                 print(f"[SIDEBAR_SAVE] Attempting to save {len(key_value_pairs)} entries for label '{label_val}'")
@@ -1352,7 +1373,6 @@ def register_plot_callbacks(app):
                 with MANUAL_LABELS_LOCK:
                     for key, label_val in key_value_pairs:
                         MANUAL_LABELS_CACHE[key] = label_val
-
                     # Verify the write succeeded within the same lock
                     verification_success = True
                     for key, expected_val in key_value_pairs[:3]:  # Check first 3 entries
@@ -1361,7 +1381,7 @@ def register_plot_callbacks(app):
                             print(f"[SIDEBAR_SAVE] VERIFICATION FAILED: {key} = {actual_val}, expected {expected_val}")
                             verification_success = False
                             break
-
+                
                 if verification_success:
                     print(f"[SIDEBAR_SAVE] SUCCESS: Saved and verified {len(key_value_pairs)} entries")
                     # Create unique trigger for production reliability
@@ -1406,12 +1426,16 @@ def register_plot_callbacks(app):
             
             if plot_id in dff.index:
                 row = dff.loc[plot_id]
-                file_basename = os.path.basename(str(row['mp3_file']))
+                loc = row.get('location', 'Unknown')
+                if pd.isna(loc): loc = 'Unknown'
+                micro = row.get('microlocation', 'Unknown') 
+                if pd.isna(micro): micro = 'Unknown'
+                file_basename = str(row['mp3_file']).replace('\\', '/').split('/')[-1]
                 channel = int(row['channel'])
                 start_time = float(row['clip_time'])
                 duration = float(row.get('clip_duration', 5.0))
                 
-                lbl = get_label_for_clip(file_basename, channel, start_time, duration)
+                lbl = get_label_for_clip(loc, micro, file_basename, channel, start_time, duration)
                 return "" if lbl == 'Unlabeled' else lbl
             return ""
         except:

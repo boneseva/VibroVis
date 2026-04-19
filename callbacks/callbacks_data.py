@@ -21,7 +21,7 @@ from dash import dcc
 
 import read_data
 import utils
-from callbacks.callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, initial_df, MANUAL_LABELS_CACHE
+from callbacks.callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, initial_df, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK
 
 # Suppress mpg123 decoder warnings (these are non-critical)
 warnings.filterwarnings('ignore', category=UserWarning)
@@ -188,10 +188,14 @@ def _build_portable_export_payload():
     labels = {}
     # Sort the cache keys for consistent ordering with thread safety
     with MANUAL_LABELS_LOCK:
-        sorted_keys = sorted(MANUAL_LABELS_CACHE)
+        sorted_keys = sorted(MANUAL_LABELS_CACHE.iterkeys())
         for key_tuple in sorted_keys:
-            label = MANUAL_LABELS_CACHE[key_tuple]
-            labels[_key_tuple_to_string(key_tuple)] = str(label)
+            try:
+                label = MANUAL_LABELS_CACHE[key_tuple]
+                labels[_key_tuple_to_string(key_tuple)] = str(label)
+            except KeyError:
+                # Key was deleted during iteration, skip it
+                continue
 
     return {
         'format': 'vibrovis-manual-labels',
