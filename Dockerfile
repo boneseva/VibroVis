@@ -19,5 +19,5 @@ COPY . .
 # Tell Docker that the container listens on port 8080
 EXPOSE 8080
 
-# The command to run when the container starts
-CMD ["gunicorn", "-w", "1", "--threads", "8", "--worker-class", "gthread", "-b", "0.0.0.0:8080", "--timeout", "60", "app:server"]
+# Single worker to avoid shared state issues with global caches - Optimized for 4 cores, 32GB RAM
+CMD ["gunicorn", "-w", "1", "--threads", "20", "--worker-class", "gthread", "-b", "0.0.0.0:8080", "--timeout", "60", "app:server"]

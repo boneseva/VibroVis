@@ -2,6 +2,7 @@ import os
 import re
 from dash import Dash
 from werkzeug.middleware.proxy_fix import ProxyFix
+from flask_compress import Compress
 
 from layout import create_layout
 import read_data
@@ -12,6 +13,9 @@ app.title = "VibroVis"
 server = app.server
 server.secret_key = 'vibrovis-secure-key-change-this-in-env'
 server.config['WTF_CSRF_ENABLED'] = False
+
+# Enable compression for large JSON payloads (scatter plots, spectrograms)
+Compress(app.server)
 
 # Apply ProxyFix to handle HTTPS headers correctly
 server.wsgi_app = ProxyFix(server.wsgi_app, x_proto=1, x_host=1)

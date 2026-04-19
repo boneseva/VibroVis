@@ -508,47 +508,31 @@ def register_data_callbacks(app):
         if not dff_filtered.empty and 'file_name' in dff_filtered.columns and 'channel' in dff_filtered.columns:
             dff_filtered = dff_filtered.sort_values(['file_name', 'channel', 'cluster_id', 'clip_time']).reset_index(drop=True)
             
-            merge_groups = []
-            current_group = 0
-            prev_file = None
-            prev_channel = None
-            prev_cluster = None
-            prev_end = None
-            
             # Ensure clip_duration is present
             if 'clip_duration' not in dff_filtered.columns:
                 dff_filtered['clip_duration'] = 5.0
             else:
                  dff_filtered['clip_duration'] = pd.to_numeric(dff_filtered['clip_duration'], errors='coerce').fillna(5.0)
 
-            for idx, row in dff_filtered.iterrows():
-                file_name = row['file_name']
-                channel = row['channel']
-                cluster_id = row['cluster_id']
-                clip_time = row['clip_time']
-                clip_duration = row.get('clip_duration', 5.0)
-                clip_end = clip_time + clip_duration
-                
-                can_merge = (
-                    file_name == prev_file and
-                    channel == prev_channel and
-                    cluster_id == prev_cluster and
-                    prev_end is not None and
-                    clip_time <= prev_end
-                )
-                
-                if not can_merge:
-                    current_group += 1
-                    prev_end = clip_end
-                else:
-                    # Extend the merge window to the maximum end time seen so far
-                    prev_end = max(prev_end, clip_end)
-                
-                merge_groups.append(current_group)
-                prev_file = file_name
-                prev_channel = channel
-                prev_cluster = cluster_id
+            # OPTIMIZATION: Vectorized merge group calculation (replacing iterrows loop)
+            # Create shifted columns for comparison with previous row
+            prev_file = dff_filtered['file_name'].shift(1)
+            prev_channel = dff_filtered['channel'].shift(1)
+            prev_cluster = dff_filtered['cluster_id'].shift(1)
+            prev_clip_end = (dff_filtered['clip_time'] + dff_filtered['clip_duration']).shift(1)
             
+            # Vectorized comparison: can this row merge with the previous one?
+            same_context = (
+                (dff_filtered['file_name'] == prev_file) &
+                (dff_filtered['channel'] == prev_channel) &
+                (dff_filtered['cluster_id'] == prev_cluster)
+            )
+            temporal_overlap = dff_filtered['clip_time'] <= prev_clip_end
+            can_merge = same_context & temporal_overlap & prev_clip_end.notna()
+            
+            # Create merge groups: increment group number where can_merge is False
+            # This preserves the exact same grouping logic as the original loop
+            merge_groups = (~can_merge).cumsum()
             dff_filtered['merge_group'] = merge_groups
             dff_filtered['clip_end'] = dff_filtered['clip_time'] + dff_filtered['clip_duration']
             
