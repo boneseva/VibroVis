@@ -25,36 +25,14 @@ import numpy as np
 import plotly.graph_objects as go
 
 
-def get_label_for_clip(loc, micro, file_basename, channel, start_time, duration):
+def get_label_for_clip(loc, micro, file_basename, channel, row_idx):
     """
-    Get the majority label for a clip based on per-second labels.
-    Uses proper rounding to prevent label bleed into adjacent clips.
+    Get the label for a specific clip instance identified by its unique row_idx.
+    Instance-based: one key per clip, no propagation to other clips sharing the same audio seconds.
     """
-    # Use round() instead of floor/ceil to only tag seconds meaningfully within bounds
-    start_second = round(start_time)
-    end_second = round(start_time + duration) - 1
-    
-    # Handle edge case where very short clips might have end_second < start_second
-    if end_second < start_second:
-        end_second = start_second
-    
-    labels = []
-    # Check every second covered by the clip (only seconds that fall within bounds)
-    for sec in range(start_second, end_second + 1):
-        key = (loc, micro, file_basename, int(channel), int(sec))  # Ensure int types
-        label = MANUAL_LABELS_CACHE.get(key)
-        if label and label != 'Unlabeled':
-            labels.append(label)
-            
-    if not labels:
-        return 'Unlabeled'
-    
-    # Majority vote
-    counts = Counter(labels)
-    # most_common returns list of (element, count). 
-    # taking [0][0] gets the most common element.
-    # Ties are broken arbitrarily (first one encountered).
-    return counts.most_common(1)[0][0]
+    key = (loc, micro, file_basename, int(channel), int(row_idx))
+    label = MANUAL_LABELS_CACHE.get(key)
+    return label if label and label != 'Unlabeled' else 'Unlabeled'
 
 
 def register_plot_callbacks(app):
@@ -97,7 +75,8 @@ def register_plot_callbacks(app):
          State('location-dropdown', 'value'),
          State('last-preset-load-time', 'data'),
          State({'type': 'cluster-checkbox', 'index': ALL}, 'id'),
-         State({'type': 'label-checkbox', 'index': ALL}, 'id')],
+         State({'type': 'label-checkbox', 'index': ALL}, 'id'),
+         State('filtered-data', 'data')],
         prevent_initial_call='initial_duplicate'
     )
     def update_figure(model_ready_signal, selected_channels, selected_num_clusters,
@@ -109,7 +88,7 @@ def register_plot_callbacks(app):
                       label_checkbox_values,
                       current_figure_state, stored_indices,
                       selected_location, last_preset_time, cluster_checkbox_ids,
-                      label_checkbox_ids):
+                      label_checkbox_ids, current_filtered_key):
         try:
             return _update_figure_impl(model_ready_signal, selected_channels, selected_num_clusters,
                       cluster_checkbox_values, cluster_colors_data, cluster_names_data,
@@ -120,7 +99,7 @@ def register_plot_callbacks(app):
                       label_checkbox_values,
                       current_figure_state, stored_indices,
                       selected_location, last_preset_time, cluster_checkbox_ids,
-                      label_checkbox_ids)
+                      label_checkbox_ids, current_filtered_key)
         except Exception:
             import traceback
             traceback.print_exc()
@@ -135,7 +114,7 @@ def register_plot_callbacks(app):
                       label_checkbox_values,
                       current_figure_state, stored_indices,
                       selected_location, last_preset_time, cluster_checkbox_ids,
-                      label_checkbox_ids):
+                      label_checkbox_ids, current_filtered_key=None):
 
         t_start = time.time() if ENABLE_PROFILING else None
         t_checkpoint = {}
@@ -151,6 +130,120 @@ def register_plot_callbacks(app):
         ctx = callback_context
         all_triggered_ids = [t['prop_id'] for t in ctx.triggered] if ctx.triggered else []
         t_last = checkpoint('init') or t_last
+
+        # ---------------------------------------------------------------
+        # FAST PATH: label-only update
+        # When ONLY manual-labels-store fires we only need to recolor the
+        # already-sampled data.  Skip the full filter/merge/sample pipeline
+        # and update server_cache in-place so filtered-data key stays the
+        # same → update_table fires only ONCE (from manual-labels-store),
+        # not twice.
+        # ---------------------------------------------------------------
+        is_label_only = (
+            len(all_triggered_ids) == 1
+            and all_triggered_ids[0] == 'manual-labels-store.data'
+        )
+        if is_label_only and current_filtered_key and server_cache.get(current_filtered_key) is not None:
+            try:
+                dff_fast = server_cache[current_filtered_key].copy()
+                if 'clip_duration' not in dff_fast.columns:
+                    dff_fast['clip_duration'] = 5.0
+                dff_fast = apply_manual_labels_efficiently(dff_fast)
+
+                is_manual_now = (color_mode == 'manual')
+                color_col_fast = 'manual_label' if is_manual_now else 'cluster_id_str'
+                if 'cluster_id_str' not in dff_fast.columns:
+                    dff_fast['cluster_id_str'] = dff_fast['cluster_id'].astype(str)
+
+                # Build color map (mirrors full-path logic)
+                color_map_fast = {}
+                if is_manual_now:
+                    unique_labels_fast = sorted(dff_fast['manual_label'].unique())
+                    for lbl in unique_labels_fast:
+                        lbl_str = str(lbl)
+                        if lbl == 'Unlabeled':
+                            color_map_fast[lbl_str] = '#D9D9D9'
+                        elif label_colors_data and lbl_str in label_colors_data:
+                            color_map_fast[lbl_str] = label_colors_data[lbl_str]
+                        else:
+                            sorted_all = sorted([l for l in unique_labels_fast if l != 'Unlabeled'])
+                            if 'Unlabeled' in unique_labels_fast:
+                                sorted_all.append('Unlabeled')
+                            try:
+                                color_map_fast[lbl_str] = CLUSTER_COLORS[sorted_all.index(lbl) % len(CLUSTER_COLORS)]
+                            except Exception:
+                                color_map_fast[lbl_str] = CLUSTER_COLORS[0]
+                else:
+                    for c in dff_fast['cluster_id'].unique():
+                        c_str = str(c)
+                        if cluster_colors_data and c_str in cluster_colors_data:
+                            color_map_fast[c_str] = cluster_colors_data[c_str]
+                        else:
+                            try:
+                                color_map_fast[c_str] = CLUSTER_COLORS[int(c) % len(CLUSTER_COLORS)]
+                            except Exception:
+                                color_map_fast[c_str] = CLUSTER_COLORS[0]
+
+                dff_fast['color_col_content'] = dff_fast[color_col_fast] if color_col_fast in dff_fast.columns else 'Unlabeled'
+                dff_fast['mapped_color'] = dff_fast[color_col_fast].astype(str).map(color_map_fast).fillna('#888888')
+
+                # Preserve zoom
+                x_range_fast, y_range_fast = None, None
+                if current_figure_state:
+                    try:
+                        x_range_fast = current_figure_state['layout']['xaxis']['range']
+                        y_range_fast = current_figure_state['layout']['yaxis']['range']
+                    except Exception:
+                        pass
+
+                label_name_fast = 'Label' if is_manual_now else 'Cluster'
+                fig_fast = go.Figure()
+                if not dff_fast.empty:
+                    unique_groups_fast = sorted(dff_fast[color_col_fast].unique())
+                    if 'Unlabeled' in unique_groups_fast:
+                        unique_groups_fast.remove('Unlabeled')
+                        unique_groups_fast = ['Unlabeled'] + unique_groups_fast
+                    _cd_cols = ["color_col_content", "row_idx", "plot_id", "start_hour_float",
+                                "day_int", "clip_count", "file_name", "clip_time", "channel", "date_time_str"]
+                    _cd_cols_present = [c for c in _cd_cols if c in dff_fast.columns]
+                    for group in unique_groups_fast:
+                        gp = dff_fast[dff_fast[color_col_fast] == group]
+                        if gp.empty:
+                            continue
+                        fig_fast.add_trace(go.Scattergl(
+                            x=gp['x'], y=gp['y'],
+                            mode='markers',
+                            marker=dict(size=gp['marker_size'], color=gp['mapped_color'],
+                                        sizemode='diameter', sizeref=1, opacity=1.0),
+                            customdata=gp[_cd_cols_present].to_numpy(),
+                            hovertemplate=f'<b>{label_name_fast}:</b> %{{customdata[0]}}<br>'
+                                          '<b>File:</b> %{customdata[6]}<br>'
+                                          '<b>Clip Count:</b> %{customdata[5]}<br>'
+                                          '<b>Time:</b> %{customdata[7]:.2f}s<br>'
+                                          '<b>Date & Time:</b> %{customdata[9]}<br>'
+                                          '<b>Channel:</b> %{customdata[8]}<extra></extra>',
+                            name=str(group), showlegend=True,
+                        ))
+                fig_fast.update_layout(showlegend=False, margin=dict(l=5, r=5, t=5, b=5),
+                                       paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+                if x_range_fast:
+                    fig_fast.update_xaxes(visible=False, range=x_range_fast)
+                    fig_fast.update_yaxes(visible=False, range=y_range_fast)
+                else:
+                    fig_fast.update_xaxes(visible=False)
+                    fig_fast.update_yaxes(visible=False)
+
+                # Update cache in-place — same key keeps filtered-data unchanged
+                server_cache[current_filtered_key] = dff_fast
+                print(f"[FAST-PATH] Label update recolored scatter in place (key={current_filtered_key[:8]}…)")
+                # Return same filtered-data key so update_table is NOT triggered a second time
+                return (fig_fast, current_filtered_key,
+                        no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update)
+            except Exception:
+                import traceback as _tb
+                _tb.print_exc()
+                # Fall through to full pipeline on error
+        # ---------------------------------------------------------------
 
         is_fresh_load = any('model-data-ready-signal' in t_id for t_id in all_triggered_ids)
         is_resample_click = any('resample-btn' in t_id for t_id in all_triggered_ids)
@@ -1254,16 +1347,21 @@ def register_plot_callbacks(app):
          Input({'type': 'table-inline-label', 'index': ALL}, 'value')],
         [State('manual-label-input', 'value'),
          State("scatter", "clickData"),
-         State('filtered-data', 'data')],
+         State('filtered-data', 'data'),
+         State('merge-switch', 'on')],
         prevent_initial_call=True
     )
-    def save_manual_label(n_clicks, n_submit, table_label_values, label_text, clickData, filtered_data_cache_key):
+    def save_manual_label(n_clicks, n_submit, table_label_values, label_text, clickData, filtered_data_cache_key, merge_on):
         import json
 
         triggered = dash.callback_context.triggered
         if not triggered:
             return dash.no_update, "", dash.no_update
-            
+
+        # Merging is ON → labeling is disabled for instance-based accuracy
+        if merge_on:
+            return dash.no_update, "Labeling is disabled while Merge is ON.", dash.no_update
+
         triggered_id_str = triggered[0]['prop_id'].split('.')[0]
         
         if not filtered_data_cache_key:
@@ -1304,28 +1402,17 @@ def register_plot_callbacks(app):
                     
                     # CRITICAL: Use cross-platform file path extraction
                     file_basename = str(row['mp3_file']).replace('\\', '/').split('/')[-1]
-                    start_time = float(row['clip_time'])
-                    duration = float(row.get('clip_duration', 5.0))
-                    
-                    # CRITICAL: Use round() to match utils.py key generation
-                    start_second = round(start_time)
-                    end_second = round(start_time + duration) - 1
-                    
-                    # Handle edge case where very short clips might have end_second < start_second
-                    if end_second < start_second:
-                        end_second = start_second
-                    
-                    # Thread-safe cache updates for inline table labeling
+
+                    # Instance-based key: label is tied to this specific clip by row_idx, not time.
+                    instance_key = (loc, micro, file_basename, int(channel), int(plot_id))
+
+                    # Thread-safe cache update — single key per clip instance
                     with MANUAL_LABELS_LOCK:
-                        for sec in range(start_second, end_second + 1):
-                            key = (loc, micro, file_basename, int(channel), int(sec))  # Ensure int types
-                            MANUAL_LABELS_CACHE[key] = label_val
-                    
+                        MANUAL_LABELS_CACHE[instance_key] = label_val
+
                     # Verify the update was successful for production reliability
                     with MANUAL_LABELS_LOCK:
-                        verification_key = (loc, micro, file_basename, int(channel), int(start_second))
-                        if MANUAL_LABELS_CACHE.get(verification_key) == label_val:
-                            # Create a unique trigger to force UI updates across all threads
+                        if MANUAL_LABELS_CACHE.get(instance_key) == label_val:
                             unique_trigger = f"{time.time()}_{hash(label_val)}_{len(MANUAL_LABELS_CACHE)}"
                             return unique_trigger, f"Saved: {label_val}", dash.no_update
                         else:
@@ -1350,45 +1437,23 @@ def register_plot_callbacks(app):
                 
                 # CRITICAL: Use cross-platform file path extraction
                 file_basename = str(row['mp3_file']).replace('\\', '/').split('/')[-1]
-                start_time = float(row['clip_time'])
-                duration = float(row.get('clip_duration', 5.0))
-                
-                # CRITICAL: Use round() to match utils.py key generation
-                start_second = round(start_time)
-                end_second = round(start_time + duration) - 1
-                
-                # Handle edge case where very short clips might have end_second < start_second
-                if end_second < start_second:
-                    end_second = start_second
-                
-                # Build key-value pairs for all seconds covered by this clip
-                key_value_pairs = []
-                for sec in range(start_second, end_second + 1):
-                    key = (loc, micro, file_basename, int(channel), int(sec))  # Ensure int types
-                    key_value_pairs.append((key, label_val))
 
-                print(f"[SIDEBAR_SAVE] Attempting to save {len(key_value_pairs)} entries for label '{label_val}'")
+                # Instance-based key: label tied to this specific clip by row_idx (plot_id), not time.
+                instance_key = (loc, micro, file_basename, int(channel), int(plot_id))
 
-                # Thread-safe dictionary update with verification
+                print(f"[SIDEBAR_SAVE] Saving label '{label_val}' for row_idx={plot_id}")
+
+                # Thread-safe write with verification
                 with MANUAL_LABELS_LOCK:
-                    for key, label_val in key_value_pairs:
-                        MANUAL_LABELS_CACHE[key] = label_val
-                    # Verify the write succeeded within the same lock
-                    verification_success = True
-                    for key, expected_val in key_value_pairs[:3]:  # Check first 3 entries
-                        actual_val = MANUAL_LABELS_CACHE.get(key)
-                        if actual_val != expected_val:
-                            print(f"[SIDEBAR_SAVE] VERIFICATION FAILED: {key} = {actual_val}, expected {expected_val}")
-                            verification_success = False
-                            break
-                
+                    MANUAL_LABELS_CACHE[instance_key] = label_val
+                    verification_success = MANUAL_LABELS_CACHE.get(instance_key) == label_val
+
                 if verification_success:
-                    print(f"[SIDEBAR_SAVE] SUCCESS: Saved and verified {len(key_value_pairs)} entries")
-                    # Create unique trigger for production reliability
-                    unique_trigger = f"{time.time()}_{hash(label_val)}_{len(key_value_pairs)}"
+                    print(f"[SIDEBAR_SAVE] SUCCESS: Saved and verified label for row_idx={plot_id}")
+                    unique_trigger = f"{time.time()}_{hash(label_val)}_1"
                     return unique_trigger, f"Saved: {label_val}", label_val
                 else:
-                    print(f"[SIDEBAR_SAVE] VERIFICATION FAILED: Data not properly written")
+                    print(f"[SIDEBAR_SAVE] VERIFICATION FAILED for row_idx={plot_id}")
                     return dash.no_update, f"Error: Label verification failed for {label_val}", dash.no_update
             else:
                 return dash.no_update, "Error: Point not found.", dash.no_update
@@ -1432,10 +1497,8 @@ def register_plot_callbacks(app):
                 if pd.isna(micro): micro = 'Unknown'
                 file_basename = str(row['mp3_file']).replace('\\', '/').split('/')[-1]
                 channel = int(row['channel'])
-                start_time = float(row['clip_time'])
-                duration = float(row.get('clip_duration', 5.0))
-                
-                lbl = get_label_for_clip(loc, micro, file_basename, channel, start_time, duration)
+                # Instance-based: look up by plot_id (row_idx), not by time range
+                lbl = get_label_for_clip(loc, micro, file_basename, channel, plot_id)
                 return "" if lbl == 'Unlabeled' else lbl
             return ""
         except:

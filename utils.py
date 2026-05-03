@@ -236,11 +236,12 @@ def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels
     current_locations = dff['location'].unique() if 'location' in dff.columns else []
 
     # 1. Fast optimization: group labels by (loc, micro, f_base, chan)
+    #    The 5th element of the key tuple is now row_idx (instance-based), not a time-second.
     label_map = {}
     for key_tuple in cache_snapshot:
         label = cache_snapshot[key_tuple]
         if len(key_tuple) == 5:
-            loc, micro, f_base, chan, sec = key_tuple
+            loc, micro, f_base, chan, row_idx_key = key_tuple
 
             # Skip if not in current data view (heavy optimization)
             if len(current_locations) > 0 and loc not in current_locations:
@@ -249,7 +250,7 @@ def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels
             group_key = (loc, micro, f_base, chan)
             if group_key not in label_map:
                 label_map[group_key] = {}
-            label_map[group_key][sec] = label
+            label_map[group_key][int(row_idx_key)] = label
 
     if not label_map:
         return dff
@@ -266,52 +267,32 @@ def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels
             return dff # Cannot match without filenames
 
     # 3. Iterate over the SMALL set of labeled groups (e.g. 10 groups vs 1M rows)
-    for (loc, micro, f_base, chan), sec_map in label_map.items():
+    for (loc, micro, f_base, chan), row_idx_map in label_map.items():
         try:
              # Fast vectorized mask preparation
-             # Channel match (fastest)
              chan_val = int(chan)
              if dff['channel'].dtype.name == 'category':
                   mask = (dff['channel'].astype(int) == chan_val)
              else:
                   mask = (dff['channel'] == chan_val)
 
-             # Group comparison (Avoid loc/micro check if they are already unique in dff to save time)
              if 'location' in dff.columns:
                  mask &= (dff['location'].fillna('Unknown') == loc)
              if 'microlocation' in dff.columns:
                  mask &= (dff['microlocation'].fillna('Unknown') == micro)
 
-             # Basename match (Now O(1) string check per row using cached column)
              mask &= (dff['f_basename_cache'] == f_base)
 
-             # Get matching indices
              indices = dff.index[mask]
              if indices.empty:
                  continue
 
-             # Only iterate the tiny subset of matching rows
+             # Instance-based: look up by row_idx directly (no sec-range iteration)
              for idx in indices:
-                 row_start = float(dff.at[idx, 'clip_time'])
-                 row_dur = float(dff.at[idx, 'clip_duration']) if 'clip_duration' in dff.columns else 5.0
-
-                 # CRITICAL FIX: Use round() to match callbacks_plots.py key generation
-                 start_sec = round(row_start)
-                 end_sec = round(row_start + row_dur) - 1
-
-                 # Handle edge case where very short clips might have end_sec < start_sec
-                 if end_sec < start_sec:
-                     end_sec = start_sec
-
-                 found = []
-                 for s in range(start_sec, end_sec + 1):
-                     l = sec_map.get(int(s))  # Ensure int type for key consistency
-                     if l and l != 'Unlabeled':
-                         found.append(l)
-
-                 if found:
-                     final_label = Counter(found).most_common(1)[0][0]
-                     dff.at[idx, 'manual_label'] = final_label
+                 row_idx_val = int(dff.at[idx, 'row_idx']) if 'row_idx' in dff.columns else int(idx)
+                 l = row_idx_map.get(row_idx_val)
+                 if l and l != 'Unlabeled':
+                     dff.at[idx, 'manual_label'] = l
 
         except Exception:
             continue

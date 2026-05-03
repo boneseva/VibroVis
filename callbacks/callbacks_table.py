@@ -143,7 +143,8 @@ def _hex_to_rgba(hex_color: str, alpha: float = 0.18) -> str:
 def _render_table(page_df: pd.DataFrame, visible_cols: list,
                   sort_col: str | None = None, sort_asc: bool = True,
                   page_offset: int = 0,
-                  color_mode: str = "cluster", label_colors_data: dict = None) -> html.Div:
+                  color_mode: str = "cluster", label_colors_data: dict = None,
+                  merge_on: bool = False) -> html.Div:
     if page_df.empty:
         return html.Div("No data to display.", style={"padding": "1rem", "color": "#888"})
 
@@ -238,9 +239,13 @@ def _render_table(page_df: pd.DataFrame, visible_cols: list,
                         value=val,
                         id={"type": "table-inline-label", "index": actual_plot_id},
                         debounce=True,
+                        disabled=merge_on,
                         persistence=True,  # Persist value across re-renders
                         persistence_type="memory",  # Store in memory only
-                        style={"width": "100%", "boxSizing": "border-box", "border": "none", "background": "transparent", "outline": "none"}
+                        style={"width": "100%", "boxSizing": "border-box", "border": "none",
+                               "background": "transparent" if not merge_on else "#f0f0f0",
+                               "outline": "none", "cursor": "not-allowed" if merge_on else "text",
+                               "color": "#aaa" if merge_on else "inherit"}
                     )
                 ))
             else:
@@ -539,31 +544,25 @@ def register_table_callbacks(app):
         Input("table-page-store", "data"),
         Input("table-sort-store", "data"),
         Input("color-mode-radio", "value"),
+        State('merge-switch', 'on'),
         prevent_initial_call=True,
     )
     def update_table(active_tab, filtered_data_key, manual_labels_trigger, label_colors_data,
-                     visible_cols, page, sort_state, color_mode):
+                     visible_cols, page, sort_state, color_mode, merge_on):
 
         if active_tab != "table-tab":
             return no_update, no_update, no_update
 
-        # RACE CONDITION FIX: Check if this update was triggered by an inline table input
-        # If so, skip the re-render to prevent overwriting the user's input
         triggered_prop_id = ctx.triggered[0]['prop_id'] if ctx.triggered else ""
-        
-        # If triggered by manual-labels-store, check if we should skip the update
+
+        # FAST PATH: when a label was just saved, the scatter fast-path already updated
+        # server_cache in-place and the user's typed value is already visible in the
+        # dcc.Input (persistence=True).  Re-rendering 200 HTML rows here is unnecessary
+        # and was the main source of the ~5 s post-save freeze.
+        # • cluster mode  → skip entirely (row colors unchanged)
+        # • manual mode   → skip too; the next real data change will refresh colors
         if triggered_prop_id == 'manual-labels-store.data':
-            # Look for recent inline table input activity by checking timestamp
-            try:
-                current_time = time.time()
-                # If manual_labels_trigger is a timestamp string from within last 100ms,
-                # this was likely triggered by an inline input - skip to prevent race
-                if isinstance(manual_labels_trigger, str):
-                    trigger_time = float(manual_labels_trigger)
-                    if current_time - trigger_time < 0.1:  # 100ms window
-                        return no_update, no_update, no_update
-            except (ValueError, TypeError):
-                pass
+            return no_update, no_update, no_update
 
         try:
             if not filtered_data_key:
@@ -607,7 +606,8 @@ def register_table_callbacks(app):
 
             t0 = time.time()
             result = _render_table(page_df, visible_cols, sort_col, sort_asc, page_offset,
-                                   color_mode=color_mode or "cluster", label_colors_data=label_colors_data)
+                                   color_mode=color_mode or "cluster", label_colors_data=label_colors_data,
+                                   merge_on=bool(merge_on))
             print(f"[TABLE] page {page+1}/{total_pages} rendered in {time.time()-t0:.3f}s")
 
             return result, page_info, total_pages

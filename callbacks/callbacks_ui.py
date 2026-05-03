@@ -12,6 +12,15 @@ from .callbacks_constants import MODEL_DATA_CACHE
 def register_ui_callbacks(app):
     
     @app.callback(
+        Output('manual-label-input', 'disabled'),
+        Output('save-label-btn', 'disabled'),
+        Input('merge-switch', 'on'),
+    )
+    def disable_labeling_when_merged(merge_on):
+        """Disable manual labeling inputs when merge is ON (labels must map to raw clip instances)."""
+        return bool(merge_on), bool(merge_on)
+
+    @app.callback(
         [Output('audio-player', 'autoPlay'),
          Output('autoplay-toggle-btn', 'children'),
          Output('autoplay-toggle-btn', 'className')],
