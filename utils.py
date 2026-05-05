@@ -249,28 +249,47 @@ def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels
     # Most dffs in the app only represent one location at a time.
     current_locations = dff['location'].unique() if 'location' in dff.columns else []
 
-    # 1. Fast optimization: group labels by (loc, micro, f_base, chan)
-    #    The 5th element of the key tuple is now row_idx (instance-based), not a time-second.
-    label_map = {}
+    # 1. Import the duration cache (plain dict, no lock needed).
+    #    Keys are the same 5-tuples as MANUAL_LABELS_CACHE.
+    #    Values are float clip durations written at label-save time.
+    #    Falls back gracefully to an empty dict if not available.
+    try:
+        from callbacks.callbacks_constants import CLIP_DURATION_CACHE as _dur_cache
+    except Exception:
+        _dur_cache = {}
+
+    # 2. Group labels by (loc, micro, f_base, chan).
+    #    Key precision: round(clip_time * 10) → 0.1 s units (stored as int).
+    #    Each entry: clip_time_x10 → (label, clip_end_x10_or_None, labeled_model_or_None)
+    #    clip_end_x10 / labeled_model are None for legacy entries with no duration recorded.
+    label_map: dict = {}
     for key_tuple in cache_snapshot:
         label = cache_snapshot[key_tuple]
         if len(key_tuple) == 5:
-            loc, micro, f_base, chan, row_idx_key = key_tuple
+            loc, micro, f_base, chan, clip_time_key = key_tuple
 
-            # Skip if not in current data view (heavy optimization)
+            # Skip if not relevant to current data view
             if len(current_locations) > 0 and loc not in current_locations:
                 continue
+
+            ct_x10 = int(clip_time_key)
+            dur_entry = _dur_cache.get(key_tuple)
+            if isinstance(dur_entry, tuple) and len(dur_entry) == 2:
+                dur, labeled_model = dur_entry
+                clip_end_x10 = ct_x10 + round(dur * 10)
+            else:
+                clip_end_x10 = None
+                labeled_model = None
 
             group_key = (loc, micro, f_base, chan)
             if group_key not in label_map:
                 label_map[group_key] = {}
-            label_map[group_key][int(row_idx_key)] = label
+            label_map[group_key][ct_x10] = (label, clip_end_x10, labeled_model)
 
     if not label_map:
         return dff
 
-    # 2. Vectorized extraction of basenames (DO IT ONCE, NOT IN A LOOP)
-    # This is the most expensive part on 1M rows, avoid doing it for every label.
+    # 3. Vectorized extraction of basenames (done once, not per label group)
     if 'f_basename_cache' not in dff.columns:
         if 'mp3_file' in dff.columns:
             # Cross-platform basename extraction
@@ -280,33 +299,73 @@ def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels
         else:
             return dff # Cannot match without filenames
 
-    # 3. Iterate over the SMALL set of labeled groups (e.g. 10 groups vs 1M rows)
-    for (loc, micro, f_base, chan), row_idx_map in label_map.items():
+    # 4. Iterate over the SMALL set of labeled groups, match candidates by the rule:
+    #
+    #   • Same model as the label was created in  →  EXACT clip_time_x10 match only.
+    #     Prevents bleeding to adjacent/overlapping clips within the same model.
+    #
+    #   • Different model (cross-model transfer)  →  OVERLAP-based match.
+    #     A candidate receives the label when:
+    #       overlap / duration_of_SHORTER_clip  >=  OVERLAP_THRESHOLD (50%)
+    #
+    #   • Legacy entry (no duration/model stored) →  exact clip_time_x10 match (safe fallback).
+    OVERLAP_THRESHOLD = 0.5
+
+    # Determine the model currently loaded in dff (used for same/different model check)
+    current_model = str(dff['model_name'].iloc[0]) if 'model_name' in dff.columns and not dff.empty else None
+
+    for (loc, micro, f_base, chan), clip_map in label_map.items():
         try:
-             # Fast vectorized mask preparation
-             chan_val = int(chan)
-             if dff['channel'].dtype.name == 'category':
-                  mask = (dff['channel'].astype(int) == chan_val)
-             else:
-                  mask = (dff['channel'] == chan_val)
+            chan_val = int(chan)
+            if dff['channel'].dtype.name == 'category':
+                mask = (dff['channel'].astype(int) == chan_val)
+            else:
+                mask = (dff['channel'] == chan_val)
 
-             if 'location' in dff.columns:
-                 mask &= (dff['location'].fillna('Unknown') == loc)
-             if 'microlocation' in dff.columns:
-                 mask &= (dff['microlocation'].fillna('Unknown') == micro)
+            if 'location' in dff.columns:
+                mask &= (dff['location'].fillna('Unknown') == loc)
+            if 'microlocation' in dff.columns:
+                mask &= (dff['microlocation'].fillna('Unknown') == micro)
 
-             mask &= (dff['f_basename_cache'] == f_base)
+            mask &= (dff['f_basename_cache'] == f_base)
 
-             indices = dff.index[mask]
-             if indices.empty:
-                 continue
+            indices = dff.index[mask]
+            if indices.empty:
+                continue
 
-             # Instance-based: look up by row_idx directly (no sec-range iteration)
-             for idx in indices:
-                 row_idx_val = int(dff.at[idx, 'row_idx']) if 'row_idx' in dff.columns else int(idx)
-                 l = row_idx_map.get(row_idx_val)
-                 if l and l != 'Unlabeled':
-                     dff.at[idx, 'manual_label'] = l
+            for idx in indices:
+                ct = float(dff.at[idx, 'clip_time']) if 'clip_time' in dff.columns else 0.0
+                cd = float(dff.at[idx, 'clip_duration']) if 'clip_duration' in dff.columns else 5.0
+                cand_start = round(ct * 10)
+                cand_end   = round((ct + cd) * 10)
+
+                best_label = None
+                best_overlap = -1.0
+
+                for labeled_start, (lbl, labeled_end, labeled_model) in clip_map.items():
+                    same_model = (labeled_model is not None and current_model is not None
+                                  and labeled_model == current_model)
+
+                    if labeled_end is None or same_model:
+                        # Exact match only — no cross-clip bleeding within the same model
+                        if labeled_start == cand_start:
+                            best_label = lbl
+                            break
+                    else:
+                        # Cross-model: overlap-based transfer
+                        overlap_x10 = max(0, min(cand_end, labeled_end) - max(cand_start, labeled_start))
+                        if overlap_x10 <= 0:
+                            continue
+                        shorter_x10 = min(labeled_end - labeled_start, cand_end - cand_start)
+                        if shorter_x10 <= 0:
+                            continue
+                        frac = overlap_x10 / shorter_x10
+                        if frac >= OVERLAP_THRESHOLD and frac > best_overlap:
+                            best_overlap = frac
+                            best_label = lbl
+
+                if best_label and best_label != 'Unlabeled':
+                    dff.at[idx, 'manual_label'] = best_label
 
         except Exception:
             continue

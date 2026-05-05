@@ -5,10 +5,8 @@ import time
 import dash
 from dash import Input, Output, State, html, dcc, ALL
 import pandas as pd
-import hashlib # Added for stable coloring
 
 from callbacks.callbacks_constants import MODEL_DATA_CACHE, initial_df, CLUSTER_COLORS, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK
-from utils import apply_manual_labels_efficiently
 
 
 def register_cluster_callbacks(app):
@@ -56,23 +54,6 @@ def register_cluster_callbacks(app):
             except Exception:
                 return []
 
-            # Build cluster → majority-label map (for coloring in manual mode)
-            cluster_to_label: dict = {}
-            if is_manual and MANUAL_LABELS_CACHE and 'cluster_id' in dff.columns:
-                from collections import Counter
-                # Build a lookup: (location, microlocation, file_name, channel, clip_time) → label
-                # Vectorized: create key tuples for each row, map to label, then groupby cluster_id
-                key_cols = ['location', 'microlocation', 'file_name', 'channel', 'clip_time']
-                available = [c for c in key_cols if c in dff.columns]
-                if available:
-                    key_series = dff[available].apply(
-                        lambda row: tuple(row[c] if c in row.index else None for c in key_cols), axis=1
-                    )
-                    label_series = key_series.map(lambda k: MANUAL_LABELS_CACHE.get(k, 'Unlabeled'))
-                    # Majority label per cluster_id
-                    tmp = pd.DataFrame({'cluster_id': dff['cluster_id'], 'label': label_series})
-                    for cid, grp in tmp.groupby('cluster_id'):
-                        cluster_to_label[cid] = Counter(grp['label']).most_common(1)[0][0]
 
             children = []
 
@@ -116,36 +97,17 @@ def register_cluster_callbacks(app):
                     c_idx = c
                 c_label_str = str(c_idx)
 
-                # Determine color
-                if is_manual:
-                    # Color by majority label of this cluster
-                    label_for_color = cluster_to_label.get(c_idx, cluster_to_label.get(c, 'Unlabeled'))
-                    lbl_str_for_color = str(label_for_color)
-                    
-                    if label_for_color == 'Unlabeled':
-                        default_color = '#dddddd'
-                    elif label_colors_data and lbl_str_for_color in label_colors_data:
-                        default_color = label_colors_data[lbl_str_for_color]
-                    else:
-                        hash_val = int(hashlib.md5(lbl_str_for_color.encode('utf-8')).hexdigest(), 16)
-                        default_color = CLUSTER_COLORS[hash_val % len(CLUSTER_COLORS)]
-                else:
-                    try:
-                        default_color = CLUSTER_COLORS[c_idx % len(CLUSTER_COLORS)]
-                    except Exception:
-                        default_color = CLUSTER_COLORS[i % len(CLUSTER_COLORS)]
+                # Determine color — always use CLUSTER_COLORS by cluster index,
+                # regardless of whether we are in cluster or manual label mode.
+                try:
+                    default_color = CLUSTER_COLORS[c_idx % len(CLUSTER_COLORS)]
+                except Exception:
+                    default_color = CLUSTER_COLORS[i % len(CLUSTER_COLORS)]
 
                 color_val = current_colors.get(c_label_str, default_color) if current_colors else default_color
 
-                # Display name: show cluster ID, and in manual mode append its majority label
-                if is_manual:
-                    lbl = cluster_to_label.get(c_idx, cluster_to_label.get(c, 'Unlabeled'))
-                    lbl_str = str(lbl)
-                    # Use custom label name if available
-                    display_lbl = label_names_data.get(lbl_str, lbl_str) if label_names_data else lbl_str
-                    name_val = current_names.get(c_label_str, f"{c_label_str} ({display_lbl})") if current_names else f"{c_label_str} ({display_lbl})"
-                else:
-                    name_val = current_names.get(c_label_str, c_label_str) if current_names else c_label_str
+                # Display name: always show the cluster ID (or a user-set custom name)
+                name_val = current_names.get(c_label_str, c_label_str) if current_names else c_label_str
 
                 is_checked = True
                 # Ensure reliable comparison key (string)

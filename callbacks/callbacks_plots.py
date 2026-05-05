@@ -14,7 +14,7 @@ import pandas as pd
 import uuid
 
 import utils
-from callbacks.callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, server_cache, initial_df, CLUSTER_COLORS, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK
+from callbacks.callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, server_cache, initial_df, CLUSTER_COLORS, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK, CLIP_DURATION_CACHE
 from utils import apply_manual_labels_efficiently
 
 # Performance profiling
@@ -25,12 +25,13 @@ import numpy as np
 import plotly.graph_objects as go
 
 
-def get_label_for_clip(loc, micro, file_basename, channel, row_idx):
+def get_label_for_clip(loc, micro, file_basename, channel, clip_time):
     """
-    Get the label for a specific clip instance identified by its unique row_idx.
-    Instance-based: one key per clip, no propagation to other clips sharing the same audio seconds.
+    Get the label for a clip identified by its audio content key.
+    Content-based: keyed on round(clip_time * 10) so the same physical clip is
+    labelled consistently across model/K switches.
     """
-    key = (loc, micro, file_basename, int(channel), int(row_idx))
+    key = (loc, micro, file_basename, int(channel), round(float(clip_time) * 10))
     label = MANUAL_LABELS_CACHE.get(key)
     return label if label and label != 'Unlabeled' else 'Unlabeled'
 
@@ -1408,12 +1409,20 @@ def register_plot_callbacks(app):
                     # CRITICAL: Use cross-platform file path extraction
                     file_basename = str(row['mp3_file']).replace('\\', '/').split('/')[-1]
 
-                    # Instance-based key: label is tied to this specific clip by row_idx, not time.
-                    instance_key = (loc, micro, file_basename, int(channel), int(plot_id))
+                    # Content-based key: round(clip_time * 10) gives 0.1 s precision,
+                    # stable across model/K switches and safe against float drift.
+                    clip_time_key = round(float(row['clip_time']) * 10)
+                    instance_key = (loc, micro, file_basename, int(channel), clip_time_key)
 
                     # Thread-safe cache update — single key per clip instance
                     with MANUAL_LABELS_LOCK:
                         MANUAL_LABELS_CACHE[instance_key] = label_val
+                    # Store (duration, model_name) so apply_manual_labels_efficiently
+                    # can use exact match within the same model and overlap match across models.
+                    CLIP_DURATION_CACHE[instance_key] = (
+                        float(row.get('clip_duration', 5.0)),
+                        str(row.get('model_name', ''))
+                    )
 
                     # Verify the update was successful for production reliability
                     with MANUAL_LABELS_LOCK:
@@ -1443,18 +1452,26 @@ def register_plot_callbacks(app):
                 # CRITICAL: Use cross-platform file path extraction
                 file_basename = str(row['mp3_file']).replace('\\', '/').split('/')[-1]
 
-                # Instance-based key: label tied to this specific clip by row_idx (plot_id), not time.
-                instance_key = (loc, micro, file_basename, int(channel), int(plot_id))
+                # Content-based key: round(clip_time * 10) gives 0.1 s precision,
+                # stable across model/K switches and safe against float drift.
+                clip_time_key = round(float(row['clip_time']) * 10)
+                instance_key = (loc, micro, file_basename, int(channel), clip_time_key)
 
-                print(f"[SIDEBAR_SAVE] Saving label '{label_val}' for row_idx={plot_id}")
+                print(f"[SIDEBAR_SAVE] Saving label '{label_val}' for clip_time={row['clip_time']}")
 
                 # Thread-safe write with verification
                 with MANUAL_LABELS_LOCK:
                     MANUAL_LABELS_CACHE[instance_key] = label_val
                     verification_success = MANUAL_LABELS_CACHE.get(instance_key) == label_val
+                # Store (duration, model_name) so apply_manual_labels_efficiently
+                # can use exact match within the same model and overlap match across models.
+                CLIP_DURATION_CACHE[instance_key] = (
+                    float(row.get('clip_duration', 5.0)),
+                    str(row.get('model_name', ''))
+                )
 
                 if verification_success:
-                    print(f"[SIDEBAR_SAVE] SUCCESS: Saved and verified label for row_idx={plot_id}")
+                    print(f"[SIDEBAR_SAVE] SUCCESS: Saved and verified label for clip_time={row['clip_time']}")
                     unique_trigger = f"{time.time()}_{hash(label_val)}_1"
                     return unique_trigger, f"Saved: {label_val}", label_val
                 else:
@@ -1502,8 +1519,8 @@ def register_plot_callbacks(app):
                 if pd.isna(micro): micro = 'Unknown'
                 file_basename = str(row['mp3_file']).replace('\\', '/').split('/')[-1]
                 channel = int(row['channel'])
-                # Instance-based: look up by plot_id (row_idx), not by time range
-                lbl = get_label_for_clip(loc, micro, file_basename, channel, plot_id)
+                # Content-based lookup: same clip_time = same label across models
+                lbl = get_label_for_clip(loc, micro, file_basename, channel, row['clip_time'])
                 return "" if lbl == 'Unlabeled' else lbl
             return ""
         except:
