@@ -192,6 +192,8 @@ def _build_portable_export_payload():
         for key_tuple in sorted_keys:
             try:
                 label = MANUAL_LABELS_CACHE[key_tuple]
+                if str(label) == 'Unlabeled':
+                    continue  # skip unlabeled entries from export
                 labels[_key_tuple_to_string(key_tuple)] = str(label)
             except KeyError:
                 # Key was deleted during iteration, skip it

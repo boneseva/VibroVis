@@ -109,7 +109,8 @@ def load_positions_tsv_optimized(wav_meta=OVERVIEW_TSV, data_dir=DATA_DIR, save_
         df['channel'] = df['channel'].astype(int)
         
     df.drop(columns=['day', 'start_time'], errors='ignore', inplace=True)
-    
+
+    print(df['model_name'].unique())
     # Clean up exact duplicate clustering entries caused by duplicate TSV sweeps in directory
     if set(['wav_file', 'channel', 'clip_time', 'model_name', 'cluster_num']).issubset(df.columns):
         df.drop_duplicates(subset=['wav_file', 'channel', 'clip_time', 'model_name', 'cluster_num'], inplace=True)

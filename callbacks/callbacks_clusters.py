@@ -299,22 +299,6 @@ def register_cluster_callbacks(app):
                               label_colors_data, label_names_data, cluster_stats, model_ready,
                               current_values, current_ids, color_mode):
         try:
-            import hashlib
-            # Get current data to find cluster -> label mapping (for initial color syncing)
-            dff = MODEL_DATA_CACHE.get('df')
-            label_to_color_seed = {}
-            
-            if dff is not None and not dff.empty and 'cluster_id' in dff.columns:
-                # If we have cluster color overrides, use them to seed label colors
-                if cluster_colors_data:
-                    tmp = dff[['cluster_id', 'location', 'microlocation', 'file_name', 'channel', 'clip_time']].drop_duplicates('cluster_id')
-                    tmp = apply_manual_labels_efficiently(tmp)
-                    for _, row in tmp.iterrows():
-                        cid_str = str(row['cluster_id'])
-                        lbl = row['manual_label']
-                        if cid_str in cluster_colors_data and lbl not in label_to_color_seed:
-                            label_to_color_seed[lbl] = cluster_colors_data[cid_str]
-
             # unique_labels from cache
             with MANUAL_LABELS_LOCK:
                 cache_keys = list(MANUAL_LABELS_CACHE.iterkeys())
@@ -355,22 +339,17 @@ def register_cluster_callbacks(app):
                 lbl_str = str(lbl)
                 
                 # Determine color
-                # Priority: 1. label_colors_data, 2. cluster-seed, 3. hash
+                # Priority: 1. label_colors_data (single source of truth), 2. CLUSTER_COLORS sequential
                 if lbl == 'Unlabeled':
                     default_color = '#D9D9D9'  # Locked to gray
                 elif label_colors_data and lbl_str in label_colors_data:
                     default_color = label_colors_data[lbl_str]
-                elif lbl in label_to_color_seed:
-                    default_color = label_to_color_seed[lbl]
                 else:
-                    # Use deterministic color assignment from CLUSTER_COLORS
-                    sorted_labels = [l for l in unique_labels if l != 'Unlabeled']
-                    sorted_labels = sorted(sorted_labels)
-                    try:
-                        color_index = sorted_labels.index(lbl) % len(CLUSTER_COLORS)
-                        default_color = CLUSTER_COLORS[color_index]
-                    except:
-                        default_color = CLUSTER_COLORS[0]
+                    # Fallback: same sequential assignment as sync_label_colors uses.
+                    # Use alphabetical position among non-Unlabeled labels as the index.
+                    non_unlabeled = [l for l in unique_labels if l != 'Unlabeled']
+                    idx = non_unlabeled.index(lbl) if lbl in non_unlabeled else 0
+                    default_color = CLUSTER_COLORS[idx % len(CLUSTER_COLORS)]
 
                 color_val = default_color
 
@@ -519,18 +498,25 @@ def register_cluster_callbacks(app):
     @app.callback(
         Output('label-color-store', 'data'),
         [Input({'type': 'label-color-picker', 'index': ALL}, 'value'),
-         Input('manual-labels-store', 'data')],
+         Input('manual-labels-store', 'data'),
+         Input('model-data-ready-signal', 'data')],
         [State({'type': 'label-color-picker', 'index': ALL}, 'id'),
          State('label-color-store', 'data')],
         prevent_initial_call=True
     )
-    def sync_label_colors(colors, manual_labels_trigger, ids, current_color_store):
+    def sync_label_colors(colors, manual_labels_trigger, model_ready, ids, current_color_store):
         """
         Single Source of Truth for label colors.
-        Auto-assigns colors from CLUSTER_COLORS palette and locks 'Unlabeled' to gray.
+        Auto-assigns colors sequentially from CLUSTER_COLORS (same palette and order as
+        clusters: first label created → CLUSTER_COLORS[0], second → CLUSTER_COLORS[1], …).
+        'Unlabeled' is always locked to gray (#D9D9D9).
+        Fires on startup (model-data-ready-signal) so pre-existing labels get colors.
         """
         color_map = current_color_store.copy() if current_color_store else {}
-        
+
+        # Always lock Unlabeled to gray
+        color_map['Unlabeled'] = '#D9D9D9'
+
         # Get all current labels from cache
         with MANUAL_LABELS_LOCK:
             cache_keys = list(MANUAL_LABELS_CACHE.iterkeys())
@@ -540,38 +526,40 @@ def register_cluster_callbacks(app):
                     label = MANUAL_LABELS_CACHE[key]
                     all_labels.append(label)
                 except KeyError:
-                    # Key was deleted during iteration, skip it
                     continue
-            all_labels = sorted(set(all_labels))
-        if 'Unlabeled' not in all_labels:
-            all_labels.append('Unlabeled')
-        
-        # Sort labels alphabetically, but put "Unlabeled" at the end
-        sorted_labels = [lbl for lbl in all_labels if lbl != 'Unlabeled']
-        sorted_labels = sorted(sorted_labels)
-        if 'Unlabeled' in all_labels:
-            sorted_labels.append('Unlabeled')
-        
-        # Auto-assign colors for new labels using CLUSTER_COLORS
-        for i, label in enumerate(sorted_labels):
+            all_labels = sorted(set(l for l in all_labels if l and l != 'Unlabeled'))
+
+        # Track which palette colors are already claimed so new labels get
+        # the next UNUSED color (no duplicates, same sequential walk as clusters).
+        already_assigned = {
+            v for k, v in color_map.items()
+            if k != 'Unlabeled' and v != '#D9D9D9'
+        }
+
+        for label in all_labels:
             label_str = str(label)
-            if label == 'Unlabeled':
-                # IRONCLAD RULE: Unlabeled is always gray
-                color_map[label_str] = '#D9D9D9'
-            elif label_str not in color_map:
-                # Assign from CLUSTER_COLORS palette using deterministic index
-                color_index = i % len(CLUSTER_COLORS)
-                color_map[label_str] = CLUSTER_COLORS[color_index]
-        
-        # Handle user color picker changes
+            if label_str in color_map:
+                continue  # already has a color — keep it
+            # Pick the next CLUSTER_COLORS entry not yet used by another label
+            assigned = False
+            for candidate in CLUSTER_COLORS:
+                if candidate != '#D9D9D9' and candidate not in already_assigned:
+                    color_map[label_str] = candidate
+                    already_assigned.add(candidate)
+                    assigned = True
+                    break
+            if not assigned:
+                # All palette colors used → wrap around
+                color_map[label_str] = CLUSTER_COLORS[len(already_assigned) % len(CLUSTER_COLORS)]
+
+        # Handle user color-picker changes (overrides auto-assignment)
         if colors and ids:
             for color, id_dict in zip(colors, ids):
                 label_str = str(id_dict['index'])
-                if label_str != 'Unlabeled':  # Protect "Unlabeled" from user changes
+                if label_str != 'Unlabeled':
                     color_map[label_str] = color
                 else:
-                    # Force Unlabeled back to gray if user tries to change it
                     color_map[label_str] = '#D9D9D9'
-        
+
         return color_map
 

@@ -192,38 +192,52 @@ def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels
     """
     Apply manual labels to dff using a high-performance vectorized approach.
     Optimized to handle 1M+ rows without redundant string scans or console flooding.
+
+    Performance tip: pass a pre-built plain ``dict`` as *manual_labels_cache* to skip
+    lock acquisition and diskcache I/O entirely.  Build it once per callback with::
+
+        with MANUAL_LABELS_LOCK:
+            snapshot = dict(MANUAL_LABELS_CACHE)          # or iterate iterkeys()
+        dff = apply_manual_labels_efficiently(dff, snapshot)
     """
-    # Import here to avoid circular dependency
-    if manual_labels_cache is None:
-        from callbacks.callbacks_constants import MANUAL_LABELS_CACHE
-        manual_labels_cache = MANUAL_LABELS_CACHE
-    
-    if manual_labels_lock is None:
-        from callbacks.callbacks_constants import MANUAL_LABELS_LOCK
-        manual_labels_lock = MANUAL_LABELS_LOCK
-    
-    # THREAD SAFETY: Use lock to prevent concurrent access during read
-    with manual_labels_lock:
+    # Fast path: caller already provided a plain-dict snapshot — no lock, no disk I/O.
+    if isinstance(manual_labels_cache, dict):
         if not manual_labels_cache or dff.empty:
             dff['manual_label'] = 'Unlabeled'
             return dff
-        
-        # Create a snapshot of the cache to work with outside the lock
-        # For diskcache, we need to safely iterate and handle missing keys
-        cache_snapshot = {}
-        try:
-            # Use list() to create a snapshot of keys first to avoid concurrent modification
-            cache_keys = list(manual_labels_cache.iterkeys())
-            for key in cache_keys:
-                try:
-                    cache_snapshot[key] = manual_labels_cache[key]
-                except KeyError:
-                    # Key was deleted during iteration, skip it
-                    continue
-        except Exception:
-            # If anything fails, return the dataframe with unlabeled entries
-            dff['manual_label'] = 'Unlabeled'
-            return dff
+        cache_snapshot = manual_labels_cache
+    else:
+        # Import here to avoid circular dependency
+        if manual_labels_cache is None:
+            from callbacks.callbacks_constants import MANUAL_LABELS_CACHE
+            manual_labels_cache = MANUAL_LABELS_CACHE
+
+        if manual_labels_lock is None:
+            from callbacks.callbacks_constants import MANUAL_LABELS_LOCK
+            manual_labels_lock = MANUAL_LABELS_LOCK
+
+        # THREAD SAFETY: Use lock to prevent concurrent access during read
+        with manual_labels_lock:
+            if not manual_labels_cache or dff.empty:
+                dff['manual_label'] = 'Unlabeled'
+                return dff
+
+            # Create a snapshot of the cache to work with outside the lock
+            # For diskcache, we need to safely iterate and handle missing keys
+            cache_snapshot = {}
+            try:
+                # Use list() to create a snapshot of keys first to avoid concurrent modification
+                cache_keys = list(manual_labels_cache.iterkeys())
+                for key in cache_keys:
+                    try:
+                        cache_snapshot[key] = manual_labels_cache[key]
+                    except KeyError:
+                        # Key was deleted during iteration, skip it
+                        continue
+            except Exception:
+                # If anything fails, return the dataframe with unlabeled entries
+                dff['manual_label'] = 'Unlabeled'
+                return dff
 
     # Initialize with Unlabeled
     if 'manual_label' not in dff.columns:
