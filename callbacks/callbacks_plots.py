@@ -8,7 +8,7 @@ import math
 import hashlib
 from collections import Counter
 import dash
-from dash import Input, Output, State, callback_context, ALL, html, no_update, clientside_callback
+from dash import Input, Output, State, callback_context, ALL, html, no_update, clientside_callback, Patch
 import plotly.express as px
 import pandas as pd
 import uuid
@@ -133,6 +133,55 @@ def register_plot_callbacks(app):
         t_last = checkpoint('init') or t_last
 
         # ---------------------------------------------------------------
+        # FAST PATH: color-only update (Patch)
+        # When ONLY cluster-color-store or label-color-store fires we update
+        # marker.color on each existing trace via Patch() — zero data
+        # re-processing, zero scatter payload re-transmission.
+        # ---------------------------------------------------------------
+        _COLOR_ONLY_TRIGGERS = frozenset({'cluster-color-store.data', 'label-color-store.data'})
+        is_color_only = (
+            bool(all_triggered_ids)
+            and set(all_triggered_ids) <= _COLOR_ONLY_TRIGGERS
+            and current_figure_state
+            and current_figure_state.get('data')
+        )
+        if is_color_only:
+            try:
+                is_manual_now = (color_mode == 'manual')
+                patched = Patch()
+                for i, trace in enumerate(current_figure_state['data']):
+                    group_name = trace.get('name', '')
+                    if is_manual_now:
+                        if group_name == 'Unlabeled':
+                            new_color = '#D9D9D9'
+                        elif label_colors_data and group_name in label_colors_data:
+                            new_color = label_colors_data[group_name]
+                        else:
+                            try:
+                                all_lbls = sorted(label_colors_data.keys()) if label_colors_data else []
+                                idx = all_lbls.index(group_name) if group_name in all_lbls else 0
+                                new_color = CLUSTER_COLORS[idx % len(CLUSTER_COLORS)]
+                            except Exception:
+                                new_color = CLUSTER_COLORS[0]
+                    else:
+                        if cluster_colors_data and group_name in cluster_colors_data:
+                            new_color = cluster_colors_data[group_name]
+                        else:
+                            try:
+                                new_color = CLUSTER_COLORS[int(group_name) % len(CLUSTER_COLORS)]
+                            except Exception:
+                                new_color = CLUSTER_COLORS[0]
+                    # Scalar color — no per-point buffer re-upload in WebGL → no flash
+                    patched['data'][i]['marker']['color'] = new_color
+                return (patched, no_update, no_update, no_update, no_update,
+                        no_update, no_update, no_update, no_update, no_update)
+            except Exception:
+                import traceback as _tb
+                _tb.print_exc()
+                # Fall through to full pipeline on error
+        # ---------------------------------------------------------------
+
+        # ---------------------------------------------------------------
         # FAST PATH: label-only update
         # When ONLY manual-labels-store fires we only need to recolor the
         # already-sampled data.  Skip the full filter/merge/sample pipeline
@@ -214,7 +263,8 @@ def register_plot_callbacks(app):
                         fig_fast.add_trace(go.Scattergl(
                             x=gp['x'], y=gp['y'],
                             mode='markers',
-                            marker=dict(size=gp['marker_size'], color=gp['mapped_color'],
+                            marker=dict(size=gp['marker_size'],
+                                        color=color_map_fast.get(str(group), '#888888'),
                                         sizemode='diameter', sizeref=1, opacity=1.0),
                             customdata=gp[_cd_cols_present].to_numpy(),
                             hovertemplate=f'<b>{label_name_fast}:</b> %{{customdata[0]}}<br>'
@@ -841,7 +891,10 @@ def register_plot_callbacks(app):
                     mode='markers',
                     marker=dict(
                         size=gp_df['marker_size'],
-                        color=gp_df['mapped_color'],
+                        # Scalar color per trace — all points in a group share one color.
+                        # Using a scalar (not a per-point array) avoids WebGL buffer re-upload
+                        # when color changes via Patch(), eliminating the opacity-flash artifact.
+                        color=final_color_map.get(str(group), '#888888'),
                         sizemode='diameter',
                         sizeref=1,
                         opacity=1.0
