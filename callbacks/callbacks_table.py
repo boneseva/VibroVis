@@ -455,7 +455,7 @@ def register_table_callbacks(app):
                 empty_fig = go.Figure()
                 empty_fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                                         xaxis={'visible': False}, yaxis={'visible': False})
-                return ({"x": [], "y": [], "z": [], "info": "Error: Audio load failed",
+                return ({"info": "Error: Audio load failed",
                          "audio_path": "", "_rev": time.time_ns()},
                         empty_fig, None, "Error: Could not load audio segment.")
 
@@ -516,7 +516,6 @@ def register_table_callbacks(app):
             table_click_data = {"points": [{"customdata": [hist_key, None, None]}]}
 
             store_data = {
-                "x": t.tolist(), "y": f.tolist(), "z": Sxx_db.tolist(),
                 "audio_path": audio_path, "info": info,
                 "_rev": time.time_ns(),
             }
@@ -527,7 +526,7 @@ def register_table_callbacks(app):
             empty_fig = go.Figure()
             empty_fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                                     xaxis={'visible': False}, yaxis={'visible': False})
-            return ({"x": [], "y": [], "z": [], "info": "Error loading audio",
+            return ({"info": "Error loading audio",
                      "audio_path": "", "_rev": time.time_ns()},
                     empty_fig, None, "Error loading audio for selected row.")
 

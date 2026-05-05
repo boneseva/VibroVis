@@ -954,7 +954,7 @@ def register_plot_callbacks(app):
         )
 
         if segment is None:
-             err_data = {'x': [], 'y': [], 'z': [], 'info': 'Error: Audio load failed', 'audio_path': '', '_rev': time.time_ns()}
+             err_data = {'info': 'Error: Audio load failed', 'audio_path': '', '_rev': time.time_ns()}
              return err_data, empty_fig, "Error: Could not load audio segment."
 
         f, t, Sxx_db = utils.compute_spectrogram(
@@ -966,7 +966,7 @@ def register_plot_callbacks(app):
         )
 
         if Sxx_db.size == 0:
-            return {'x': [], 'y': [], 'z': [], 'info': 'Error', 'audio_path': '', '_rev': time.time_ns()}, go.Figure(), "Warning: Empty Spectrogram"
+            return {'info': 'Error', 'audio_path': '', '_rev': time.time_ns()}, go.Figure(), "Warning: Empty Spectrogram"
 
         # 3. APPLY DB FLOOR (Fixes the "Washed Out" look)
         # This restores the black/solid background for quiet areas
@@ -1003,9 +1003,6 @@ def register_plot_callbacks(app):
         info = f"{row['file_name']} at {start_time:.2f}s (cluster {row['cluster_id']})"
 
         store_data = {
-            'x': t.tolist(),
-            'y': f.tolist(),
-            'z': Sxx_db.tolist(),
             'audio_path': audio_path,
             'info': info,
             '_rev': time.time_ns()
