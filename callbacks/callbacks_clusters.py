@@ -448,11 +448,21 @@ def register_cluster_callbacks(app):
             # Apply updates
             for cache_key, new_label in cache_updates:
                 MANUAL_LABELS_CACHE[cache_key] = new_label
+                try:
+                    with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
+                        _log.write(f"{time.time()}\tclusters_rename_update\t{cache_key}\t{new_label}\n")
+                except Exception:
+                    pass
             
             # Apply deletions
             for key in cache_deletions:
                 if key in MANUAL_LABELS_CACHE:
-                    del MANUAL_LABELS_CACHE[key]
+                    try:
+                        del MANUAL_LABELS_CACHE[key]
+                        with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
+                            _log.write(f"{time.time()}\tclusters_rename_delete\t{key}\tDELETED\n")
+                    except Exception:
+                        pass
 
         # Timestamp token is enough to trigger dependent callbacks.
         return updated_store, str(time.time())

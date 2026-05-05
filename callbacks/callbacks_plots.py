@@ -236,7 +236,6 @@ def register_plot_callbacks(app):
 
                 # Update cache in-place — same key keeps filtered-data unchanged
                 server_cache[current_filtered_key] = dff_fast
-                print(f"[FAST-PATH] Label update recolored scatter in place (key={current_filtered_key[:8]}…)")
                 # Return same filtered-data key so update_table is NOT triggered a second time
                 return (fig_fast, current_filtered_key,
                         no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update)
@@ -306,11 +305,9 @@ def register_plot_callbacks(app):
         should_force_defaults = is_fresh_load and not is_preset_active
 
         if should_force_defaults:
-            # When forcing defaults (fresh load), we want to show ALL data initially
-            # unless restricted by dropdown defaults.
-            # Empty list here usually means "unfiltered" in our mask logic below if we handle it right.
-            selected_channels = None # None = All
-            selected_num_clusters = None # Pick first available K later
+            # When forcing defaults (fresh load), show ALL data initially.
+            selected_channels = None
+            selected_num_clusters = None
             selected_microlocations = None
             selected_recorders = None
             selected_dates = None
@@ -318,7 +315,6 @@ def register_plot_callbacks(app):
             clip_count_threshold = 1
             cluster_checkbox_values = []
             stored_indices = None
-            print("DEBUG: forcing defaults for fresh load")
 
         if is_fresh_load:
             stored_indices = None
@@ -887,106 +883,10 @@ def register_plot_callbacks(app):
             timing_str = f"⏱️  Plot Update Timing (total: {total_time:.1f}ms): "
             for name, segment_time in t_checkpoint.items():
                 timing_str += f"{name}={segment_time:.1f}ms "
-            print(timing_str)
 
         return fig, dff['cache_key'].iloc[
             0], max_clip_count, max_distance, new_indices_to_store, ranges_data, sampling_text, cluster_stats, None, False if should_force_defaults else no_update
 
-    # @app.callback(
-    #     Output('spectrogram-raw-data-store', 'data'),
-    #     Output('fft-warning', 'children'),
-    #     [Input("scatter", "clickData"),
-    #      Input('filtered-data', 'data'),
-    #      Input('frequency-scale', 'value'),
-    #      Input('fft-window-size', 'value'),
-    #      Input('window-overlap', 'value'),
-    #      Input('window-type', 'value'),
-    #      Input('min-freq', 'value'),
-    #      Input('max-freq', 'value'),
-    #      Input('num-bins', 'value')],
-    #     prevent_initial_call=True)
-    # def compute_spectrogram_data(clickData, filtered_data_cache_key,
-    #                              frequency_scale, fft_window_size, window_overlap,
-    #                              window_type, min_freq, max_freq, num_bins):
-    #
-    #     print("\n--- SPECTROGRAM CALLBACK TRIGGERED ---")
-    #     try:
-    #         if not clickData:
-    #             print("Abort: No clickData")
-    #             return dash.no_update, ""
-    #
-    #         if not filtered_data_cache_key:
-    #             print("Abort: No filtered_data_cache_key")
-    #             return dash.no_update, ""
-    #
-    #         dff = server_cache.get(filtered_data_cache_key)
-    #         if dff is None:
-    #             print("Abort: Filtered data not found in cache")
-    #             return dash.no_update, "Error: Filtered data not found in cache."
-    #
-    #         try:
-    #             point = clickData["points"][0]
-    #             plot_id = point["customdata"][2]
-    #             print(f"Clicked Point ID: {plot_id}")
-    #         except Exception as e:
-    #             print(f"Abort: Error parsing clickData: {e}")
-    #             return dash.no_update, f"Error parsing clickData: {e}"
-    #
-    #         try:
-    #             row = dff.loc[plot_id]
-    #             print(f"Found row for {plot_id}: {row['mp3_file']}")
-    #         except KeyError:
-    #             print(f"Abort: Plot ID {plot_id} not found in dataframe")
-    #             return dash.no_update, "Error: Clicked point not found. Please re-filter."
-    #
-    #         print(f"Attempting to load audio: {row['mp3_file']}")
-    #         segment, samplerate = utils.load_audio_segment(
-    #             mp3_file_relative_path=row['mp3_file'],
-    #             clip_time=float(row['clip_time']),
-    #             clip_duration=float(row['clip_duration']),
-    #             channel=int(row['channel']),
-    #             padding_s=0.5
-    #         )
-    #
-    #         if segment is None:
-    #             print(f"Error: Segment is None for {row['mp3_file']}")
-    #             # CONTEXT: Return empty data to ensure the chain continues and UI updates (clears spinner)
-    #             return {'x': [], 'y': [], 'z': [], 'info': 'Error: Audio load failed', 'audio_path': '', '_rev': time.time_ns()}, "Error: Could not load audio segment."
-    #
-    #         print(f"Audio loaded. Shape: {segment.shape if segment is not None else 'None'}, SR: {samplerate}")
-    #         if segment is not None:
-    #              print(f"Audio stats: Min={np.min(segment)}, Max={np.max(segment)}, Mean={np.mean(segment)}, HasNaN={np.isnan(segment).any()}")
-    #
-    #         print(f"Calling compute_spectrogram with: scale={frequency_scale}, win={fft_window_size}, overlap={window_overlap}")
-    #
-    #         f, t, Sxx_db = utils.compute_spectrogram(
-    #             segment=segment, samplerate=samplerate, scale=frequency_scale,
-    #             fft_window_size=fft_window_size, window_overlap=window_overlap,
-    #             window_type=window_type, min_freq=min_freq, max_freq=max_freq,
-    #             num_bins=num_bins,
-    #             db_floor=-120
-    #         )
-    #
-    #         if Sxx_db.size == 0:
-    #             print("Error: Sxx_db size is 0")
-    #             return {'x': [], 'y': [], 'z': [], 'info': 'Error: Spectrogram empty', 'audio_path': '', '_rev': time.time_ns()}, "Warning: Spectrogram computation failed."
-    #
-    #         print(f"Spectrogram computed. Shape: {Sxx_db.shape}")
-    #         # print(f"Spectrogram shape: {Sxx_db.shape}, Time bins: {len(t)}, Freq bins: {len(f)}")
-    #         # print(f"Audio Path: {row['mp3_file']} ({float(row['clip_duration']):.2f}s)")
-    #
-    #         start_time = float(row['clip_time'])
-    #         audio_path = f"/audio_segment_normalized/{row['mp3_file']}/{int(row['channel'])}/{start_time}/{start_time + float(row['clip_duration'])}"
-    #         info = f"{row['file_name']} at {start_time:.2f}s (cluster {row['cluster_id']})"
-    #
-    #         print("--- RETURNING SUCCESS ---")
-    #         return {'x': t.tolist(), 'y': f.tolist(), 'z': Sxx_db.tolist(), 'audio_path': audio_path, 'info': info,
-    #                 '_rev': time.time_ns()}, ""
-    #
-    #     except Exception as e:
-    #         print("CRITICAL ERROR IN COMPUTE_SPECTROGRAM_DATA:")
-    #         traceback.print_exc()
-    #         return {'x': [], 'y': [], 'z': [], 'info': f'Error: {e}', 'audio_path': '', '_rev': time.time_ns()}, f"Critical Error: {e}"
 
     @app.callback(
         Output('spectrogram-raw-data-store', 'data'),
@@ -1043,8 +943,6 @@ def register_plot_callbacks(app):
         except KeyError:
              return no_update, no_update, "Error: Clicked point not found. Please re-filter."
 
-        print(row['mp3_file'])
-        
         # 2. Compute (Standard)
         segment, samplerate = utils.load_audio_segment(
             mp3_file_relative_path=row['mp3_file'],
@@ -1115,37 +1013,6 @@ def register_plot_callbacks(app):
 
         return store_data, fig, ""
 
-    # @app.callback(
-    #     [Output("info", "children", allow_duplicate=True),
-    #      Output("audio-player", "src", allow_duplicate=True),
-    #      Output("spectrogram-plot", "figure"),
-    #      Output('spectrogram-plot-container', 'key')],
-    #     [Input('spectrogram-raw-data-store', 'data'),
-    #      Input('colormap', 'value'),
-    #      Input('db-floor', 'value')],
-    #     prevent_initial_call=True)
-    # def update_spectrogram_plot_from_cache(data, colormap, db_floor):
-    #     if not data:
-    #         data = {'x': [], 'y': [], 'z': [], 'info': 'No data', 'audio_path': '', '_rev': time.time_ns()}
-    #
-    #     z_data = np.array(data['z'])
-    #     if z_data.size > 0:
-    #         z_data[z_data < db_floor] = db_floor
-    #
-    #     fig = go.Figure(data=go.Heatmap(
-    #         x=data['x'], y=data['y'], z=z_data.tolist(),
-    #         colorscale=colormap,
-    #         zmin=db_floor,
-    #         zmax=np.max(z_data) if z_data.size > 0 else 0,
-    #         colorbar=dict(title='dB')
-    #     ))
-    #
-    #     fig.update_layout(
-    #         xaxis=dict(title="Time (s)"),
-    #         yaxis=dict(title="Frequency (Hz)", type='log'),
-    #         margin=dict(l=40, r=10, t=20, b=80), uirevision=data['_rev']
-    #     )
-    #     return data['info'], data['audio_path'], fig, str(data['_rev'])
 
     app.clientside_callback(
         """
@@ -1186,7 +1053,6 @@ def register_plot_callbacks(app):
          State('filtered-data', 'data')])
     def show_histogram_for_clicked_cluster(clickData, hist_type, time_scale, cluster_colors, label_colors, label_names, color_mode,
                                            table_click_data, filtered_data_cache_key):
-        print("\n--- HISTOGRAM CALLBACK TRIGGERED ---")
 
         # Determine the effective clickData source
         triggered = dash.callback_context.triggered
@@ -1202,12 +1068,10 @@ def register_plot_callbacks(app):
 
         try:
             if not effective_click or not filtered_data_cache_key:
-                print("Abort Histogram: No clickData or cache key")
                 fig = go.Figure()
                 title = "Time of Day" if time_scale == 'daily' else "Week of Year"
-                dff = apply_manual_labels_efficiently(dff, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK)
                 fig.update_layout(
-                    xaxis=dict(title=title, range=rng),
+                    xaxis=dict(title=title),
                     yaxis_title="Count", showlegend=False,
                     margin=dict(l=0, r=0, t=20, b=10),
                     paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
@@ -1381,9 +1245,6 @@ def register_plot_callbacks(app):
             # Inline Table Edit
             if triggered_id_str.startswith('{'):
                 trig_dict = json.loads(triggered_id_str)
-            # Inline Table Edit
-            if triggered_id_str.startswith('{'):
-                trig_dict = json.loads(triggered_id_str)
                 if trig_dict.get('type') == 'table-inline-label':
                     plot_id = trig_dict.get('index')
                     
@@ -1415,8 +1276,75 @@ def register_plot_callbacks(app):
                     instance_key = (loc, micro, file_basename, int(channel), clip_time_key)
 
                     # Thread-safe cache update — single key per clip instance
+                    # Deduplicate: if an existing cache key in the same file/channel overlaps
+                    # the current clip by >=50% and already has the same label, skip inserting
+                    DEDUPE_THRESHOLD = 0.5
+                    should_write = True
                     with MANUAL_LABELS_LOCK:
-                        MANUAL_LABELS_CACHE[instance_key] = label_val
+                        # Scan same-file/channel keys
+                        for k in list(MANUAL_LABELS_CACHE):
+                            try:
+                                k_loc, k_micro, k_f, k_chan, k_sec = k
+                            except Exception:
+                                continue
+                            if (k_loc, k_micro, k_f, int(k_chan)) != (loc, micro, file_basename, int(channel)):
+                                continue
+                            # Get durations
+                            dur_entry = CLIP_DURATION_CACHE.get(k)
+                            if isinstance(dur_entry, tuple) and len(dur_entry) == 2:
+                                k_dur = int(round(dur_entry[0] * 10))
+                            else:
+                                k_dur = 0
+                            existing_start = int(k_sec)
+                            existing_end = existing_start + k_dur
+                            new_start = int(clip_time_key)
+                            new_end = new_start + int(round(float(row.get('clip_duration', 5.0)) * 10))
+                            overlap = max(0, min(existing_end, new_end) - max(existing_start, new_start))
+                            shorter = min((existing_end - existing_start) if existing_end > existing_start else 0,
+                                          (new_end - new_start) if new_end > new_start else 0)
+                            if shorter > 0:
+                                frac = overlap / shorter
+                                if frac >= DEDUPE_THRESHOLD and MANUAL_LABELS_CACHE.get(k) == label_val:
+                                    should_write = False
+                                    break
+                        if should_write:
+                            if label_val == 'Unlabeled':
+                                # Interpret Unlabeled as a delete request: remove any existing persistent key
+                                if instance_key in MANUAL_LABELS_CACHE:
+                                    try:
+                                        del MANUAL_LABELS_CACHE[instance_key]
+                                    except Exception:
+                                        pass
+                                    # Remove duration entry as well if present
+                                    try:
+                                        if instance_key in CLIP_DURATION_CACHE:
+                                            del CLIP_DURATION_CACHE[instance_key]
+                                    except Exception:
+                                        pass
+                                    # Log deletion
+                                    try:
+                                        with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
+                                            _log.write(f"{time.time()}\tplots_inline_delete\t{instance_key}\tDELETED\n")
+                                    except Exception:
+                                        pass
+                                    unique_trigger = f"{time.time()}_{hash(label_val)}_{len(MANUAL_LABELS_CACHE)}"
+                                    return unique_trigger, f"Deleted label", dash.no_update
+                                else:
+                                    # Nothing to delete — no-op
+                                    unique_trigger = f"{time.time()}_{hash(label_val)}_{len(MANUAL_LABELS_CACHE)}"
+                                    return unique_trigger, f"No-op: Unlabeled", dash.no_update
+                            else:
+                                MANUAL_LABELS_CACHE[instance_key] = label_val
+                        else:
+                            # Already saved by overlapping key — treat as success without new write
+                            unique_trigger = f"{time.time()}_{hash(label_val)}_{len(MANUAL_LABELS_CACHE)}"
+                            return unique_trigger, f"Saved: {label_val}", dash.no_update
+                    # Instrumentation: log manual label writes for debugging intermittent duplication
+                    try:
+                        with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
+                            _log.write(f"{time.time()}\tplots_inline_save\t{instance_key}\t{label_val}\n")
+                    except Exception:
+                        pass
                     # Store (duration, model_name) so apply_manual_labels_efficiently
                     # can use exact match within the same model and overlap match across models.
                     CLIP_DURATION_CACHE[instance_key] = (
@@ -1457,12 +1385,74 @@ def register_plot_callbacks(app):
                 clip_time_key = round(float(row['clip_time']) * 10)
                 instance_key = (loc, micro, file_basename, int(channel), clip_time_key)
 
-                print(f"[SIDEBAR_SAVE] Saving label '{label_val}' for clip_time={row['clip_time']}")
 
                 # Thread-safe write with verification
+                # Deduplicate before writing to persistent cache (same logic as inline path)
+                DEDUPE_THRESHOLD = 0.5
+                should_write = True
                 with MANUAL_LABELS_LOCK:
-                    MANUAL_LABELS_CACHE[instance_key] = label_val
-                    verification_success = MANUAL_LABELS_CACHE.get(instance_key) == label_val
+                    for k in list(MANUAL_LABELS_CACHE):
+                        try:
+                            k_loc, k_micro, k_f, k_chan, k_sec = k
+                        except Exception:
+                            continue
+                        if (k_loc, k_micro, k_f, int(k_chan)) != (loc, micro, file_basename, int(channel)):
+                            continue
+                        dur_entry = CLIP_DURATION_CACHE.get(k)
+                        if isinstance(dur_entry, tuple) and len(dur_entry) == 2:
+                            k_dur = int(round(dur_entry[0] * 10))
+                        else:
+                            k_dur = 0
+                        existing_start = int(k_sec)
+                        existing_end = existing_start + k_dur
+                        new_start = int(clip_time_key)
+                        new_end = new_start + int(round(float(row.get('clip_duration', 5.0)) * 10))
+                        overlap = max(0, min(existing_end, new_end) - max(existing_start, new_start))
+                        shorter = min((existing_end - existing_start) if existing_end > existing_start else 0,
+                                      (new_end - new_start) if new_end > new_start else 0)
+                        if shorter > 0:
+                            frac = overlap / shorter
+                            if frac >= DEDUPE_THRESHOLD and MANUAL_LABELS_CACHE.get(k) == label_val:
+                                should_write = False
+                                break
+                    if should_write:
+                        if label_val == 'Unlabeled':
+                            # Delete existing persistent key instead of writing 'Unlabeled'
+                            if instance_key in MANUAL_LABELS_CACHE:
+                                try:
+                                    del MANUAL_LABELS_CACHE[instance_key]
+                                except Exception:
+                                    pass
+                                try:
+                                    if instance_key in CLIP_DURATION_CACHE:
+                                        del CLIP_DURATION_CACHE[instance_key]
+                                except Exception:
+                                    pass
+                                # Log deletion
+                                try:
+                                    with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
+                                        _log.write(f"{time.time()}\tplots_sidebar_delete\t{instance_key}\tDELETED\n")
+                                except Exception:
+                                    pass
+                                verification_success = True
+                                unique_trigger = f"{time.time()}_{hash(label_val)}_1"
+                                return unique_trigger, f"Deleted label", label_val
+                            else:
+                                verification_success = True
+                                unique_trigger = f"{time.time()}_{hash(label_val)}_1"
+                                return unique_trigger, f"No-op: Unlabeled", label_val
+                        else:
+                            MANUAL_LABELS_CACHE[instance_key] = label_val
+                    else:
+                        verification_success = True
+                        unique_trigger = f"{time.time()}_{hash(label_val)}_1"
+                        return unique_trigger, f"Saved: {label_val}", label_val
+                # Log writes for debugging
+                try:
+                    with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
+                        _log.write(f"{time.time()}\tplots_sidebar_save\t{instance_key}\t{label_val}\n")
+                except Exception:
+                    pass
                 # Store (duration, model_name) so apply_manual_labels_efficiently
                 # can use exact match within the same model and overlap match across models.
                 CLIP_DURATION_CACHE[instance_key] = (
@@ -1471,11 +1461,9 @@ def register_plot_callbacks(app):
                 )
 
                 if verification_success:
-                    print(f"[SIDEBAR_SAVE] SUCCESS: Saved and verified label for clip_time={row['clip_time']}")
                     unique_trigger = f"{time.time()}_{hash(label_val)}_1"
                     return unique_trigger, f"Saved: {label_val}", label_val
                 else:
-                    print(f"[SIDEBAR_SAVE] VERIFICATION FAILED for row_idx={plot_id}")
                     return dash.no_update, f"Error: Label verification failed for {label_val}", dash.no_update
             else:
                 return dash.no_update, "Error: Point not found.", dash.no_update

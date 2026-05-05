@@ -36,7 +36,6 @@ def _extract_logo_accent_color(svg_path: str, fallback: str = '#4b8af2') -> str:
 
 _logo_path = os.path.join(os.path.dirname(__file__), 'assets', 'logo.svg')
 _accent_color = _extract_logo_accent_color(_logo_path)
-print(f'[VibroVis] Theme accent color extracted from logo: {_accent_color}')
 
 app.index_string = f'''
 <!DOCTYPE html>
@@ -85,4 +84,3 @@ if __name__ == "__main__":
     print(f"Dash is running on http://{display_host}:{display_port}/")
     
     app.run(port=PORT, host=ADDRESS, debug=False, use_reloader=False, dev_tools_ui=False)
-   # app.run(port=PORT, host=ADDRESS, debug=True, use_reloader=True, dev_tools_ui=True)

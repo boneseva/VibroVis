@@ -144,7 +144,6 @@ def compute_spectrogram(segment, samplerate, scale='log', fft_window_size=1024, 
         segment, fs=samplerate, nperseg=fft_window_size,
         noverlap=(fft_window_size - fft_step_size), nfft=nfft, window=window_type
     )
-    print(f"DEBUG: Scipy spectrogram done. Sxx shape={Sxx.shape}")
 
     # Filter by frequency range
     freq_slice = np.where((f >= min_freq) & (f <= max_freq))
@@ -314,6 +313,11 @@ def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels
     # Determine the model currently loaded in dff (used for same/different model check)
     current_model = str(dff['model_name'].iloc[0]) if 'model_name' in dff.columns and not dff.empty else None
 
+    # Micro-optimization: bucket labeled clips into coarse time bins so each candidate
+    # only compares with nearby labeled clips. This avoids N*L worst-case behavior
+    # when labels are widely spread but candidates are concentrated.
+    BIN_SIZE_X10 = 10  # 10 units = 1.0 second at the x10 scale (0.1s resolution)
+
     for (loc, micro, f_base, chan), clip_map in label_map.items():
         try:
             chan_val = int(chan)
@@ -333,39 +337,118 @@ def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels
             if indices.empty:
                 continue
 
-            for idx in indices:
-                ct = float(dff.at[idx, 'clip_time']) if 'clip_time' in dff.columns else 0.0
-                cd = float(dff.at[idx, 'clip_duration']) if 'clip_duration' in dff.columns else 5.0
-                cand_start = round(ct * 10)
-                cand_end   = round((ct + cd) * 10)
+            # Vectorize candidate starts/ends for this group
+            cand_cts = (dff.loc[indices, 'clip_time'].astype(float) * 10).round().astype(int).to_numpy()
+            cand_cds = (dff.loc[indices, 'clip_duration'].astype(float) * 10).round().astype(int).to_numpy()
+            cand_starts = cand_cts
+            cand_ends = cand_cts + cand_cds
 
-                best_label = None
-                best_overlap = -1.0
+            # Build labeled items list and bucket them into BINs
+            labeled_items = []
+            max_labeled_span = 0
+            for labeled_start, (lbl, labeled_end, labeled_model) in clip_map.items():
+                span = (labeled_end - labeled_start) if (labeled_end is not None) else 0
+                if span > max_labeled_span:
+                    max_labeled_span = span
+                labeled_items.append((labeled_start, lbl, labeled_end, labeled_model))
 
-                for labeled_start, (lbl, labeled_end, labeled_model) in clip_map.items():
-                    same_model = (labeled_model is not None and current_model is not None
-                                  and labeled_model == current_model)
+            # If there are no labeled items (should not happen), continue
+            if not labeled_items:
+                continue
 
-                    if labeled_end is None or same_model:
-                        # Exact match only — no cross-clip bleeding within the same model
-                        if labeled_start == cand_start:
-                            best_label = lbl
-                            break
-                    else:
-                        # Cross-model: overlap-based transfer
-                        overlap_x10 = max(0, min(cand_end, labeled_end) - max(cand_start, labeled_start))
-                        if overlap_x10 <= 0:
-                            continue
-                        shorter_x10 = min(labeled_end - labeled_start, cand_end - cand_start)
-                        if shorter_x10 <= 0:
-                            continue
-                        frac = overlap_x10 / shorter_x10
-                        if frac >= OVERLAP_THRESHOLD and frac > best_overlap:
-                            best_overlap = frac
-                            best_label = lbl
+            # Create bins: int -> list of labeled_items indices
+            bin_map = {}
+            for item in labeled_items:
+                lstart = item[0]
+                bin_idx = lstart // BIN_SIZE_X10
+                bin_map.setdefault(bin_idx, []).append(item)
 
-                if best_label and best_label != 'Unlabeled':
-                    dff.at[idx, 'manual_label'] = best_label
+            # Number of neighboring bins to check based on max span (at least 1)
+            neighbor_bins = max(1, int(np.ceil(max_labeled_span / BIN_SIZE_X10)))
+
+            # Micro-prefilter: limit candidates to those that overlap the overall
+            # labeled span expanded by max_labeled_span. This avoids checking
+            # candidates that are far away in time from any labeled clip.
+            labeled_starts = [it[0] for it in labeled_items]
+            labeled_ends = [it[2] if it[2] is not None else it[0] for it in labeled_items]
+            min_labeled_start = min(labeled_starts)
+            max_labeled_end = max(labeled_ends)
+            margin = max_labeled_span
+
+            # Boolean mask (on the candidates arrays) selecting only nearby candidates
+            cand_keep_mask = (cand_ends >= (min_labeled_start - margin)) & (cand_starts <= (max_labeled_end + margin))
+            if not cand_keep_mask.any():
+                continue
+
+            # Reduce the indices and candidate arrays to the prefiltered subset
+            filtered_indices = indices[cand_keep_mask]
+            filtered_starts = cand_starts[cand_keep_mask]
+            filtered_ends = cand_ends[cand_keep_mask]
+
+            # Build mapping from labeled items → best candidate (single-best per labeled clip)
+            # and then resolve conflicts so each candidate receives at most one label (highest overlap wins).
+            num_cands = len(filtered_indices)
+            if num_cands == 0:
+                continue
+
+            cand_st = np.array(filtered_starts, dtype=int)
+            cand_en = np.array(filtered_ends, dtype=int)
+            cand_span = cand_en - cand_st
+
+            # Candidate assignment map: pos_in_filtered -> (label, overlap_frac)
+            candidate_assignments = {}
+
+            # For each labeled item, find the single best candidate (by overlap fraction)
+            for labeled_start, lbl, labeled_end, labeled_model in labeled_items:
+                labeled_start = int(labeled_start)
+                if labeled_end is None:
+                    # Legacy entry: require exact clip_time match
+                    labeled_end = labeled_start
+                labeled_end = int(labeled_end)
+
+                same_model = (labeled_model is not None and current_model is not None and labeled_model == current_model)
+
+                if labeled_end == labeled_start or same_model:
+                    # Exact match only — find candidate(s) with identical start
+                    matches = np.nonzero(cand_st == labeled_start)[0]
+                    if matches.size > 0:
+                        # Choose the first matching candidate (stable) — treat as full overlap
+                        pos = int(matches[0])
+                        # Mark assignment with overlap fraction 1.0 to take precedence
+                        prev = candidate_assignments.get(pos)
+                        if prev is None or 1.0 > prev[1]:
+                            candidate_assignments[pos] = (lbl, 1.0)
+                    # If no exact match, nothing to do for this labeled clip
+                    continue
+
+                # Cross-model labeled clip: compute overlap fractions against filtered candidates
+                # overlap_x10 = max(0, min(cand_end, labeled_end) - max(cand_start, labeled_start))
+                overlap = np.maximum(0, np.minimum(cand_en, labeled_end) - np.maximum(cand_st, labeled_start))
+                if overlap.max() <= 0:
+                    continue
+
+                labeled_span = labeled_end - labeled_start
+                shorter = np.minimum(labeled_span, cand_span)
+                valid_mask = shorter > 0
+                if not valid_mask.any():
+                    continue
+
+                frac = np.zeros_like(overlap, dtype=float)
+                frac[valid_mask] = overlap[valid_mask] / shorter[valid_mask]
+
+                # Pick the candidate index with maximum fraction
+                best_pos = int(np.argmax(frac))
+                best_frac = float(frac[best_pos])
+                if best_frac >= OVERLAP_THRESHOLD:
+                    prev = candidate_assignments.get(best_pos)
+                    # If candidate already assigned, prefer the label with higher overlap fraction
+                    if prev is None or best_frac > prev[1]:
+                        candidate_assignments[best_pos] = (lbl, best_frac)
+
+            # Apply assignments to dataframe
+            for pos, (lbl, frac) in candidate_assignments.items():
+                if lbl and lbl != 'Unlabeled':
+                    dff.at[filtered_indices[pos], 'manual_label'] = lbl
 
         except Exception:
             continue

@@ -553,15 +553,13 @@ def register_table_callbacks(app):
         if active_tab != "table-tab":
             return no_update, no_update, no_update
 
-        triggered_prop_id = ctx.triggered[0]['prop_id'] if ctx.triggered else ""
+        triggered_prop_ids = [t['prop_id'] for t in ctx.triggered] if ctx.triggered else []
 
-        # FAST PATH: when a label was just saved, the scatter fast-path already updated
-        # server_cache in-place and the user's typed value is already visible in the
-        # dcc.Input (persistence=True).  Re-rendering 200 HTML rows here is unnecessary
-        # and was the main source of the ~5 s post-save freeze.
-        # • cluster mode  → skip entirely (row colors unchanged)
-        # • manual mode   → skip too; the next real data change will refresh colors
-        if triggered_prop_id == 'manual-labels-store.data':
+        # FAST PATH: when ONLY manual-labels-store fires we can skip a full re-render
+        # because the scatter fast-path already updated server_cache in-place and
+        # the user's typed value is visible in the dcc.Input (persistence=True).
+        # If any other input triggered (e.g., color-mode change) we must re-render.
+        if triggered_prop_ids and set(triggered_prop_ids) == {'manual-labels-store.data'}:
             return no_update, no_update, no_update
 
         try:
@@ -604,11 +602,9 @@ def register_table_callbacks(app):
             page_df     = dff.iloc[page_offset : page_offset + PAGE_SIZE]
             page_info   = f"Page {page + 1} of {total_pages}  ({total_rows} rows)"
 
-            t0 = time.time()
             result = _render_table(page_df, visible_cols, sort_col, sort_asc, page_offset,
                                    color_mode=color_mode or "cluster", label_colors_data=label_colors_data,
                                    merge_on=bool(merge_on))
-            print(f"[TABLE] page {page+1}/{total_pages} rendered in {time.time()-t0:.3f}s")
 
             return result, page_info, total_pages
 

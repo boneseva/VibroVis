@@ -275,10 +275,6 @@ def merge_clips_vectorized(dff, merge_threshold):
     # Create merge groups - clips with merge_mask=True belong to previous group
     merge_groups = (~merge_mask).cumsum()
     
-    # Add debug validation
-    original_count = len(dff)
-    potential_merges = merge_mask.sum()
-    
     # Create clip_end for aggregation
     dff['clip_end'] = dff['clip_time'] + dff['clip_duration']
 
@@ -301,16 +297,6 @@ def merge_clips_vectorized(dff, merge_threshold):
     grouped['clip_duration'] = grouped['clip_end'] - grouped['clip_time']
     grouped = grouped.drop(columns=['clip_end'])
     
-    # Debug output to verify merging is working
-    final_count = len(grouped)
-    if potential_merges > 0:
-        print(f"MERGE DEBUG: {original_count} clips -> {final_count} after merging "
-              f"({potential_merges} potential merges, threshold={merge_threshold})")
-    
-    return grouped
-    grouped = dff.groupby(merge_groups).agg(**agg_dict).reset_index(drop=True)
-    grouped['clip_duration'] = grouped['clip_end'] - grouped['clip_time']
-    grouped = grouped.drop(columns=['clip_end'])
     return grouped
 
 
@@ -357,10 +343,8 @@ def register_data_callbacks(app):
         else:
             data_path = read_data.SAVE_PATH
             if not os.path.exists(data_path):
-                print(f"FATAL: Source data not found at {data_path}.")
                 MODEL_DATA_CACHE['df'] = None
             else:
-                print(f"Loading data for model: {selected_model} AND location: {selected_location}...")
                 cols_to_load = ['x', 'y', 'location', 'microlocation', 'model_name', 'channel',
                                 'cluster_num', 'cluster_id', 'day_dt', 'start_hour_float',
                                 'file_name', 'clip_time', 'clip_duration', 'mp3_file', 'row_idx',
@@ -391,7 +375,6 @@ def register_data_callbacks(app):
                         model_df['channel'] = model_df['channel'].astype('category')
                     
                     MODEL_DATA_CACHE['df'] = model_df
-                    print(f"Cached {len(model_df)} rows.")
                 except Exception as e:
                     print(f"Error loading data: {e}")
                     MODEL_DATA_CACHE['df'] = None
@@ -617,8 +600,6 @@ def register_data_callbacks(app):
         export_df['cluster_id'] = dff_filtered['cluster_id'].astype(str) if 'cluster_id' in dff_filtered.columns else ''
         export_df = export_df.sort_values(['wav_file', 'date_time'])
 
-        export_df = export_df.sort_values(['wav_file', 'date_time'])
-
         return dcc.send_data_frame(export_df.to_csv, "filtered_data_export.csv", index=False)
 
     @app.callback(
@@ -709,7 +690,12 @@ def register_data_callbacks(app):
                     # Store in cache
                     MANUAL_LABELS_CACHE[(loc, micro, f_base, chan, sec)] = label
                     count += 1
-            
+                    try:
+                        with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
+                            _log.write(f"{time.time()}\tdata_load_file\t{(loc, micro, f_base, chan, sec)}\t{label}\n")
+                    except Exception:
+                        pass
+
             msg = f"Loaded '{name}' ({count} labels)."
             return msg
         except Exception as e:

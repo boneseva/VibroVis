@@ -15,30 +15,12 @@ SAVE_PATH = os.path.join(BASE_DATA_DIR, "cache", "final_data.parquet")
 
 # OVERVIEW_TSV = os.path.join(BASE_DATA_DIR, "zabe+hyla.tsv")
 
-# DEBUG: DIAGNOSE DATA PATHS
-print("--- DEBUG: DATA PATH DIAGNOSTICS ---")
-print(f"CWD: {os.getcwd()}")
-print(f"BASE_DATA_DIR: {BASE_DATA_DIR} (Absolute: {os.path.abspath(BASE_DATA_DIR)})")
-print(f"DATA_DIR: {DATA_DIR}")
-
-if os.path.exists(BASE_DATA_DIR):
-    print(f"OK: BASE_DATA_DIR exists. Contents: {os.listdir(BASE_DATA_DIR)}")
-else:
-    print(f"ERROR: BASE_DATA_DIR does NOT exist!")
-
-if os.path.exists(DATA_DIR):
-    print(f"OK: DATA_DIR exists. Contents (first 5): {os.listdir(DATA_DIR)[:5]}")
-else:
-    print(f"ERROR: DATA_DIR does NOT exist!")
-print("------------------------------------")
-
 # Load the overview TSV as reference (if it exists, to avoid import-time crash)
 if os.path.exists(OVERVIEW_TSV):
     wav_meta = pd.read_csv(OVERVIEW_TSV, sep='\t', dtype={6: str})
     wav_meta['wav_file'] = wav_meta['wav_file'].apply(os.path.normpath)
 else:
     wav_meta = pd.DataFrame()
-    # print(f"WARNING: Overview file not found at {OVERVIEW_TSV}")
 
 
 def load_positions_tsv_optimized(wav_meta=OVERVIEW_TSV, data_dir=DATA_DIR, save_path=SAVE_PATH):
@@ -110,7 +92,6 @@ def load_positions_tsv_optimized(wav_meta=OVERVIEW_TSV, data_dir=DATA_DIR, save_
         
     df.drop(columns=['day', 'start_time'], errors='ignore', inplace=True)
 
-    print(df['model_name'].unique())
     # Clean up exact duplicate clustering entries caused by duplicate TSV sweeps in directory
     if set(['wav_file', 'channel', 'clip_time', 'model_name', 'cluster_num']).issubset(df.columns):
         df.drop_duplicates(subset=['wav_file', 'channel', 'clip_time', 'model_name', 'cluster_num'], inplace=True)
