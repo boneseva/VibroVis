@@ -5,10 +5,8 @@ import time
 import dash
 from dash import Input, Output, State, html, dcc, ALL
 import pandas as pd
-import hashlib # Added for stable coloring
 
-from callbacks.callbacks_constants import MODEL_DATA_CACHE, initial_df, CLUSTER_COLORS, MANUAL_LABELS_CACHE
-from utils import apply_manual_labels_efficiently
+from callbacks.callbacks_constants import MODEL_DATA_CACHE, initial_df, CLUSTER_COLORS, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK
 
 
 def register_cluster_callbacks(app):
@@ -56,23 +54,6 @@ def register_cluster_callbacks(app):
             except Exception:
                 return []
 
-            # Build cluster → majority-label map (for coloring in manual mode)
-            cluster_to_label: dict = {}
-            if is_manual and MANUAL_LABELS_CACHE and 'cluster_id' in dff.columns:
-                from collections import Counter
-                # Build a lookup: (location, microlocation, file_name, channel, clip_time) → label
-                # Vectorized: create key tuples for each row, map to label, then groupby cluster_id
-                key_cols = ['location', 'microlocation', 'file_name', 'channel', 'clip_time']
-                available = [c for c in key_cols if c in dff.columns]
-                if available:
-                    key_series = dff[available].apply(
-                        lambda row: tuple(row[c] if c in row.index else None for c in key_cols), axis=1
-                    )
-                    label_series = key_series.map(lambda k: MANUAL_LABELS_CACHE.get(k, 'Unlabeled'))
-                    # Majority label per cluster_id
-                    tmp = pd.DataFrame({'cluster_id': dff['cluster_id'], 'label': label_series})
-                    for cid, grp in tmp.groupby('cluster_id'):
-                        cluster_to_label[cid] = Counter(grp['label']).most_common(1)[0][0]
 
             children = []
 
@@ -116,36 +97,17 @@ def register_cluster_callbacks(app):
                     c_idx = c
                 c_label_str = str(c_idx)
 
-                # Determine color
-                if is_manual:
-                    # Color by majority label of this cluster
-                    label_for_color = cluster_to_label.get(c_idx, cluster_to_label.get(c, 'Unlabeled'))
-                    lbl_str_for_color = str(label_for_color)
-                    
-                    if label_for_color == 'Unlabeled':
-                        default_color = '#dddddd'
-                    elif label_colors_data and lbl_str_for_color in label_colors_data:
-                        default_color = label_colors_data[lbl_str_for_color]
-                    else:
-                        hash_val = int(hashlib.md5(lbl_str_for_color.encode('utf-8')).hexdigest(), 16)
-                        default_color = CLUSTER_COLORS[hash_val % len(CLUSTER_COLORS)]
-                else:
-                    try:
-                        default_color = CLUSTER_COLORS[c_idx % len(CLUSTER_COLORS)]
-                    except Exception:
-                        default_color = CLUSTER_COLORS[i % len(CLUSTER_COLORS)]
+                # Determine color — always use CLUSTER_COLORS by cluster index,
+                # regardless of whether we are in cluster or manual label mode.
+                try:
+                    default_color = CLUSTER_COLORS[c_idx % len(CLUSTER_COLORS)]
+                except Exception:
+                    default_color = CLUSTER_COLORS[i % len(CLUSTER_COLORS)]
 
                 color_val = current_colors.get(c_label_str, default_color) if current_colors else default_color
 
-                # Display name: show cluster ID, and in manual mode append its majority label
-                if is_manual:
-                    lbl = cluster_to_label.get(c_idx, cluster_to_label.get(c, 'Unlabeled'))
-                    lbl_str = str(lbl)
-                    # Use custom label name if available
-                    display_lbl = label_names_data.get(lbl_str, lbl_str) if label_names_data else lbl_str
-                    name_val = current_names.get(c_label_str, f"{c_label_str} ({display_lbl})") if current_names else f"{c_label_str} ({display_lbl})"
-                else:
-                    name_val = current_names.get(c_label_str, c_label_str) if current_names else c_label_str
+                # Display name: always show the cluster ID (or a user-set custom name)
+                name_val = current_names.get(c_label_str, c_label_str) if current_names else c_label_str
 
                 is_checked = True
                 # Ensure reliable comparison key (string)
@@ -299,24 +261,18 @@ def register_cluster_callbacks(app):
                               label_colors_data, label_names_data, cluster_stats, model_ready,
                               current_values, current_ids, color_mode):
         try:
-            import hashlib
-            # Get current data to find cluster -> label mapping (for initial color syncing)
-            dff = MODEL_DATA_CACHE.get('df')
-            label_to_color_seed = {}
-            
-            if dff is not None and not dff.empty and 'cluster_id' in dff.columns:
-                # If we have cluster color overrides, use them to seed label colors
-                if cluster_colors_data:
-                    tmp = dff[['cluster_id', 'location', 'microlocation', 'file_name', 'channel', 'clip_time']].drop_duplicates('cluster_id')
-                    tmp = apply_manual_labels_efficiently(tmp)
-                    for _, row in tmp.iterrows():
-                        cid_str = str(row['cluster_id'])
-                        lbl = row['manual_label']
-                        if cid_str in cluster_colors_data and lbl not in label_to_color_seed:
-                            label_to_color_seed[lbl] = cluster_colors_data[cid_str]
-
             # unique_labels from cache
-            unique_labels = sorted(set(MANUAL_LABELS_CACHE.values()))
+            with MANUAL_LABELS_LOCK:
+                cache_keys = list(MANUAL_LABELS_CACHE.iterkeys())
+                unique_labels = []
+                for key in cache_keys:
+                    try:
+                        label = MANUAL_LABELS_CACHE[key]
+                        unique_labels.append(label)
+                    except KeyError:
+                        # Key was deleted during iteration, skip it
+                        continue
+                unique_labels = sorted(set(unique_labels))
             if 'Unlabeled' not in unique_labels:
                 unique_labels.append('Unlabeled')
             
@@ -335,25 +291,27 @@ def register_cluster_callbacks(app):
                         previously_selected.add(str(id_dict['index']))
                     previously_rendered.add(str(id_dict['index']))
 
-            total_clips = 0
-            if cluster_stats and 'total' in cluster_stats:
-                total_clips = cluster_stats['total']
+            labeled_total = 0
+            if cluster_stats and '__labeled_total__' in cluster_stats:
+                labeled_total = int(cluster_stats['__labeled_total__'])
+            no_labels_applied = (labeled_total == 0)
 
             children = []
             for lbl in unique_labels:
                 lbl_str = str(lbl)
                 
                 # Determine color
-                # Priority: 1. label_colors_data, 2. cluster-seed, 3. hash
+                # Priority: 1. label_colors_data (single source of truth), 2. CLUSTER_COLORS sequential
                 if lbl == 'Unlabeled':
-                    default_color = '#999999'
+                    default_color = '#D9D9D9'  # Locked to gray
                 elif label_colors_data and lbl_str in label_colors_data:
                     default_color = label_colors_data[lbl_str]
-                elif lbl in label_to_color_seed:
-                    default_color = label_to_color_seed[lbl]
                 else:
-                    hash_val = int(hashlib.md5(lbl_str.encode('utf-8')).hexdigest(), 16)
-                    default_color = CLUSTER_COLORS[hash_val % len(CLUSTER_COLORS)]
+                    # Fallback: same sequential assignment as sync_label_colors uses.
+                    # Use alphabetical position among non-Unlabeled labels as the index.
+                    non_unlabeled = [l for l in unique_labels if l != 'Unlabeled']
+                    idx = non_unlabeled.index(lbl) if lbl in non_unlabeled else 0
+                    default_color = CLUSTER_COLORS[idx % len(CLUSTER_COLORS)]
 
                 color_val = default_color
 
@@ -368,10 +326,14 @@ def register_cluster_callbacks(app):
 
                 # Percentage
                 percent_str = ""
-                if cluster_stats and lbl_str in cluster_stats and total_clips > 0:
-                    count = cluster_stats[lbl_str]
-                    pct = (count / total_clips) * 100
-                    percent_str = f" ({pct:.1f}%)"
+                count = int(cluster_stats.get(lbl_str, 0)) if cluster_stats else 0
+                if lbl_str != 'Unlabeled' and labeled_total > 0:
+                    pct = (count / labeled_total) * 100
+                    percent_str = f" ({count:,}, {pct:.1f}%)"
+                elif lbl_str == 'Unlabeled' and no_labels_applied:
+                    percent_str = " (No labels applied yet)"
+                elif lbl_str == 'Unlabeled' and count > 0:
+                    percent_str = f" ({count:,})"
 
                 row = html.Div([
                     # Checkbox
@@ -386,8 +348,11 @@ def register_cluster_callbacks(app):
                         id={'type': 'label-color-picker', 'index': lbl},
                         type='color',
                         value=color_val,
-                        style={'width': '40px', 'height': '24px', 'padding': '0', 'border': 'none', 'cursor': 'pointer',
-                               'marginLeft': '5px', 'backgroundColor': 'transparent', 'flexShrink': 0}
+                        disabled=(lbl == 'Unlabeled'),  # Lock Unlabeled color
+                        style={'width': '40px', 'height': '24px', 'padding': '0', 'border': 'none', 
+                               'cursor': 'pointer' if lbl != 'Unlabeled' else 'not-allowed',
+                               'marginLeft': '5px', 'backgroundColor': 'transparent', 'flexShrink': 0,
+                               'opacity': 0.6 if lbl == 'Unlabeled' else 1.0}
                     ),
                     # Name Input
                     dcc.Input(
@@ -416,7 +381,8 @@ def register_cluster_callbacks(app):
             return []
 
     @app.callback(
-        Output('label-name-store', 'data'),
+        [Output('label-name-store', 'data'),
+         Output('manual-labels-store', 'data', allow_duplicate=True)],
         Input({'type': 'label-name-input', 'index': ALL}, 'value'),
         State({'type': 'label-name-input', 'index': ALL}, 'id'),
         State('label-name-store', 'data'),
@@ -425,26 +391,147 @@ def register_cluster_callbacks(app):
     def sync_label_names(new_names, ids, current_store):
         if current_store is None:
             current_store = {}
-        updated_store = current_store.copy()
+
+        triggered_id = dash.callback_context.triggered_id
+        if not isinstance(triggered_id, dict) or triggered_id.get('type') != 'label-name-input':
+            return dash.no_update, dash.no_update
+
+        old_label_name = str(triggered_id.get('index'))
+        if old_label_name == 'Unlabeled':
+            # Protect origin category from rename/delete.
+            return dash.no_update, dash.no_update
+
+        # Resolve the edited value for the triggered label input.
+        new_label_name = None
         for name_val, id_dict in zip(new_names, ids):
-            idx_str = str(id_dict['index'])
-            if name_val and name_val.strip() != "" and name_val != idx_str:
-                updated_store[idx_str] = name_val
+            if str(id_dict.get('index')) == old_label_name:
+                new_label_name = (name_val or '').strip()
+                break
+
+        if new_label_name is None:
+            return dash.no_update, dash.no_update
+
+        updated_store = current_store.copy()
+
+        # Keep display-name store behavior for non-rename custom names.
+        if new_label_name and new_label_name != old_label_name:
+            updated_store[old_label_name] = new_label_name
+        else:
+            updated_store.pop(old_label_name, None)
+
+        # Empty or unchanged text does not perform cache relabel operations.
+        if not new_label_name or new_label_name == old_label_name:
+            return updated_store, dash.no_update
+
+        changed = False
+        cache_updates = []  # Collect updates for batch operation
+        cache_deletions = []  # Collect deletions for batch operation
+        
+        for cache_key in list(MANUAL_LABELS_CACHE):
+            cache_label = MANUAL_LABELS_CACHE[cache_key]
+            if cache_label != old_label_name:
+                continue
+
+            changed = True
+            if new_label_name == 'Unlabeled':
+                # Delete label assignment by removing per-second keys.
+                cache_deletions.append(cache_key)
             else:
-                if idx_str in updated_store:
-                    del updated_store[idx_str]
-        return updated_store
+                # Rename/merge (case-sensitive by design).
+                cache_updates.append((cache_key, new_label_name))
+
+        if not changed:
+            return updated_store, dash.no_update
+
+        # Apply cache changes with thread-safe operations
+        with MANUAL_LABELS_LOCK:
+            # Apply updates
+            for cache_key, new_label in cache_updates:
+                MANUAL_LABELS_CACHE[cache_key] = new_label
+                try:
+                    with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
+                        _log.write(f"{time.time()}\tclusters_rename_update\t{cache_key}\t{new_label}\n")
+                except Exception:
+                    pass
+            
+            # Apply deletions
+            for key in cache_deletions:
+                if key in MANUAL_LABELS_CACHE:
+                    try:
+                        del MANUAL_LABELS_CACHE[key]
+                        with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
+                            _log.write(f"{time.time()}\tclusters_rename_delete\t{key}\tDELETED\n")
+                    except Exception:
+                        pass
+
+        # Timestamp token is enough to trigger dependent callbacks.
+        return updated_store, str(time.time())
 
     @app.callback(
         Output('label-color-store', 'data'),
-        Input({'type': 'label-color-picker', 'index': ALL}, 'value'),
-        State({'type': 'label-color-picker', 'index': ALL}, 'id'),
+        [Input({'type': 'label-color-picker', 'index': ALL}, 'value'),
+         Input('manual-labels-store', 'data'),
+         Input('model-data-ready-signal', 'data')],
+        [State({'type': 'label-color-picker', 'index': ALL}, 'id'),
+         State('label-color-store', 'data')],
         prevent_initial_call=True
     )
-    def sync_label_colors(colors, ids):
-        color_map = {}
-        for color, id_dict in zip(colors, ids):
-            idx = id_dict['index']
-            color_map[str(idx)] = color
+    def sync_label_colors(colors, manual_labels_trigger, model_ready, ids, current_color_store):
+        """
+        Single Source of Truth for label colors.
+        Auto-assigns colors sequentially from CLUSTER_COLORS (same palette and order as
+        clusters: first label created → CLUSTER_COLORS[0], second → CLUSTER_COLORS[1], …).
+        'Unlabeled' is always locked to gray (#D9D9D9).
+        Fires on startup (model-data-ready-signal) so pre-existing labels get colors.
+        """
+        color_map = current_color_store.copy() if current_color_store else {}
+
+        # Always lock Unlabeled to gray
+        color_map['Unlabeled'] = '#D9D9D9'
+
+        # Get all current labels from cache
+        with MANUAL_LABELS_LOCK:
+            cache_keys = list(MANUAL_LABELS_CACHE.iterkeys())
+            all_labels = []
+            for key in cache_keys:
+                try:
+                    label = MANUAL_LABELS_CACHE[key]
+                    all_labels.append(label)
+                except KeyError:
+                    continue
+            all_labels = sorted(set(l for l in all_labels if l and l != 'Unlabeled'))
+
+        # Track which palette colors are already claimed so new labels get
+        # the next UNUSED color (no duplicates, same sequential walk as clusters).
+        already_assigned = {
+            v for k, v in color_map.items()
+            if k != 'Unlabeled' and v != '#D9D9D9'
+        }
+
+        for label in all_labels:
+            label_str = str(label)
+            if label_str in color_map:
+                continue  # already has a color — keep it
+            # Pick the next CLUSTER_COLORS entry not yet used by another label
+            assigned = False
+            for candidate in CLUSTER_COLORS:
+                if candidate != '#D9D9D9' and candidate not in already_assigned:
+                    color_map[label_str] = candidate
+                    already_assigned.add(candidate)
+                    assigned = True
+                    break
+            if not assigned:
+                # All palette colors used → wrap around
+                color_map[label_str] = CLUSTER_COLORS[len(already_assigned) % len(CLUSTER_COLORS)]
+
+        # Handle user color-picker changes (overrides auto-assignment)
+        if colors and ids:
+            for color, id_dict in zip(colors, ids):
+                label_str = str(id_dict['index'])
+                if label_str != 'Unlabeled':
+                    color_map[label_str] = color
+                else:
+                    color_map[label_str] = '#D9D9D9'
+
         return color_map
 

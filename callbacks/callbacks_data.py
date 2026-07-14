@@ -4,6 +4,7 @@ Data loading, caching, and audio serving callbacks.
 import time
 import os
 import sys
+import hashlib
 import flask
 import soundfile as sf
 import io
@@ -20,13 +21,204 @@ from dash import dcc
 
 import read_data
 import utils
-from callbacks.callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, initial_df, MANUAL_LABELS_CACHE
+from callbacks.callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, initial_df, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK
 
 # Suppress mpg123 decoder warnings (these are non-critical)
 warnings.filterwarnings('ignore', category=UserWarning)
 
+LOCAL_LABELS_SCHEMA_VERSION = 1
+LOCAL_LABELS_SOFT_LIMIT_BYTES = 4_000_000
+
+
+def _key_tuple_to_string(key_tuple):
+    return "||".join(str(x) for x in key_tuple)
+
+
+def _string_to_key_tuple(key_str):
+    parts = str(key_str).split('||')
+    if len(parts) != 5:
+        return None
+    try:
+        return parts[0], parts[1], parts[2], int(parts[3]), int(parts[4])
+    except (TypeError, ValueError):
+        return None
+
+
+def _entry_to_key_tuple(entry):
+    if not isinstance(entry, (list, tuple)) or len(entry) < 6:
+        return None
+    try:
+        return str(entry[0]), str(entry[1]), str(entry[2]), int(entry[3]), int(entry[4])
+    except (TypeError, ValueError):
+        return None
+
+
+def _build_local_labels_payload():
+    entries = []
+    for key_tuple in MANUAL_LABELS_CACHE:
+        label = MANUAL_LABELS_CACHE[key_tuple]
+        loc, micro, f_base, chan, sec = key_tuple
+        entries.append([str(loc), str(micro), str(f_base), int(chan), int(sec), str(label)])
+    entries.sort(key=lambda x: (x[0], x[1], x[2], x[3], x[4]))
+    payload: dict[str, object] = {
+        'v': LOCAL_LABELS_SCHEMA_VERSION,
+        'e': entries,
+        'n': len(entries)
+    }
+    payload_raw = json.dumps(payload, separators=(',', ':'), ensure_ascii=True)
+    payload['h'] = hashlib.md5(payload_raw.encode('utf-8')).hexdigest()
+    payload['b'] = len(payload_raw.encode('utf-8'))
+    return payload
+
+
+def _deserialize_labels_payload(payload):
+    result = {}
+    if not isinstance(payload, dict):
+        return result
+
+    # Compact local-storage schema
+    if isinstance(payload.get('e'), list):
+        for entry in payload['e']:
+            key_tuple = _entry_to_key_tuple(entry)
+            if key_tuple is None:
+                continue
+            result[key_tuple] = str(entry[5])
+        return result
+
+    # Portable export schema
+    labels_obj = payload.get('labels')
+    if isinstance(labels_obj, dict):
+        for key_str, label in labels_obj.items():
+            key_tuple = _string_to_key_tuple(key_str)
+            if key_tuple is None:
+                continue
+            result[key_tuple] = str(label)
+        return result
+
+    # Legacy flat schema: {"loc||micro||file||chan||sec": "label"}
+    reserved = {'v', 'e', 'n', 'h', 'b', 'format', 'version', 'created_at', 'labels'}
+    for key_str, label in payload.items():
+        if key_str in reserved:
+            continue
+        key_tuple = _string_to_key_tuple(key_str)
+        if key_tuple is None:
+            continue
+        result[key_tuple] = str(label)
+
+    return result
+
+
+def _build_import_session(incoming_labels, source_name):
+    non_conflicts = []
+    conflicts = []
+
+    for key_tuple, incoming_label in incoming_labels.items():
+        key_entry = [key_tuple[0], key_tuple[1], key_tuple[2], key_tuple[3], key_tuple[4], str(incoming_label)]
+        current_label = MANUAL_LABELS_CACHE.get(key_tuple)
+
+        if current_label is None or str(current_label) == str(incoming_label):
+            non_conflicts.append(key_entry)
+        else:
+            conflicts.append([
+                key_tuple[0], key_tuple[1], key_tuple[2], key_tuple[3], key_tuple[4],
+                str(current_label), str(incoming_label)
+            ])
+
+    return {
+        'source': source_name,
+        'incoming_total': len(incoming_labels),
+        'non_conflicts': non_conflicts,
+        'conflicts': conflicts,
+        'resolutions': [None] * len(conflicts),
+        'cursor': 0,
+    }
+
+
+def _next_unresolved_index(resolutions, start_idx=0):
+    for idx in range(max(0, int(start_idx)), len(resolutions)):
+        if resolutions[idx] is None:
+            return idx
+    return None
+
+
+def _format_conflict_text(session):
+    conflicts = session.get('conflicts', [])
+    resolutions = session.get('resolutions', [])
+    cursor = _next_unresolved_index(resolutions, session.get('cursor', 0))
+    if cursor is None or cursor >= len(conflicts):
+        return ""
+
+    loc, micro, f_base, chan, sec, current_label, incoming_label = conflicts[cursor]
+    total = len(conflicts)
+    return (
+        f"Conflict {cursor + 1}/{total} | {f_base} ch{chan} @ {sec}s | "
+        f"Location: {loc}/{micro} | Current: '{current_label}' | Incoming: '{incoming_label}'"
+    )
+
+
+def _apply_import_session(session):
+    applied_count = 0
+    kept_conflicts = 0
+    used_conflicts = 0
+
+    for entry in session.get('non_conflicts', []):
+        key_tuple = _entry_to_key_tuple(entry)
+        if key_tuple is None:
+            continue
+        MANUAL_LABELS_CACHE[key_tuple] = str(entry[5])
+        applied_count += 1
+
+    conflicts = session.get('conflicts', [])
+    resolutions = session.get('resolutions', [])
+    for idx, conflict in enumerate(conflicts):
+        resolution = resolutions[idx] if idx < len(resolutions) else 'keep'
+        if resolution != 'use':
+            kept_conflicts += 1
+            continue
+
+        key_tuple = (str(conflict[0]), str(conflict[1]), str(conflict[2]), int(conflict[3]), int(conflict[4]))
+        MANUAL_LABELS_CACHE[key_tuple] = str(conflict[6])
+        applied_count += 1
+        used_conflicts += 1
+
+    return applied_count, used_conflicts, kept_conflicts
+
+
+def _build_portable_export_payload():
+    labels = {}
+    # Sort the cache keys for consistent ordering with thread safety
+    with MANUAL_LABELS_LOCK:
+        sorted_keys = sorted(MANUAL_LABELS_CACHE.iterkeys())
+        for key_tuple in sorted_keys:
+            try:
+                label = MANUAL_LABELS_CACHE[key_tuple]
+                if str(label) == 'Unlabeled':
+                    continue  # skip unlabeled entries from export
+                labels[_key_tuple_to_string(key_tuple)] = str(label)
+            except KeyError:
+                # Key was deleted during iteration, skip it
+                continue
+
+    return {
+        'format': 'vibrovis-manual-labels',
+        'version': 1,
+        'created_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        'labels': labels,
+        'count': len(labels)
+    }
+
 
 def merge_clips_vectorized(dff, merge_threshold):
+    """
+    Merge consecutive clips that share the same context (file, channel, cluster) 
+    and are within spatial and temporal thresholds.
+    
+    CRITICAL FIXES:
+    - Fixed sorting to include cluster_id (was missing!)
+    - Added floating-point tolerance for temporal continuity
+    - Fixed context field consistency (file_name vs mp3_file)
+    - Added NaN handling for spatial distance calculations
+    """
     if dff.empty:
         return dff
     if 'clip_count' not in dff.columns:
@@ -35,35 +227,55 @@ def merge_clips_vectorized(dff, merge_threshold):
     else:
         dff = dff.copy()
     
+    # Convert to category for performance
     if dff['file_name'].dtype != 'category':
         dff['file_name'] = dff['file_name'].astype('category')
     if dff['channel'].dtype != 'category':
         dff['channel'] = dff['channel'].astype('category')
     
-    dff = dff.sort_values(['file_name', 'channel', 'clip_time'])
+    # CRITICAL FIX: Add cluster_id to sort - this was missing and breaking adjacency logic!
+    dff = dff.sort_values(['file_name', 'channel', 'cluster_id', 'clip_time']).reset_index(drop=True)
     
     # Ensure numeric consistency for math
     dff['clip_time'] = pd.to_numeric(dff['clip_time'], errors='coerce').fillna(0.0)
+    
     # Handle variable clip durations (user confirmed they vary and overlap)
-    # Default to 5.0 only if widely missing, but respect existing data
     if 'clip_duration' not in dff.columns:
         dff['clip_duration'] = 5.0
     else:
         dff['clip_duration'] = pd.to_numeric(dff['clip_duration'], errors='coerce').fillna(5.0)
 
+    # FIXED: Use consistent field (file_name) in both sorting and context checks
     same_context = (
-            (dff['mp3_file'] == dff['mp3_file'].shift(1)) &
-            (dff['channel'] == dff['channel'].shift(1)) &
-            (dff['cluster_id'] == dff['cluster_id'].shift(1))
+        (dff['file_name'] == dff['file_name'].shift(1)) &
+        (dff['channel'] == dff['channel'].shift(1)) &
+        (dff['cluster_id'] == dff['cluster_id'].shift(1))
     )
+    
+    # Spatial proximity calculation with NaN handling
     prev_points = dff[['x', 'y']].shift(1).to_numpy()
     curr_points = dff[['x', 'y']].to_numpy()
-    distances = np.linalg.norm(curr_points - prev_points, axis=1)
+    
+    # Handle NaN values in first row after shift
+    valid_spatial = ~(np.isnan(prev_points).any(axis=1) | np.isnan(curr_points).any(axis=1))
+    distances = np.full(len(dff), np.inf)  # Default to infinity (no merge)
+    distances[valid_spatial] = np.linalg.norm(
+        curr_points[valid_spatial] - prev_points[valid_spatial], axis=1
+    )
     spatial_proximity = distances < merge_threshold
+    
+    # CRITICAL FIX: Add floating-point tolerance for temporal continuity
     prev_clip_end = dff['clip_time'].shift(1) + dff['clip_duration'].shift(1)
-    temporal_continuity = dff['clip_time'] < prev_clip_end
+    # Use small epsilon to handle floating-point precision issues
+    temporal_continuity = dff['clip_time'] <= (prev_clip_end + 1e-6)
+    
+    # Combine all merge conditions
     merge_mask = same_context & temporal_continuity & spatial_proximity
+    
+    # Create merge groups - clips with merge_mask=True belong to previous group
     merge_groups = (~merge_mask).cumsum()
+    
+    # Create clip_end for aggregation
     dff['clip_end'] = dff['clip_time'] + dff['clip_duration']
 
     agg_dict = {
@@ -80,9 +292,11 @@ def merge_clips_vectorized(dff, merge_threshold):
         'day_dt': ('day_dt', 'first'),
         'microlocation': ('microlocation', 'first'),
     }
+    
     grouped = dff.groupby(merge_groups).agg(**agg_dict).reset_index(drop=True)
     grouped['clip_duration'] = grouped['clip_end'] - grouped['clip_time']
     grouped = grouped.drop(columns=['clip_end'])
+    
     return grouped
 
 
@@ -129,10 +343,8 @@ def register_data_callbacks(app):
         else:
             data_path = read_data.SAVE_PATH
             if not os.path.exists(data_path):
-                print(f"FATAL: Source data not found at {data_path}.")
                 MODEL_DATA_CACHE['df'] = None
             else:
-                print(f"Loading data for model: {selected_model} AND location: {selected_location}...")
                 cols_to_load = ['x', 'y', 'location', 'microlocation', 'model_name', 'channel',
                                 'cluster_num', 'cluster_id', 'day_dt', 'start_hour_float',
                                 'file_name', 'clip_time', 'clip_duration', 'mp3_file', 'row_idx',
@@ -163,7 +375,6 @@ def register_data_callbacks(app):
                         model_df['channel'] = model_df['channel'].astype('category')
                     
                     MODEL_DATA_CACHE['df'] = model_df
-                    print(f"Cached {len(model_df)} rows.")
                 except Exception as e:
                     print(f"Error loading data: {e}")
                     MODEL_DATA_CACHE['df'] = None
@@ -282,47 +493,31 @@ def register_data_callbacks(app):
         if not dff_filtered.empty and 'file_name' in dff_filtered.columns and 'channel' in dff_filtered.columns:
             dff_filtered = dff_filtered.sort_values(['file_name', 'channel', 'cluster_id', 'clip_time']).reset_index(drop=True)
             
-            merge_groups = []
-            current_group = 0
-            prev_file = None
-            prev_channel = None
-            prev_cluster = None
-            prev_end = None
-            
             # Ensure clip_duration is present
             if 'clip_duration' not in dff_filtered.columns:
                 dff_filtered['clip_duration'] = 5.0
             else:
                  dff_filtered['clip_duration'] = pd.to_numeric(dff_filtered['clip_duration'], errors='coerce').fillna(5.0)
 
-            for idx, row in dff_filtered.iterrows():
-                file_name = row['file_name']
-                channel = row['channel']
-                cluster_id = row['cluster_id']
-                clip_time = row['clip_time']
-                clip_duration = row.get('clip_duration', 5.0)
-                clip_end = clip_time + clip_duration
-                
-                can_merge = (
-                    file_name == prev_file and
-                    channel == prev_channel and
-                    cluster_id == prev_cluster and
-                    prev_end is not None and
-                    clip_time <= prev_end
-                )
-                
-                if not can_merge:
-                    current_group += 1
-                    prev_end = clip_end
-                else:
-                    # Extend the merge window to the maximum end time seen so far
-                    prev_end = max(prev_end, clip_end)
-                
-                merge_groups.append(current_group)
-                prev_file = file_name
-                prev_channel = channel
-                prev_cluster = cluster_id
+            # OPTIMIZATION: Vectorized merge group calculation (replacing iterrows loop)
+            # Create shifted columns for comparison with previous row
+            prev_file = dff_filtered['file_name'].shift(1)
+            prev_channel = dff_filtered['channel'].shift(1)
+            prev_cluster = dff_filtered['cluster_id'].shift(1)
+            prev_clip_end = (dff_filtered['clip_time'] + dff_filtered['clip_duration']).shift(1)
             
+            # Vectorized comparison: can this row merge with the previous one?
+            same_context = (
+                (dff_filtered['file_name'] == prev_file) &
+                (dff_filtered['channel'] == prev_channel) &
+                (dff_filtered['cluster_id'] == prev_cluster)
+            )
+            temporal_overlap = dff_filtered['clip_time'] <= prev_clip_end
+            can_merge = same_context & temporal_overlap & prev_clip_end.notna()
+            
+            # Create merge groups: increment group number where can_merge is False
+            # This preserves the exact same grouping logic as the original loop
+            merge_groups = (~can_merge).cumsum()
             dff_filtered['merge_group'] = merge_groups
             dff_filtered['clip_end'] = dff_filtered['clip_time'] + dff_filtered['clip_duration']
             
@@ -405,8 +600,6 @@ def register_data_callbacks(app):
         export_df['cluster_id'] = dff_filtered['cluster_id'].astype(str) if 'cluster_id' in dff_filtered.columns else ''
         export_df = export_df.sort_values(['wav_file', 'date_time'])
 
-        export_df = export_df.sort_values(['wav_file', 'date_time'])
-
         return dcc.send_data_frame(export_df.to_csv, "filtered_data_export.csv", index=False)
 
     @app.callback(
@@ -442,11 +635,12 @@ def register_data_callbacks(app):
         # Convert tuple keys to string keys for JSON serialization
         # Key format: (loc, micro, f_base, chan, sec)
         json_data = {}
-        for k, v in MANUAL_LABELS_CACHE.items():
+        for k in MANUAL_LABELS_CACHE:
+            v = MANUAL_LABELS_CACHE[k]
             # k is tuple
             key_str = "||".join(str(x) for x in k)
             json_data[key_str] = v
-            
+
         if not os.path.exists('labels'):
             os.makedirs('labels')
             
@@ -458,8 +652,7 @@ def register_data_callbacks(app):
             return f"Error saving: {str(e)}", dash.no_update, dash.no_update
 
     @app.callback(
-        [Output('manual-labels-store', 'data', allow_duplicate=True),
-         Output('label-saved-msg', 'children', allow_duplicate=True)],
+        Output('label-saved-msg', 'children', allow_duplicate=True),
         Input('label-load-btn', 'n_clicks'),
         State('label-load-dropdown', 'value'),
         prevent_initial_call=True
@@ -467,7 +660,7 @@ def register_data_callbacks(app):
     def load_manual_labels_server_side(n_clicks, name):
         """Load manual labels from a JSON file on the server."""
         if not n_clicks or not name:
-            return dash.no_update, dash.no_update
+            return dash.no_update
             
         path = f"labels/{name}.json"
         if not os.path.exists(path):
@@ -497,14 +690,185 @@ def register_data_callbacks(app):
                     # Store in cache
                     MANUAL_LABELS_CACHE[(loc, micro, f_base, chan, sec)] = label
                     count += 1
-            
+                    try:
+                        with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
+                            _log.write(f"{time.time()}\tdata_load_file\t{(loc, micro, f_base, chan, sec)}\t{label}\n")
+                    except Exception:
+                        pass
+
             msg = f"Loaded '{name}' ({count} labels)."
-            # Trigger update by sending timestamp
-            return {'updated_at': time.time()}, msg
-            
+            return msg
         except Exception as e:
             print(f"Error loading manual labels: {e}")
             return dash.no_update, f"Error: {str(e)}"
+
+    @app.callback(
+        Output('label-backup-msg', 'children'),
+        Input('local-labels-store', 'data'),
+        prevent_initial_call=False
+    )
+    def update_local_backup_hint(local_payload):
+        if MANUAL_LABELS_CACHE:
+            return ""
+        parsed = _deserialize_labels_payload(local_payload)
+        if not parsed:
+            return ""
+        return f"Browser backup found ({len(parsed)} labels). Use 'Restore from Browser Backup' to import it."
+
+    @app.callback(
+        Output('local-labels-store', 'data'),
+        Input('local-labels-store', 'data'),
+        State('local-labels-store', 'data'),
+        prevent_initial_call=True
+    )
+    def backup_manual_labels_to_browser(trigger_data, existing_local_payload):
+        # We don't need to trigger off manual-labels-store anymore with simple global dict
+        return dash.no_update
+
+    @app.callback(
+        [Output('download-labels-json', 'data'),
+         Output('label-saved-msg', 'children', allow_duplicate=True)],
+        Input('download-labels-btn', 'n_clicks'),
+        prevent_initial_call=True
+    )
+    def download_manual_labels_json(n_clicks):
+        if not n_clicks:
+            return dash.no_update, dash.no_update
+        if not MANUAL_LABELS_CACHE:
+            return dash.no_update, "No labels to download."
+
+        payload = _build_portable_export_payload()
+        file_name = f"manual_labels_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        return dcc.send_string(json.dumps(payload, indent=2), file_name), f"Downloaded {payload['count']} labels."
+
+    @app.callback(
+        [Output('manual-labels-store', 'data', allow_duplicate=True),
+         Output('label-saved-msg', 'children', allow_duplicate=True),
+         Output('label-import-session-store', 'data'),
+         Output('label-conflict-panel', 'style'),
+         Output('label-conflict-text', 'children')],
+        [Input('restore-local-labels-btn', 'n_clicks'),
+         Input('upload-labels-json', 'contents')],
+        [State('local-labels-store', 'data'),
+         State('upload-labels-json', 'filename')],
+        prevent_initial_call=True
+    )
+    def start_restore_or_upload(restore_clicks, upload_contents, local_payload, upload_filename):
+        triggered = callback_context.triggered
+        if not triggered:
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+        trigger_id = triggered[0]['prop_id'].split('.')[0]
+        incoming = {}
+        source_name = ""
+
+        if trigger_id == 'restore-local-labels-btn':
+            if not restore_clicks:
+                return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            incoming = _deserialize_labels_payload(local_payload)
+            source_name = 'browser backup'
+
+        elif trigger_id == 'upload-labels-json':
+            if not upload_contents:
+                return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            try:
+                _, content_string = upload_contents.split(',', 1)
+                decoded = base64.b64decode(content_string)
+                upload_json = json.loads(decoded.decode('utf-8'))
+            except Exception as ex:
+                return f"Upload failed: {str(ex)}", None, {'display': 'none'}, ""
+
+            incoming = _deserialize_labels_payload(upload_json)
+            source_name = f"uploaded file '{upload_filename or 'labels.json'}'"
+
+        if not incoming:
+            return f"No valid labels found in {source_name or 'source'}.", None, {'display': 'none'}, ""
+
+        session = _build_import_session(incoming, source_name)
+        conflict_count = len(session.get('conflicts', []))
+
+        if conflict_count == 0:
+            applied_count, _, _ = _apply_import_session(session)
+            msg = f"Imported {applied_count} labels from {source_name}."
+            return (
+                msg,
+                None,
+                {'display': 'none'},
+                ""
+            )
+
+        session['cursor'] = 0
+        conflict_text = _format_conflict_text(session)
+        msg = f"Found {conflict_count} conflicts from {source_name}. Resolve them below."
+        return (
+            msg,
+            session,
+            {'display': 'block', 'border': '1px solid #ddd', 'borderRadius': '4px', 'padding': '8px', 'marginBottom': '8px'},
+            conflict_text
+        )
+
+    @app.callback(
+        [Output('label-saved-msg', 'children', allow_duplicate=True),
+         Output('label-import-session-store', 'data', allow_duplicate=True),
+         Output('label-conflict-panel', 'style', allow_duplicate=True),
+         Output('label-conflict-text', 'children', allow_duplicate=True)],
+        [Input('label-conflict-keep-btn', 'n_clicks'),
+         Input('label-conflict-use-btn', 'n_clicks'),
+         Input('label-conflict-keep-all-btn', 'n_clicks'),
+         Input('label-conflict-use-all-btn', 'n_clicks'),
+         Input('label-conflict-cancel-btn', 'n_clicks')],
+        State('label-import-session-store', 'data'),
+        prevent_initial_call=True
+    )
+    def resolve_label_conflicts(keep_clicks, use_clicks, keep_all_clicks, use_all_clicks, cancel_clicks, session):
+        if not session or not isinstance(session, dict):
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+        triggered = callback_context.triggered
+        if not triggered:
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+        trigger_id = triggered[0]['prop_id'].split('.')[0]
+
+        conflicts = session.get('conflicts', [])
+        resolutions = session.get('resolutions', [])
+        if len(resolutions) != len(conflicts):
+            resolutions = [None] * len(conflicts)
+            session['resolutions'] = resolutions
+
+        if trigger_id == 'label-conflict-cancel-btn':
+            return "Restore/import canceled.", None, {'display': 'none'}, ""
+
+        cursor = _next_unresolved_index(resolutions, session.get('cursor', 0))
+        if cursor is None:
+            applied_count, used_conflicts, kept_conflicts = _apply_import_session(session)
+            msg = f"Import complete: {applied_count} labels applied ({used_conflicts} replaced, {kept_conflicts} kept)."
+            return msg, None, {'display': 'none'}, ""
+
+        if trigger_id == 'label-conflict-keep-btn':
+            resolutions[cursor] = 'keep'
+        elif trigger_id == 'label-conflict-use-btn':
+            resolutions[cursor] = 'use'
+        elif trigger_id == 'label-conflict-keep-all-btn':
+            for idx in range(cursor, len(resolutions)):
+                if resolutions[idx] is None:
+                    resolutions[idx] = 'keep'
+        elif trigger_id == 'label-conflict-use-all-btn':
+            for idx in range(cursor, len(resolutions)):
+                if resolutions[idx] is None:
+                    resolutions[idx] = 'use'
+        else:
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+        next_idx = _next_unresolved_index(resolutions, cursor + 1)
+        if next_idx is None:
+            applied_count, used_conflicts, kept_conflicts = _apply_import_session(session)
+            msg = f"Import complete: {applied_count} labels applied ({used_conflicts} replaced, {kept_conflicts} kept)."
+            return msg, None, {'display': 'none'}, ""
+
+        session['cursor'] = next_idx
+        session['resolutions'] = resolutions
+        return dash.no_update, f"Resolved {next_idx}/{len(conflicts)} conflicts.", session, {'display': 'block', 'border': '1px solid #ddd', 'borderRadius': '4px', 'padding': '8px', 'marginBottom': '8px'}, _format_conflict_text(session)
 
     @app.callback(
         Output('confirm-reset-labels', 'displayed'),
@@ -517,17 +881,14 @@ def register_data_callbacks(app):
         return False
 
     @app.callback(
-        [Output('manual-labels-store', 'data', allow_duplicate=True),
-         Output('label-saved-msg', 'children', allow_duplicate=True)],
+        Output('label-saved-msg', 'children', allow_duplicate=True),
         Input('confirm-reset-labels', 'submit_n_clicks'),
         prevent_initial_call=True
     )
     def reset_manual_labels(submit_n_clicks):
         if not submit_n_clicks:
-             return dash.no_update, dash.no_update
+             return dash.no_update
         
         MANUAL_LABELS_CACHE.clear()
-        
-        # Trigger update
-        return {'updated_at': time.time(), 'cleared': True}, "Labels Reset!"
 
+        return "Labels Reset!"

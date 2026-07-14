@@ -11,5 +11,7 @@ numba
 soundfile
 
 tqdm
+diskcache
 
 gunicorn
+flask-compress

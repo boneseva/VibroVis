@@ -1,57 +1,65 @@
 # Updated utils.py
-# (This file now has a memory-efficient audio loader)
+# Optimized for Random Access - Selective segment loading without full-file caching
 
 import soundfile as sf
 import numpy as np
 import os
 from scipy.signal import spectrogram
-import math
 from collections import Counter
 import read_data  # Import read_data to access DATA_DIR
 import librosa  # Make sure librosa is imported
-from callbacks.callbacks_constants import MANUAL_LABELS_CACHE
 
 
-# --- *** NEW, MEMORY-EFFICIENT FUNCTION *** ---
+# --- *** OPTIMIZED SELECTIVE AUDIO LOADING *** ---
 def load_audio_segment(mp3_file_relative_path, clip_time, clip_duration, channel=0, padding_s=1.0):
     """
-    Loads a specific audio segment from a file *without* loading the
-    entire file into memory.
+    Loads a specific audio segment using optimized selective loading.
+    Perfect for random access across many different files.
+    Uses soundfile/librosa offset parameters to skip file decoding.
     """
     mp3_file_relative_path = mp3_file_relative_path.replace("\\", "/")
     full_path = os.path.join(read_data.DATA_DIR, mp3_file_relative_path)
+    
     if not os.path.exists(full_path):
         print(f"Warning: Audio file not found at {full_path}")
         return None, None
 
     try:
-        # Suppress stderr from mpg123 decoder (redirects to devnull)
-        with open(os.devnull, 'w') as devnull:
-            # Note: direct C-level stderr redirection requires more complex handling (os.dup2)
-            # but this might catch Python-level propagated errors or if library uses sys.stderr
-            # For pure C libraries like libmpg123, we often need C-level redirection.
-            # However, we'll restore the previous user attempt first.
-            from contextlib import redirect_stderr
-            with redirect_stderr(devnull):
-                 # 1. Get file info without loading data
-                info = sf.info(full_path)
-                samplerate = info.samplerate
-                total_frames = info.frames
-                num_channels = info.channels
+        # Suppress stderr from mpg123 decoder to prevent console clutter
+        import sys
+        import contextlib
+        
+        @contextlib.contextmanager
+        def suppress_stderr():
+            with open(os.devnull, "w") as devnull:
+                old_stderr = sys.stderr
+                sys.stderr = devnull
+                try:
+                    yield
+                finally:
+                    sys.stderr = old_stderr
 
-                # 2. Calculate start and end samples with padding
-                start_sample = int(max(0, (clip_time - padding_s)) * samplerate)
-                end_sample = int(min(total_frames, (clip_time + clip_duration + padding_s) * samplerate))
+        with suppress_stderr():
+            # OPTIMIZED: Get file info without loading data
+            info = sf.info(full_path)
+            samplerate = info.samplerate
+            total_frames = info.frames
+            num_channels = info.channels
 
-                # 3. Read *only* the required segment from disk
-                # We read as float32 for consistency with librosa
-                segment, _ = sf.read(full_path, start=start_sample, stop=end_sample, dtype='float32')
+            # Calculate start and end samples with padding
+            start_sample = int(max(0, (clip_time - padding_s) * samplerate))
+            end_sample = int(min(total_frames, (clip_time + clip_duration + padding_s) * samplerate))
 
-        # 4. Handle mono vs multi-channel *after* loading the small segment
+            # EFFICIENCY TWEAK: Use start/stop parameters for selective loading
+            # This allows the C-engine to skip decoding most of the file
+            segment, _ = sf.read(full_path, start=start_sample, stop=end_sample, dtype='float32')
+
+        # Handle mono vs multi-channel after loading the small segment
         if segment.ndim > 1:
             if channel < num_channels:
                 channel_data = segment[:, channel]
-            else:  # Fallback to first channel
+            else:
+                # Fallback to first channel
                 channel_data = segment[:, 0]
         else:
             channel_data = segment
@@ -59,38 +67,31 @@ def load_audio_segment(mp3_file_relative_path, clip_time, clip_duration, channel
         return channel_data, samplerate
 
     except Exception as e:
-        print(f"Error loading with soundfile: {e}. Trying librosa...")
+        # Fallback to librosa with selective loading
         try:
-             # Fallback to librosa (loads entire file, slower but more robust)
-             # librosa.load returns (y, sr)
-             # We load with original sr to match behavior, or just let librosa decide
-             y, sr = librosa.load(full_path, sr=None) 
-             
-             # Calculate samples
-             start_sample = int(max(0, (clip_time - padding_s)) * sr)
-             end_sample = int(min(len(y), (clip_time + clip_duration + padding_s) * sr))
-             
-             segment = y[start_sample:end_sample]
-             
-             # Handle multi-channel if librosa loaded it (librosa usually loads mono by default unless mono=False)
-             # Let's force load as mono for simplicity in fallback, or handle channels if needed.
-             # VibroVis seems to rely on channels, so let's try reading multi-channel.
-             y_multi, sr_multi = librosa.load(full_path, sr=None, mono=False)
-             
-             if y_multi.ndim > 1:
-                  if channel < y_multi.shape[0]:
-                       segment = y_multi[channel, start_sample:end_sample]
-                  else:
-                       segment = y_multi[0, start_sample:end_sample]
-             else:
-                  segment = y_multi[start_sample:end_sample]
-                  
-             return segment, sr_multi
-
+            with suppress_stderr():
+                # Calculate offset and duration for librosa
+                offset_seconds = max(0, clip_time - padding_s)
+                duration_seconds = clip_duration + (2 * padding_s)
+                
+                # EFFICIENCY TWEAK: Use offset and duration for selective loading
+                y, sr = librosa.load(full_path, sr=None, offset=offset_seconds, 
+                                   duration=duration_seconds, mono=False)
+                
+                # Handle multi-channel selection
+                if y.ndim > 1:
+                    if channel < y.shape[0]:
+                        segment = y[channel, :]
+                    else:
+                        segment = y[0, :]  # Fallback to first channel
+                else:
+                    segment = y
+                    
+                return segment, sr
+                
         except Exception as e2:
-             print(f"Error loading audio segment from {full_path} with librosa: {e2}")
-             return None, None
-# --- *** END OF NEW FUNCTION *** ---
+            print(f"Error loading audio segment from {full_path}: {e2}")
+            return None, None
 
 
 def compute_spectrogram(segment, samplerate, scale='log', fft_window_size=1024, window_overlap=0.5,
@@ -143,7 +144,6 @@ def compute_spectrogram(segment, samplerate, scale='log', fft_window_size=1024, 
         segment, fs=samplerate, nperseg=fft_window_size,
         noverlap=(fft_window_size - fft_step_size), nfft=nfft, window=window_type
     )
-    print(f"DEBUG: Scipy spectrogram done. Sxx shape={Sxx.shape}")
 
     # Filter by frequency range
     freq_slice = np.where((f >= min_freq) & (f <= max_freq))
@@ -191,108 +191,270 @@ def compute_spectrogram(segment, samplerate, scale='log', fft_window_size=1024, 
 
 
 # --- *** MANUAL LABELING HELPERS *** ---
-def apply_manual_labels_efficiently(dff):
+def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels_lock=None):
     """
-    Apply manual labels to dff using an inverted loop strategy.
-    Instead of iterating all rows, iterate likely labeled groups.
-    MOVED TO UTILS to be shared between callbacks.
+    Apply manual labels to dff using a high-performance vectorized approach.
+    Optimized to handle 1M+ rows without redundant string scans or console flooding.
+
+    Performance tip: pass a pre-built plain ``dict`` as *manual_labels_cache* to skip
+    lock acquisition and diskcache I/O entirely.  Build it once per callback with::
+
+        with MANUAL_LABELS_LOCK:
+            snapshot = dict(MANUAL_LABELS_CACHE)          # or iterate iterkeys()
+        dff = apply_manual_labels_efficiently(dff, snapshot)
     """
-    if not MANUAL_LABELS_CACHE or dff.empty:
-        dff['manual_label'] = 'Unlabeled'
-        return dff
-        
+    # Fast path: caller already provided a plain-dict snapshot — no lock, no disk I/O.
+    if isinstance(manual_labels_cache, dict):
+        if not manual_labels_cache or dff.empty:
+            dff['manual_label'] = 'Unlabeled'
+            return dff
+        cache_snapshot = manual_labels_cache
+    else:
+        # Import here to avoid circular dependency
+        if manual_labels_cache is None:
+            from callbacks.callbacks_constants import MANUAL_LABELS_CACHE
+            manual_labels_cache = MANUAL_LABELS_CACHE
+
+        if manual_labels_lock is None:
+            from callbacks.callbacks_constants import MANUAL_LABELS_LOCK
+            manual_labels_lock = MANUAL_LABELS_LOCK
+
+        # THREAD SAFETY: Use lock to prevent concurrent access during read
+        with manual_labels_lock:
+            if not manual_labels_cache or dff.empty:
+                dff['manual_label'] = 'Unlabeled'
+                return dff
+
+            # Create a snapshot of the cache to work with outside the lock
+            # For diskcache, we need to safely iterate and handle missing keys
+            cache_snapshot = {}
+            try:
+                # Use list() to create a snapshot of keys first to avoid concurrent modification
+                cache_keys = list(manual_labels_cache.iterkeys())
+                for key in cache_keys:
+                    try:
+                        cache_snapshot[key] = manual_labels_cache[key]
+                    except KeyError:
+                        # Key was deleted during iteration, skip it
+                        continue
+            except Exception:
+                # If anything fails, return the dataframe with unlabeled entries
+                dff['manual_label'] = 'Unlabeled'
+                return dff
+
     # Initialize with Unlabeled
-    dff['manual_label'] = 'Unlabeled'
-    
-    # Fast optimization: pre-calculate label map
-    label_map = {}
-    if MANUAL_LABELS_CACHE:
-        # Key format: (location, microlocation, f_base, chan, sec)
-        for key_tuple, label in MANUAL_LABELS_CACHE.items():
-            if len(key_tuple) == 5:
-                loc, micro, f_base, chan, sec = key_tuple
-                
-                # Group by (loc, micro, f_base, chan)
-                group_key = (loc, micro, f_base, chan)
-                if group_key not in label_map:
-                    label_map[group_key] = {}
-                label_map[group_key][sec] = label
-            # Add backwards compatibility check if needed, or simply let old keys fail/drop
-    
+    if 'manual_label' not in dff.columns:
+        dff['manual_label'] = 'Unlabeled'
+    else:
+        dff['manual_label'] = 'Unlabeled'
+
+    # 0. Pre-filter the cache to ONLY those relevant to the current location/microlocation
+    # Most dffs in the app only represent one location at a time.
+    current_locations = dff['location'].unique() if 'location' in dff.columns else []
+
+    # 1. Import the duration cache (plain dict, no lock needed).
+    #    Keys are the same 5-tuples as MANUAL_LABELS_CACHE.
+    #    Values are float clip durations written at label-save time.
+    #    Falls back gracefully to an empty dict if not available.
+    try:
+        from callbacks.callbacks_constants import CLIP_DURATION_CACHE as _dur_cache
+    except Exception:
+        _dur_cache = {}
+
+    # 2. Group labels by (loc, micro, f_base, chan).
+    #    Key precision: round(clip_time * 10) → 0.1 s units (stored as int).
+    #    Each entry: clip_time_x10 → (label, clip_end_x10_or_None, labeled_model_or_None)
+    #    clip_end_x10 / labeled_model are None for legacy entries with no duration recorded.
+    label_map: dict = {}
+    for key_tuple in cache_snapshot:
+        label = cache_snapshot[key_tuple]
+        if len(key_tuple) == 5:
+            loc, micro, f_base, chan, clip_time_key = key_tuple
+
+            # Skip if not relevant to current data view
+            if len(current_locations) > 0 and loc not in current_locations:
+                continue
+
+            ct_x10 = int(clip_time_key)
+            dur_entry = _dur_cache.get(key_tuple)
+            if isinstance(dur_entry, tuple) and len(dur_entry) == 2:
+                dur, labeled_model = dur_entry
+                clip_end_x10 = ct_x10 + round(dur * 10)
+            else:
+                clip_end_x10 = None
+                labeled_model = None
+
+            group_key = (loc, micro, f_base, chan)
+            if group_key not in label_map:
+                label_map[group_key] = {}
+            label_map[group_key][ct_x10] = (label, clip_end_x10, labeled_model)
+
     if not label_map:
-        dff['manual_label'] = 'Unlabeled'
         return dff
-        
-    # Initialize with Unlabeled
-    dff['manual_label'] = 'Unlabeled'
-    
-    print(f"DEBUG: apply_manual_labels_efficiently called on {len(dff)} rows with label_map={list(label_map.keys())}")
-    
-    # Iterate over labeled files only
-    for (loc, micro, f_base, chan), sec_map in label_map.items():
-        # Fast filter: channel is usually integer or char
+
+    # 3. Vectorized extraction of basenames (done once, not per label group)
+    if 'f_basename_cache' not in dff.columns:
+        if 'mp3_file' in dff.columns:
+            # Cross-platform basename extraction
+            dff['f_basename_cache'] = dff['mp3_file'].astype(str).str.replace('\\', '/').str.split('/').str[-1]
+        elif 'file_name' in dff.columns:
+            dff['f_basename_cache'] = dff['file_name'].astype(str).str.replace('\\', '/').str.split('/').str[-1]
+        else:
+            return dff # Cannot match without filenames
+
+    # 4. Iterate over the SMALL set of labeled groups, match candidates by the rule:
+    #
+    #   • Same model as the label was created in  →  EXACT clip_time_x10 match only.
+    #     Prevents bleeding to adjacent/overlapping clips within the same model.
+    #
+    #   • Different model (cross-model transfer)  →  OVERLAP-based match.
+    #     A candidate receives the label when:
+    #       overlap / duration_of_SHORTER_clip  >=  OVERLAP_THRESHOLD (50%)
+    #
+    #   • Legacy entry (no duration/model stored) →  exact clip_time_x10 match (safe fallback).
+    OVERLAP_THRESHOLD = 0.5
+
+    # Determine the model currently loaded in dff (used for same/different model check)
+    current_model = str(dff['model_name'].iloc[0]) if 'model_name' in dff.columns and not dff.empty else None
+
+    # Micro-optimization: bucket labeled clips into coarse time bins so each candidate
+    # only compares with nearby labeled clips. This avoids N*L worst-case behavior
+    # when labels are widely spread but candidates are concentrated.
+    BIN_SIZE_X10 = 10  # 10 units = 1.0 second at the x10 scale (0.1s resolution)
+
+    for (loc, micro, f_base, chan), clip_map in label_map.items():
         try:
-             # Mask: Channel AND File Basename AND Location AND Microlocation
-             
-             # Channel match
-             if dff['channel'].dtype.name == 'category':
-                  mask = (dff['channel'].astype(int) == int(chan))
-             else:
-                  mask = (dff['channel'] == int(chan))
-             
-             # Location match (if column exists, usually does)
-             if 'location' in dff.columns:
-                 # Handle NaN vs Unknown
-                 # dff is a copy, safe to modify or just use fillna in comparison
-                 mask &= (dff['location'].fillna('Unknown') == loc)
-             
-             # Microlocation match
-             if 'microlocation' in dff.columns:
-                 mask &= (dff['microlocation'].fillna('Unknown') == micro)
-             
-             # File Basename match
-             mask &= dff['mp3_file'].astype(str).str.endswith(f_base)
-             
-             # Get indices
-             indices = dff.index[mask]
-             
-             if len(indices) == 0:
-                 # print(f"DEBUG: No matches for group {loc}/{micro}/{f_base} ch{chan}")
-                 continue
-                 
-             print(f"DEBUG: Found {len(indices)} matches for group {loc}/{micro}/{f_base} ch{chan}")
-             # Iterate only the relevant rows
-             # This is much faster (e.g. 100 rows vs 700k)
-             for idx in indices:
-                 row_start = float(dff.at[idx, 'clip_time'])
-                 row_dur = float(dff.at[idx, 'clip_duration']) if 'clip_duration' in dff.columns else 5.0
-                 
-                 # Majority vote using the sec_map directly
-                 start_second = math.floor(row_start)
-                 end_second = math.ceil(row_start + row_dur)
-                 
-                 found_labels = []
-                 # ADD +1 to include the end_second in the check
-                 for sec in range(start_second, end_second + 1):
-                     l = sec_map.get(sec)
-                     if l and l != 'Unlabeled':
-                         found_labels.append(l)
-                 
-                 if found_labels:
-                     # Filter valid (ignore 'Unlabeled' if it snuck in)
-                     valid_labels = [l for l in found_labels if l != 'Unlabeled']
-                     
-                     # We relax the strict >50% overlap rule to a simple "any overlap" rule.
-                     # If the user labelled *any* second within this clip's time range, 
-                     # we assign the most frequent label. This prevents labels from disappearing 
-                     # when the clip duration is long or when labelling tightly overlapping clips.
-                     final_label = Counter(valid_labels).most_common(1)[0][0]
-                     dff.at[idx, 'manual_label'] = final_label
-                     # print(f"DEBUG: Applied label '{final_label}' to row {idx}")
-                     
-        except Exception as e:
-            # Fallback or ignore errors in optimization to allow other rows to proceed
-            print(f"Error applying labels for {f_base}: {e}")
+            chan_val = int(chan)
+            if dff['channel'].dtype.name == 'category':
+                mask = (dff['channel'].astype(int) == chan_val)
+            else:
+                mask = (dff['channel'] == chan_val)
+
+            if 'location' in dff.columns:
+                mask &= (dff['location'].fillna('Unknown') == loc)
+            if 'microlocation' in dff.columns:
+                mask &= (dff['microlocation'].fillna('Unknown') == micro)
+
+            mask &= (dff['f_basename_cache'] == f_base)
+
+            indices = dff.index[mask]
+            if indices.empty:
+                continue
+
+            # Vectorize candidate starts/ends for this group
+            cand_cts = (dff.loc[indices, 'clip_time'].astype(float) * 10).round().astype(int).to_numpy()
+            cand_cds = (dff.loc[indices, 'clip_duration'].astype(float) * 10).round().astype(int).to_numpy()
+            cand_starts = cand_cts
+            cand_ends = cand_cts + cand_cds
+
+            # Build labeled items list and bucket them into BINs
+            labeled_items = []
+            max_labeled_span = 0
+            for labeled_start, (lbl, labeled_end, labeled_model) in clip_map.items():
+                span = (labeled_end - labeled_start) if (labeled_end is not None) else 0
+                if span > max_labeled_span:
+                    max_labeled_span = span
+                labeled_items.append((labeled_start, lbl, labeled_end, labeled_model))
+
+            # If there are no labeled items (should not happen), continue
+            if not labeled_items:
+                continue
+
+            # Create bins: int -> list of labeled_items indices
+            bin_map = {}
+            for item in labeled_items:
+                lstart = item[0]
+                bin_idx = lstart // BIN_SIZE_X10
+                bin_map.setdefault(bin_idx, []).append(item)
+
+            # Number of neighboring bins to check based on max span (at least 1)
+            neighbor_bins = max(1, int(np.ceil(max_labeled_span / BIN_SIZE_X10)))
+
+            # Micro-prefilter: limit candidates to those that overlap the overall
+            # labeled span expanded by max_labeled_span. This avoids checking
+            # candidates that are far away in time from any labeled clip.
+            labeled_starts = [it[0] for it in labeled_items]
+            labeled_ends = [it[2] if it[2] is not None else it[0] for it in labeled_items]
+            min_labeled_start = min(labeled_starts)
+            max_labeled_end = max(labeled_ends)
+            margin = max_labeled_span
+
+            # Boolean mask (on the candidates arrays) selecting only nearby candidates
+            cand_keep_mask = (cand_ends >= (min_labeled_start - margin)) & (cand_starts <= (max_labeled_end + margin))
+            if not cand_keep_mask.any():
+                continue
+
+            # Reduce the indices and candidate arrays to the prefiltered subset
+            filtered_indices = indices[cand_keep_mask]
+            filtered_starts = cand_starts[cand_keep_mask]
+            filtered_ends = cand_ends[cand_keep_mask]
+
+            # Build mapping from labeled items → best candidate (single-best per labeled clip)
+            # and then resolve conflicts so each candidate receives at most one label (highest overlap wins).
+            num_cands = len(filtered_indices)
+            if num_cands == 0:
+                continue
+
+            cand_st = np.array(filtered_starts, dtype=int)
+            cand_en = np.array(filtered_ends, dtype=int)
+            cand_span = cand_en - cand_st
+
+            # Candidate assignment map: pos_in_filtered -> (label, overlap_frac)
+            candidate_assignments = {}
+
+            # For each labeled item, find the single best candidate (by overlap fraction)
+            for labeled_start, lbl, labeled_end, labeled_model in labeled_items:
+                labeled_start = int(labeled_start)
+                if labeled_end is None:
+                    # Legacy entry: require exact clip_time match
+                    labeled_end = labeled_start
+                labeled_end = int(labeled_end)
+
+                same_model = (labeled_model is not None and current_model is not None and labeled_model == current_model)
+
+                if labeled_end == labeled_start or same_model:
+                    # Exact match only — find candidate(s) with identical start
+                    matches = np.nonzero(cand_st == labeled_start)[0]
+                    if matches.size > 0:
+                        # Choose the first matching candidate (stable) — treat as full overlap
+                        pos = int(matches[0])
+                        # Mark assignment with overlap fraction 1.0 to take precedence
+                        prev = candidate_assignments.get(pos)
+                        if prev is None or 1.0 > prev[1]:
+                            candidate_assignments[pos] = (lbl, 1.0)
+                    # If no exact match, nothing to do for this labeled clip
+                    continue
+
+                # Cross-model labeled clip: compute overlap fractions against filtered candidates
+                # overlap_x10 = max(0, min(cand_end, labeled_end) - max(cand_start, labeled_start))
+                overlap = np.maximum(0, np.minimum(cand_en, labeled_end) - np.maximum(cand_st, labeled_start))
+                if overlap.max() <= 0:
+                    continue
+
+                labeled_span = labeled_end - labeled_start
+                shorter = np.minimum(labeled_span, cand_span)
+                valid_mask = shorter > 0
+                if not valid_mask.any():
+                    continue
+
+                frac = np.zeros_like(overlap, dtype=float)
+                frac[valid_mask] = overlap[valid_mask] / shorter[valid_mask]
+
+                # Pick the candidate index with maximum fraction
+                best_pos = int(np.argmax(frac))
+                best_frac = float(frac[best_pos])
+                if best_frac >= OVERLAP_THRESHOLD:
+                    prev = candidate_assignments.get(best_pos)
+                    # If candidate already assigned, prefer the label with higher overlap fraction
+                    if prev is None or best_frac > prev[1]:
+                        candidate_assignments[best_pos] = (lbl, best_frac)
+
+            # Apply assignments to dataframe
+            for pos, (lbl, frac) in candidate_assignments.items():
+                if lbl and lbl != 'Unlabeled':
+                    dff.at[filtered_indices[pos], 'manual_label'] = lbl
+
+        except Exception:
             continue
 
     return dff

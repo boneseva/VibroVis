@@ -1,7 +1,8 @@
 import os
 import re
-from dash import Dash, html
+from dash import Dash
 from werkzeug.middleware.proxy_fix import ProxyFix
+from flask_compress import Compress
 
 from layout import create_layout
 import read_data
@@ -12,6 +13,9 @@ app.title = "VibroVis"
 server = app.server
 server.secret_key = 'vibrovis-secure-key-change-this-in-env'
 server.config['WTF_CSRF_ENABLED'] = False
+
+# Enable compression for large JSON payloads (scatter plots, spectrograms)
+Compress(app.server)
 
 # Apply ProxyFix to handle HTTPS headers correctly
 server.wsgi_app = ProxyFix(server.wsgi_app, x_proto=1, x_host=1)
@@ -32,7 +36,6 @@ def _extract_logo_accent_color(svg_path: str, fallback: str = '#4b8af2') -> str:
 
 _logo_path = os.path.join(os.path.dirname(__file__), 'assets', 'logo.svg')
 _accent_color = _extract_logo_accent_color(_logo_path)
-print(f'[VibroVis] Theme accent color extracted from logo: {_accent_color}')
 
 app.index_string = f'''
 <!DOCTYPE html>
@@ -81,4 +84,3 @@ if __name__ == "__main__":
     print(f"Dash is running on http://{display_host}:{display_port}/")
     
     app.run(port=PORT, host=ADDRESS, debug=False, use_reloader=False, dev_tools_ui=False)
-   # app.run(port=PORT, host=ADDRESS, debug=True, use_reloader=True, dev_tools_ui=True)

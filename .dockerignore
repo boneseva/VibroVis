@@ -4,3 +4,22 @@ __pycache__/
 
 data/
 vibro/
+
+data_multimon/
+data_test/
+
+# Ignore virtual environments
+venv/
+.venv/
+env/
+
+# Ignore massive data and audio files
+*.parquet
+*.mp3
+*.wav
+*.csv
+audio/
+
+# Ignore local generated state
+labels/
+presets/

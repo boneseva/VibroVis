@@ -2,21 +2,21 @@
 Table View callback — paginated, cached, sortable, with row-click audio integration.
 
 Architecture:
-  - Filter hash cache: skip merge on page/sort/column visibility changes
+  - The table reads directly from server_cache via the scatter’s `filtered-data`
+    cache key, so it always displays the exact same (sampled, optionally merged)
+    clips that the scatter plot shows.  One scatter point == one table row.
   - Column headers: clickable html.Th with pattern IDs → sort-store callback
   - Row click: writes to spectrogram-raw-data-store, reusing the existing
     clientside callback that drives audio-player and info display
 """
 import hashlib
-import json
 import time
 import traceback
 
 import pandas as pd
-from dash import Input, Output, State, html, no_update, ALL, ctx
+from dash import Input, Output, State, html, dcc, no_update, ALL, ctx
 
-from callbacks.callbacks_constants import MODEL_DATA_CACHE, CLUSTER_COLORS, MANUAL_LABELS_CACHE
-from utils import apply_manual_labels_efficiently
+from callbacks.callbacks_constants import CLUSTER_COLORS, server_cache
 
 import utils  # for load_audio_segment + compute_spectrogram
 import numpy as np
@@ -75,30 +75,42 @@ SECONDARY_SORT: dict[str, list[str]] = {
 }
 
 # Default sort when no column header is clicked
-DEFAULT_SORT_COLS = ["file_name", "day_dt", "start_dt", "clip_time"]
+DEFAULT_SORT_COLS = ["file_name", "day_dt", "start_dt", "clip_time", "channel", "microlocation", "recorder_type", "row_idx"]
 
 
 def _apply_sort(df: pd.DataFrame, sort_col: str | None, sort_asc: bool) -> pd.DataFrame:
     """Sort by primary column + automatic secondary keys. Applies a default sort when sort_col is None."""
-    
+
     def sort_key(col):
         # Case-insensitive sorting for string columns to avoid splitting uppercase/lowercase
         if col.name in ["file_name", "manual_label", "microlocation", "recorder_type"]:
             return col.astype(str).str.lower()
+        # Force clip_time to be numeric to prevent string sorting ("10.0" before "2.0")
+        if col.name == "clip_time":
+            return pd.to_numeric(col, errors='coerce')
         return col
 
+    # Sanitize boolean just in case Dash passes a string state
+    is_asc = bool(sort_asc) if str(sort_asc).lower() not in ["false", "0", "none"] else False
+    df = df.copy()
+
     if not sort_col:
-        # Default: file → date → recording time → start time
-        defaults = [c for c in DEFAULT_SORT_COLS if c in df.columns]
-        return df.sort_values(defaults, ascending=True, key=sort_key) if defaults else df
+        # Default: Sort by file_name, channel, clip_time, and row_idx to ensure a persistent, stable view.
+        defaults = ['file_name', 'channel', 'clip_time', 'row_idx']
+        available = [c for c in defaults if c in df.columns]
+        return df.sort_values(available, ascending=True, key=sort_key) if available else df
+
     primary_df_col = SORT_COL_MAP.get(sort_col)
     if not primary_df_col or primary_df_col not in df.columns:
         return df
-    secondary = [c for c in SECONDARY_SORT.get(sort_col, []) if c != primary_df_col and c in df.columns]
-    cols = [primary_df_col] + secondary
-    asc  = [sort_asc]       + [True] * len(secondary)
-    return df.sort_values(cols, ascending=asc, key=sort_key)
 
+    secondary = [c for c in SECONDARY_SORT.get(sort_col, []) if c != primary_df_col and c in df.columns]
+
+    # Always append row_idx as a final tie-breaker to ensure bit-perfect deterministic ordering.
+    cols = [primary_df_col] + secondary + ["row_idx"]
+    asc = [is_asc] + [True] * (len(secondary) + 1)
+
+    return df.sort_values(cols, ascending=asc, key=sort_key)
 
 # Module-level caches
 _TABLE_CACHE: dict = {}
@@ -107,30 +119,6 @@ _TABLE_CACHE: dict = {}
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-def _make_filter_hash(selected_channels, selected_num_clusters, selected_dates,
-                      hour_range, selected_microlocations, selected_recorders,
-                      cluster_checkbox_values, cluster_checkbox_ids,
-                      color_mode: str = "cluster") -> str:
-    try:
-        # Use a sorted fingerprint of label keys so any change (add/change) invalidates the cache
-        label_fingerprint = hashlib.md5(str(sorted(MANUAL_LABELS_CACHE.keys())).encode()).hexdigest()[:8]
-        key = json.dumps([
-            sorted(selected_channels or []),
-            selected_num_clusters,
-            sorted(selected_dates or []),
-            list(hour_range or []),
-            sorted(selected_microlocations or []),
-            sorted(selected_recorders or []),
-            cluster_checkbox_values,
-            [d.get("index") for d in (cluster_checkbox_ids or [])],
-            label_fingerprint,  # invalidate when any label changes
-            color_mode,
-        ], sort_keys=True, default=str)
-        return hashlib.md5(key.encode()).hexdigest()
-    except Exception:
-        return "invalid"
-
-
 def _fmt_seconds(seconds):
     try:
         s = float(seconds)
@@ -149,143 +137,14 @@ def _hex_to_rgba(hex_color: str, alpha: float = 0.18) -> str:
     return f"rgba({r},{g},{b},{alpha})"
 
 
-def _label_color(label: str) -> str:
-    """Consistent per-label color using MD5-stable palette index."""
-    idx = int(hashlib.md5(str(label).encode()).hexdigest()[:4], 16) % len(CLUSTER_COLORS)
-    return CLUSTER_COLORS[idx]
-
-
-# ---------------------------------------------------------------------------
-# Core: filter + vectorized merge  (also preserves mp3_file for row click)
-# ---------------------------------------------------------------------------
-def _build_merged_table(dff_raw, selected_channels, selected_num_clusters,
-                        selected_dates, hour_range, selected_microlocations,
-                        selected_recorders, cluster_checkbox_values, cluster_checkbox_ids,
-                        apply_labels: bool = False):
-    t0 = time.time()
-    if dff_raw is None or dff_raw.empty:
-        return pd.DataFrame()
-
-    valid_k_values = sorted(dff_raw["cluster_num"].dropna().unique()) if "cluster_num" in dff_raw.columns else []
-    active_k = None
-    if selected_num_clusters:
-        try:
-            v = int(selected_num_clusters)
-            if v in valid_k_values:
-                active_k = v
-        except Exception:
-            pass
-    if active_k is None and valid_k_values:
-        active_k = int(valid_k_values[0])
-
-    mask = pd.Series(True, index=dff_raw.index)
-    if active_k is not None and "cluster_num" in dff_raw.columns:
-        mask &= dff_raw["cluster_num"] == active_k
-    if selected_microlocations is not None:
-        if not selected_microlocations:
-            mask &= False
-        else:
-            mask &= dff_raw["microlocation"].isin(selected_microlocations)
-    if selected_recorders is not None:
-        if not selected_recorders:
-            mask &= False
-        else:
-            mask &= dff_raw["recorder_type"].isin(selected_recorders)
-    if selected_channels:
-        mask &= dff_raw["channel"].isin(selected_channels)
-    if selected_dates:
-        try:
-            mask &= dff_raw["day_dt"].astype(str).str[:10].isin(selected_dates)
-        except Exception:
-            pass
-    if hour_range:
-        mask &= (dff_raw["start_hour_float"] >= hour_range[0]) & \
-                (dff_raw["start_hour_float"] <= hour_range[1])
-
-    dff = dff_raw[mask].copy()
-
-    selected_clusters = set()
-    if cluster_checkbox_values and cluster_checkbox_ids:
-        for val, id_dict in zip(cluster_checkbox_values, cluster_checkbox_ids):
-            if val and "on" in val:
-                try:
-                    selected_clusters.add(int(id_dict["index"]))
-                except Exception:
-                    pass
-    if selected_clusters and "cluster_id" in dff.columns:
-        dff = dff[dff["cluster_id"].isin(selected_clusters)]
-
-    if dff.empty:
-        return pd.DataFrame()
-
-    if "clip_duration" not in dff.columns:
-        dff["clip_duration"] = 5.0
-    else:
-        dff["clip_duration"] = pd.to_numeric(dff["clip_duration"], errors="coerce").fillna(5.0)
-    if "clip_count" not in dff.columns:
-        dff["clip_count"] = 1
-
-    dff = dff.sort_values(["file_name", "channel", "cluster_id", "clip_time"]).reset_index(drop=True)
-    dff["_clip_end"] = dff["clip_time"] + dff["clip_duration"]
-
-    s_file    = dff["file_name"].astype(str)
-    s_channel = dff["channel"].astype(str)
-    s_cluster = dff["cluster_id"].astype(str)
-    prev_end  = dff["_clip_end"].shift(1)
-
-    is_new = (
-        (s_file    != s_file.shift(1))    |
-        (s_channel != s_channel.shift(1)) |
-        (s_cluster != s_cluster.shift(1)) |
-        (dff["clip_time"] > prev_end)
-    ).copy()
-    is_new.iat[0] = True
-    dff["_merge_group"] = is_new.cumsum()
-
-    agg: dict = {
-        "clip_time":  ("clip_time",  "first"),
-        "_clip_end":  ("_clip_end",  "max"),
-        "file_name":  ("file_name",  "first"),
-        "channel":    ("channel",    "first"),
-        "cluster_id": ("cluster_id", "first"),
-        "clip_count": ("clip_count", "sum"),
-        "day_dt":     ("day_dt",     "first"),
-    }
-    # Preserve mp3_file so row-click can load audio; apply manual labels
-    for col in ["mp3_file", "start_dt", "microlocation", "recorder_type"]:
-        if col in dff.columns:
-            agg[col] = (col, "first")
-
-    # ALWAYS apply manual labels regardless of color mode.
-    # The label column should always be populated and never reset to Unlabeled.
-    if MANUAL_LABELS_CACHE:
-        dff = apply_manual_labels_efficiently(dff)
-    else:
-        dff["manual_label"] = "Unlabeled"
-        
-    def get_merged_label(s):
-        valid = [l for l in s if l != "Unlabeled"]
-        if valid:
-            # Return the most frequent valid label
-            return pd.Series(valid).mode()[0]
-        return "Unlabeled"
-        
-    agg["manual_label"] = ("manual_label", get_merged_label)
-
-    merged = dff.groupby("_merge_group").agg(**agg).reset_index(drop=True)
-    merged["clip_duration"] = merged["_clip_end"] - merged["clip_time"]
-    merged = merged.drop(columns=["_clip_end"])
-    print(f"[TABLE] merge: {len(dff_raw)}→{len(merged)} rows in {time.time()-t0:.2f}s")
-    return merged
-
-
 # ---------------------------------------------------------------------------
 # Render one page of the table with sortable headers
 # ---------------------------------------------------------------------------
 def _render_table(page_df: pd.DataFrame, visible_cols: list,
                   sort_col: str | None = None, sort_asc: bool = True,
                   page_offset: int = 0,
-                  color_mode: str = "cluster") -> html.Div:
+                  color_mode: str = "cluster", label_colors_data: dict = None,
+                  merge_on: bool = False) -> html.Div:
     if page_df.empty:
         return html.Div("No data to display.", style={"padding": "1rem", "color": "#888"})
 
@@ -343,11 +202,24 @@ def _render_table(page_df: pd.DataFrame, visible_cols: list,
             src = page_df[col_key] if col_key in page_df.columns else pd.Series("", index=page_df.index)
             display[col_key] = src.astype(str).fillna("")
     if "clip_count" in visible_cols:
-        display["clip_count"] = page_df["clip_count"].astype(int).astype(str)
+        src = page_df["clip_count"] if "clip_count" in page_df.columns else pd.Series(1, index=page_df.index)
+        display["clip_count"] = src.astype(int).astype(str)
 
     # Row background colors — by manual_label in manual mode, by cluster_id otherwise
     if color_mode == "manual" and "manual_label" in page_df.columns:
-        bg_colors = [_hex_to_rgba(_label_color(lbl)) for lbl in page_df["manual_label"].fillna("Unlabeled")]
+        def get_label_color(label):
+            """Get color for label from single source of truth (label-color-store)"""
+            label_str = str(label)
+            if label == 'Unlabeled':
+                return '#D9D9D9'  # Hardcoded protection
+            elif label_colors_data and label_str in label_colors_data:
+                return label_colors_data[label_str]
+            else:
+                # Fallback to CLUSTER_COLORS if not in store (rare edge case)
+                hash_val = int(hashlib.md5(label_str.encode('utf-8')).hexdigest(), 16)
+                return CLUSTER_COLORS[hash_val % len(CLUSTER_COLORS)]
+        
+        bg_colors = [_hex_to_rgba(get_label_color(lbl)) for lbl in page_df["manual_label"].fillna("Unlabeled")]
     else:
         cluster_ids = page_df["cluster_id"].astype(int)
         bg_colors = [_hex_to_rgba(CLUSTER_COLORS[cid % len(CLUSTER_COLORS)]) for cid in cluster_ids]
@@ -356,11 +228,32 @@ def _render_table(page_df: pd.DataFrame, visible_cols: list,
     for i in range(len(page_df)):
         # row-level index in the full merged df (page_offset + i) stored as data attr
         row_idx = page_offset + i
-        cells = [html.Td(display[c].iat[i] if c in display else "") for c in visible_cols]
+        actual_plot_id = int(page_df.index[i])
+        cells = []
+        for c in visible_cols:
+            val = display[c].iat[i] if c in display else ""
+            if c == "manual_label":
+                cells.append(html.Td(
+                    dcc.Input(
+                        type="text",
+                        value=val,
+                        id={"type": "table-inline-label", "index": actual_plot_id},
+                        debounce=True,
+                        disabled=merge_on,
+                        persistence=True,  # Persist value across re-renders
+                        persistence_type="memory",  # Store in memory only
+                        style={"width": "100%", "boxSizing": "border-box", "border": "none",
+                               "background": "transparent" if not merge_on else "#f0f0f0",
+                               "outline": "none", "cursor": "not-allowed" if merge_on else "text",
+                               "color": "#aaa" if merge_on else "inherit"}
+                    )
+                ))
+            else:
+                cells.append(html.Td(val))
         rows.append(
             html.Tr(
                 cells,
-                id={"type": "table-row", "index": row_idx},
+                id={"type": "table-row", "index": actual_plot_id},
                 n_clicks=0,
                 style={
                     "backgroundColor": bg_colors[i],
@@ -383,6 +276,22 @@ def _render_table(page_df: pd.DataFrame, visible_cols: list,
 # Register callbacks
 # ---------------------------------------------------------------------------
 def register_table_callbacks(app):
+
+    # -- Tab-focus → focused-row-store (clientside, no server round-trip) --
+    app.clientside_callback(
+        """
+        function(triggerVal) {
+            if (!triggerVal) return window.dash_clientside.no_update;
+            var parts = triggerVal.split('_');
+            var idx = parseInt(parts[0], 10);
+            if (isNaN(idx)) return window.dash_clientside.no_update;
+            return {index: idx, ts: Date.now()};
+        }
+        """,
+        Output('focused-row-store', 'data'),
+        Input('focused-row-trigger-input', 'value'),
+        prevent_initial_call=True,
+    )
 
     # -- Tab switching (clientside, instant) --
     app.clientside_callback(
@@ -449,6 +358,10 @@ def register_table_callbacks(app):
     def update_sort(n_clicks_list, ids, current_sort):
         if not ctx.triggered_id:
             return no_update, no_update
+
+        if not ctx.triggered or ctx.triggered[0].get('value', 0) == 0:
+            return no_update, no_update
+
         # triggered_id is a dict like {'type': 'table-header', 'index': 'cluster_id'}
         col_key = ctx.triggered_id.get("index") if isinstance(ctx.triggered_id, dict) else None
         if col_key is None:
@@ -469,6 +382,7 @@ def register_table_callbacks(app):
         Output('table-click-data-store', 'data'),
         Output('fft-warning', 'children', allow_duplicate=True),
         Input({'type': 'table-row', 'index': ALL}, 'n_clicks'),
+        Input('focused-row-store', 'data'),
         State({'type': 'table-row', 'index': ALL}, 'id'),
         State('frequency-scale', 'value'),
         State('fft-window-size', 'value'),
@@ -482,37 +396,45 @@ def register_table_callbacks(app):
         State('color-mode-radio', 'value'),
         prevent_initial_call=True,
     )
-    def table_row_click(n_clicks_list, ids,
+    def table_row_click(n_clicks_list, focused_row_data, ids,
                         frequency_scale, fft_window_size, window_overlap,
                         window_type, min_freq, max_freq, num_bins, colormap, db_floor,
                         color_mode):
         import plotly.graph_objects as go
-        if not ctx.triggered_id or not isinstance(ctx.triggered_id, dict):
-            return no_update, no_update, no_update, no_update
 
-        # Ignore fires caused by component re-render (n_clicks==0, not a real click)
-        if not ctx.triggered or ctx.triggered[0].get('value', 0) == 0:
-            return no_update, no_update, no_update, no_update
+        # Determine which input triggered and resolve row_global_idx
+        triggered_prop = (ctx.triggered[0].get('prop_id', '') if ctx.triggered else '')
 
-        row_global_idx = ctx.triggered_id.get("index")
-        if row_global_idx is None:
-            return no_update, no_update, no_update, no_update
+        if triggered_prop == 'focused-row-store.data':
+            # Tab-to-Load path
+            if not focused_row_data or focused_row_data.get('index') is None:
+                return no_update, no_update, no_update, no_update
+            row_global_idx = focused_row_data['index']
+        else:
+            # Row-click path — original guards
+            if not ctx.triggered_id or not isinstance(ctx.triggered_id, dict):
+                return no_update, no_update, no_update, no_update
+            if not ctx.triggered or ctx.triggered[0].get('value', 0) == 0:
+                return no_update, no_update, no_update, no_update
+            row_global_idx = ctx.triggered_id.get("index")
+            if row_global_idx is None:
+                return no_update, no_update, no_update, no_update
 
         cached = _TABLE_CACHE.get("entry")
         if cached is None:
             return no_update, no_update, no_update, "Click a point on the scatter first to load data."
 
-        merged = cached.get("df")
-        if merged is None or merged.empty or row_global_idx >= len(merged):
+        filtered = cached.get("df")
+        if filtered is None or filtered.empty or row_global_idx not in filtered.index:
             return no_update, no_update, no_update, no_update
 
         # Apply the same sort that's currently active
         sort_info = _TABLE_CACHE.get("sort") or {}
-        merged = _apply_sort(merged, sort_info.get("col"), sort_info.get("asc", True))
+        filtered = _apply_sort(filtered, sort_info.get("col"), sort_info.get("asc", True))
 
-        row = merged.iloc[row_global_idx]
+        row = filtered.loc[row_global_idx]
 
-        if "mp3_file" not in merged.columns or pd.isna(row.get("mp3_file")):
+        if "mp3_file" not in filtered.columns or pd.isna(row.get("mp3_file")):
             return no_update, no_update, no_update, "Audio path not available for this row."
 
         try:
@@ -533,7 +455,7 @@ def register_table_callbacks(app):
                 empty_fig = go.Figure()
                 empty_fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                                         xaxis={'visible': False}, yaxis={'visible': False})
-                return ({"x": [], "y": [], "z": [], "info": "Error: Audio load failed",
+                return ({"info": "Error: Audio load failed",
                          "audio_path": "", "_rev": time.time_ns()},
                         empty_fig, None, "Error: Could not load audio segment.")
 
@@ -594,7 +516,6 @@ def register_table_callbacks(app):
             table_click_data = {"points": [{"customdata": [hist_key, None, None]}]}
 
             store_data = {
-                "x": t.tolist(), "y": f.tolist(), "z": Sxx_db.tolist(),
                 "audio_path": audio_path, "info": info,
                 "_rev": time.time_ns(),
             }
@@ -605,93 +526,84 @@ def register_table_callbacks(app):
             empty_fig = go.Figure()
             empty_fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                                     xaxis={'visible': False}, yaxis={'visible': False})
-            return ({"x": [], "y": [], "z": [], "info": "Error loading audio",
+            return ({"info": "Error loading audio",
                      "audio_path": "", "_rev": time.time_ns()},
                     empty_fig, None, "Error loading audio for selected row.")
 
-    # -- Main table render --
+    # -- Main table render (reads from scatter's server_cache) --
     @app.callback(
         Output("table-view-output", "children"),
         Output("table-page-info", "children"),
         Output("table-total-pages-store", "data", allow_duplicate=True),
         Input("main-view-tabs", "data"),
-        Input("model-data-ready-signal", "data"),
-        Input("channel-checklist", "value"),
-        Input("num-cluster-dropdown", "value"),
-        Input({"type": "cluster-checkbox", "index": ALL}, "value"),
-        Input("date-dropdown", "data"),
-        Input("hour-slider", "value"),
-        Input("merge-threshold", "value"),
-        Input("microlocation-dropdown", "value"),
-        Input("recorder-type-dropdown", "value"),
+        Input("filtered-data", "data"),
+        Input('manual-labels-store', 'data'),
+        Input('label-color-store', 'data'),
         Input("table-column-selector", "value"),
         Input("table-page-store", "data"),
         Input("table-sort-store", "data"),
         Input("color-mode-radio", "value"),
-        Input("manual-labels-store", "data"),  # Re-render when labels are saved
-        State({"type": "cluster-checkbox", "index": ALL}, "id"),
+        State('merge-switch', 'on'),
         prevent_initial_call=True,
     )
-    def update_table(active_tab, _sig, selected_channels, selected_num_clusters,
-                     cluster_checkbox_values, selected_dates, hour_range, _merge_threshold,
-                     selected_microlocations, selected_recorders, visible_cols, page,
-                     sort_state, color_mode, _label_trigger, cluster_checkbox_ids):
+    def update_table(active_tab, filtered_data_key, manual_labels_trigger, label_colors_data,
+                     visible_cols, page, sort_state, color_mode, merge_on):
 
         if active_tab != "table-tab":
             return no_update, no_update, no_update
 
+        triggered_prop_ids = [t['prop_id'] for t in ctx.triggered] if ctx.triggered else []
+
+        # FAST PATH: when ONLY manual-labels-store fires we can skip a full re-render
+        # because the scatter fast-path already updated server_cache in-place and
+        # the user's typed value is visible in the dcc.Input (persistence=True).
+        # If any other input triggered (e.g., color-mode change) we must re-render.
+        if triggered_prop_ids and set(triggered_prop_ids) == {'manual-labels-store.data'}:
+            return no_update, no_update, no_update
+
         try:
-            dff_raw = MODEL_DATA_CACHE.get("df")
-            if dff_raw is None or dff_raw.empty:
+            if not filtered_data_key:
                 return (html.Div("No data loaded. Select a location and model.",
                                  style={"padding": "2rem", "color": "#888"}),
                         "", 1)
 
-            if not visible_cols:
-                visible_cols = DEFAULT_VISIBLE_COLS
-
-            # Cache check — only re-merge when filters change
-            filter_hash = _make_filter_hash(
-                selected_channels, selected_num_clusters, selected_dates,
-                hour_range, selected_microlocations, selected_recorders,
-                cluster_checkbox_values, cluster_checkbox_ids,
-                color_mode=color_mode or "cluster",
-            )
-            cached = _TABLE_CACHE.get("entry")
-            if cached and cached.get("hash") == filter_hash:
-                merged = cached["df"]
-            else:
-                merged = _build_merged_table(
-                    dff_raw, selected_channels, selected_num_clusters,
-                    selected_dates, hour_range, selected_microlocations,
-                    selected_recorders, cluster_checkbox_values, cluster_checkbox_ids,
-                    apply_labels=(color_mode == "manual"),
-                )
-                _TABLE_CACHE["entry"] = {"hash": filter_hash, "df": merged}
-
-            if merged.empty:
-                return (html.Div("No rows match the current filters.",
+            # Read the exact same data the scatter plot is displaying
+            dff = server_cache.get(filtered_data_key)
+            if dff is None or dff.empty:
+                return (html.Div("No data to display.",
                                  style={"padding": "2rem", "color": "#888"}),
                         "0 rows", 1)
 
+            # Never mutate the cached dataframe directly.
+            dff = dff.copy()
+
+            if not visible_cols:
+                visible_cols = DEFAULT_VISIBLE_COLS
+
+            # Always remap labels from MANUAL_LABELS_CACHE so rename/merge/delete
+            # is reflected immediately in the table.
+            dff = utils.apply_manual_labels_efficiently(dff)
+
+            # Store for row-click callback
+            _TABLE_CACHE["entry"] = {"df": dff}
+
             # Apply sorting with secondary keys
-            sort_col = sort_state.get("col")
-            sort_asc = sort_state.get("asc", True)
-            _TABLE_CACHE["sort"] = sort_state  # save for row-click callback
+            sort_col = (sort_state or {}).get("col")
+            sort_asc = (sort_state or {}).get("asc", True)
+            _TABLE_CACHE["sort"] = sort_state or {}
 
-            merged = _apply_sort(merged, sort_col, sort_asc)
+            dff = _apply_sort(dff, sort_col, sort_asc)
 
-            total_rows  = len(merged)
+            total_rows  = len(dff)
             total_pages = max(1, (total_rows + PAGE_SIZE - 1) // PAGE_SIZE)
             page        = max(0, min(int(page or 0), total_pages - 1))
             page_offset = page * PAGE_SIZE
-            page_df     = merged.iloc[page_offset : page_offset + PAGE_SIZE]
+            page_df     = dff.iloc[page_offset : page_offset + PAGE_SIZE]
             page_info   = f"Page {page + 1} of {total_pages}  ({total_rows} rows)"
 
-            t0 = time.time()
             result = _render_table(page_df, visible_cols, sort_col, sort_asc, page_offset,
-                                   color_mode=color_mode or "cluster")
-            print(f"[TABLE] page {page+1}/{total_pages} rendered in {time.time()-t0:.3f}s")
+                                   color_mode=color_mode or "cluster", label_colors_data=label_colors_data,
+                                   merge_on=bool(merge_on))
 
             return result, page_info, total_pages
 
@@ -700,3 +612,51 @@ def register_table_callbacks(app):
             return (html.Div("Error building table — check the server console.",
                              style={"padding": "2rem", "color": "red"}),
                     "error", 1)
+
+    # -- RACE CONDITION FIX: Clientside callback to update individual input values --
+    # This prevents full table re-renders from interfering with user typing
+    app.clientside_callback(
+        """
+        function(manual_labels_trigger, filtered_data_key) {
+            // Skip if no trigger or data
+            if (!manual_labels_trigger || !filtered_data_key) {
+                return window.dash_clientside.no_update;
+            }
+            
+            // Check if this is a recent inline input change (within 200ms)
+            try {
+                var triggerTime = parseFloat(manual_labels_trigger);
+                var currentTime = Date.now() / 1000;
+                if (currentTime - triggerTime < 0.2) {
+                    // Recent inline change - preserve current input states
+                    var inputs = document.querySelectorAll('[id*="table-inline-label"]');
+                    var preservedValues = {};
+                    inputs.forEach(function(input) {
+                        if (input.id && input.value !== undefined) {
+                            preservedValues[input.id] = input.value;
+                        }
+                    });
+                    
+                    // Return preserved values to prevent overwrite
+                    setTimeout(function() {
+                        Object.keys(preservedValues).forEach(function(inputId) {
+                            var input = document.getElementById(inputId);
+                            if (input && input.value !== preservedValues[inputId]) {
+                                input.value = preservedValues[inputId];
+                            }
+                        });
+                    }, 50);
+                }
+            } catch (e) {
+                // Ignore parsing errors
+            }
+            
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output('table-race-condition-fix', 'data', allow_duplicate=True),
+        Input('manual-labels-store', 'data'),
+        State('filtered-data', 'data'),
+        prevent_initial_call=True
+    )
+
