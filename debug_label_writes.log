@@ -1,0 +1,17 @@
+1790848944.9365695	plots_sidebar_save	('loc1', 'micro1', 'test.mp3', 0, 15)	TestLabel
+1790848970.0761735	plots_sidebar_save	('loc1', 'micro1', 'test.mp3', 0, 15)	TestLabel2
+1790849440.3946857	plots_sidebar_save	('test_location', 'test_microlocation', 'audio_clip_001.mp3', 0, 25)	VibrationSignalB
+1790849440.3969111	plots_sidebar_save	('test_location', 'test_microlocation', 'audio_clip_001.mp3', 0, 25)	VibrationSignalA
+1790849440.3986733	plots_sidebar_delete	('test_location', 'test_microlocation', 'audio_clip_001.mp3', 0, 25)	DELETED
+1790849459.7953355	plots_sidebar_save	('test_location', 'test_microlocation', 'audio_clip_001.mp3', 0, 25)	VibrationSignalB
+1790849459.797525	plots_sidebar_save	('test_location', 'test_microlocation', 'audio_clip_001.mp3', 0, 25)	VibrationSignalA
+1790849459.7992013	plots_sidebar_delete	('test_location', 'test_microlocation', 'audio_clip_001.mp3', 0, 25)	DELETED
+1790849654.6370716	plots_sidebar_save	('test_location', 'test_microlocation', 'audio_clip_001.mp3', 0, 25)	VibrationSignalB
+1790849654.639321	plots_sidebar_save	('test_location', 'test_microlocation', 'audio_clip_001.mp3', 0, 25)	VibrationSignalA
+1790849654.641238	plots_sidebar_delete	('test_location', 'test_microlocation', 'audio_clip_001.mp3', 0, 25)	DELETED
+1790850406.818183	plots_sidebar_save	('test_location', 'test_microlocation', 'audio_clip_001.mp3', 0, 25)	VibrationSignalB
+1790850406.822784	plots_sidebar_save	('test_location', 'test_microlocation', 'audio_clip_001.mp3', 0, 25)	VibrationSignalA
+1790850406.827748	plots_sidebar_delete	('test_location', 'test_microlocation', 'audio_clip_001.mp3', 0, 25)	DELETED
+1790851868.337797	plots_sidebar_save	('test_location', 'test_microlocation', 'audio_clip_001.mp3', 0, 25)	VibrationSignalB
+1790851868.340206	plots_sidebar_save	('test_location', 'test_microlocation', 'audio_clip_001.mp3', 0, 25)	VibrationSignalA
+1790851868.3425372	plots_sidebar_delete	('test_location', 'test_microlocation', 'audio_clip_001.mp3', 0, 25)	DELETED

@@ -22,6 +22,7 @@ from dash import dcc
 import read_data
 import utils
 from callbacks.callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, initial_df, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK
+from diagnostics import time_block
 
 # Suppress mpg123 decoder warnings (these are non-critical)
 warnings.filterwarnings('ignore', category=UserWarning)
@@ -349,35 +350,36 @@ def register_data_callbacks(app):
                                 'cluster_num', 'cluster_id', 'day_dt', 'start_hour_float',
                                 'file_name', 'clip_time', 'clip_duration', 'mp3_file', 'row_idx',
                                 'start_dt', 'time_of_day', 'recorder_type', 'wav_file']
-                try:
-                    model_df = pd.read_parquet(
-                        data_path,
-                        filters=[
-                            [('model_name', '==', selected_model),
-                             ('location', '==', selected_location)]
-                        ],
-                        columns=cols_to_load
-                    )
-                    model_df = model_df.reset_index(drop=True)
-                    
-                    if 'day_dt' in model_df.columns:
-                        model_df['day_dt_str'] = pd.to_datetime(model_df['day_dt']).dt.strftime('%Y-%m-%d')
-                    
-                    if 'cluster_id' in model_df.columns:
-                        model_df['cluster_id_str'] = model_df['cluster_id'].astype(str)
-                    
-                    if 'clip_count' not in model_df.columns:
-                        model_df['clip_count'] = 1
-                    
-                    if 'file_name' in model_df.columns and model_df['file_name'].dtype != 'category':
-                        model_df['file_name'] = model_df['file_name'].astype('category')
-                    if 'channel' in model_df.columns and model_df['channel'].dtype != 'category':
-                        model_df['channel'] = model_df['channel'].astype('category')
-                    
-                    MODEL_DATA_CACHE['df'] = model_df
-                except Exception as e:
-                    print(f"Error loading data: {e}")
-                    MODEL_DATA_CACHE['df'] = None
+                with time_block("data_load", extra_info=f"model='{selected_model}', location='{selected_location}'"):
+                    try:
+                        model_df = pd.read_parquet(
+                            data_path,
+                            filters=[
+                                [('model_name', '==', selected_model),
+                                 ('location', '==', selected_location)]
+                            ],
+                            columns=cols_to_load
+                        )
+                        model_df = model_df.reset_index(drop=True)
+                        
+                        if 'day_dt' in model_df.columns:
+                            model_df['day_dt_str'] = pd.to_datetime(model_df['day_dt']).dt.strftime('%Y-%m-%d')
+                        
+                        if 'cluster_id' in model_df.columns:
+                            model_df['cluster_id_str'] = model_df['cluster_id'].astype(str)
+                        
+                        if 'clip_count' not in model_df.columns:
+                            model_df['clip_count'] = 1
+                        
+                        if 'file_name' in model_df.columns and model_df['file_name'].dtype != 'category':
+                            model_df['file_name'] = model_df['file_name'].astype('category')
+                        if 'channel' in model_df.columns and model_df['channel'].dtype != 'category':
+                            model_df['channel'] = model_df['channel'].astype('category')
+                        
+                        MODEL_DATA_CACHE['df'] = model_df
+                    except Exception as e:
+                        print(f"Error loading data: {e}")
+                        MODEL_DATA_CACHE['df'] = None
         return time.time()
 
     @app.callback(

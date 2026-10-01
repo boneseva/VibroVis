@@ -17,8 +17,9 @@ import utils
 from callbacks.callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, server_cache, initial_df, CLUSTER_COLORS, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK, CLIP_DURATION_CACHE
 from utils import apply_manual_labels_efficiently
 
-# Performance profiling
-ENABLE_PROFILING = False
+# Performance profiling and diagnostics
+from diagnostics import PipelineTimer, is_diagnostics_enabled, get_cache_diagnostics
+ENABLE_PROFILING = is_diagnostics_enabled()
 from .callbacks_data import merge_clips_vectorized
 
 import numpy as np
@@ -117,6 +118,7 @@ def register_plot_callbacks(app):
                       selected_location, last_preset_time, cluster_checkbox_ids,
                       label_checkbox_ids, current_filtered_key=None):
 
+        timer = PipelineTimer("update_figure").start()
         t_start = time.time() if ENABLE_PROFILING else None
         t_checkpoint = {}
         t_last = t_start if ENABLE_PROFILING else None
@@ -173,6 +175,7 @@ def register_plot_callbacks(app):
                                 new_color = CLUSTER_COLORS[0]
                     # Scalar color — no per-point buffer re-upload in WebGL → no flash
                     patched['data'][i]['marker']['color'] = new_color
+                timer.stop(extra_info="fast_path_color")
                 return (patched, no_update, no_update, no_update, no_update,
                         no_update, no_update, no_update, no_update, no_update)
             except Exception:
@@ -287,6 +290,7 @@ def register_plot_callbacks(app):
                 # Update cache in-place — same key keeps filtered-data unchanged
                 server_cache[current_filtered_key] = dff_fast
                 # Return same filtered-data key so update_table is NOT triggered a second time
+                timer.stop(cache_df=dff_fast, extra_info="fast_path_label")
                 return (fig_fast, current_filtered_key,
                         no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update)
             except Exception:
@@ -302,6 +306,7 @@ def register_plot_callbacks(app):
 
         dff_raw = MODEL_DATA_CACHE.get('df')
         t_last = checkpoint('cache_get') or t_last
+        timer.step("data/filter")
 
         # ------------------------------------------------------------------
         # ONE-TIME DISKCACHE SNAPSHOT
@@ -328,6 +333,11 @@ def register_plot_callbacks(app):
         if dff_raw is not None and not dff_raw.empty and selected_location:
             cached_location = dff_raw['location'].iloc[0]
             if cached_location != selected_location:
+                msg = "Loading data..."
+                timer.stop(extra_info="location_loading")
+                if current_figure_state and current_figure_state.get('data'):
+                    # Non-destructive: preserve existing figure while new location data loads
+                    return dash.no_update, no_update, no_update, no_update, no_update, no_update, msg, no_update, None, False
                 fig = go.Figure()
                 fig.update_layout(
                     annotations=[{"text": "Loading data...", "xref": "paper", "yref": "paper",
@@ -336,10 +346,14 @@ def register_plot_callbacks(app):
                 )
                 fig.update_xaxes(visible=False);
                 fig.update_yaxes(visible=False)
-                msg = "Loading data..."
                 return fig, None, 1, 100, [], None, msg, {'total': 0}, None, False
 
         if dff_raw is None:
+            msg = "Select a model and location to begin."
+            timer.stop(extra_info="select_model_location")
+            if current_figure_state and current_figure_state.get('data'):
+                # Non-destructive: preserve existing figure if raw data is momentarily reloading
+                return dash.no_update, no_update, no_update, no_update, no_update, no_update, msg, no_update, None, False
             fig = go.Figure()
             fig.update_layout(
                 annotations=[{"text": "Select a model and location to begin.", "xref": "paper", "yref": "paper",
@@ -348,7 +362,6 @@ def register_plot_callbacks(app):
             )
             fig.update_xaxes(visible=False);
             fig.update_yaxes(visible=False)
-            msg = "Select a model and location to begin."
             return fig, None, 1, 100, [], None, msg, {'total': 0}, None, False
 
         is_preset_active = last_preset_time and (time.time() - last_preset_time < 6.0)
@@ -447,6 +460,7 @@ def register_plot_callbacks(app):
         dff_filtered = dff_base[mask].copy()
         
         # 2. Merge Logic
+        timer.step("merge")
         if merge_on and not dff_filtered.empty:
             # Dynamic merging on filtered data
             # Cache key must include filters or we skip cache for dynamic accuracy
@@ -485,6 +499,7 @@ def register_plot_callbacks(app):
         new_indices_to_store = dash.no_update
 
         # Calculate comprehensive statistics for both Cluster and Label lists.
+        timer.step("labels")
         # Keep a separate labeled-only denominator for manual-label percentages.
         cluster_stats = {
             'total': int(total_clips_available) if not dff_macro.empty else 0,
@@ -625,6 +640,7 @@ def register_plot_callbacks(app):
             if any(f in t_id for t_id in all_triggered_ids for f in other_filters):
                 should_resample = True
 
+        timer.step("sampling")
         if max_points and dff_macro['clip_count'].sum() > max_points:
             if should_resample:
                 # Apply labels BEFORE sampling to enable Priority Sampling of labeled points.
@@ -751,9 +767,11 @@ def register_plot_callbacks(app):
             else:
                 fig.update_xaxes(visible=False);
                 fig.update_yaxes(visible=False)
+            timer.stop(extra_info="empty_sampled")
             return fig, None, 1, max_distance, new_indices_to_store, None, sampling_text, cluster_stats, None, False
 
         t_last = checkpoint('sampling') or t_last
+        timer.step("figure")
         dff = dff_sampled.reset_index(drop=True).copy()
         # plot_id assignment moved to after sorting
         # Clamp marker size to avoid browser layout errors with massive points
@@ -960,7 +978,8 @@ def register_plot_callbacks(app):
                 'total_rows': len(dff)
             }
             
-            print(f"[OPTIMIZATION #1] Data reduction: {total_cols} → {essential_cols_count} columns ({reduction_pct:.1f}% reduction)")
+            if is_diagnostics_enabled():
+                print(f"[OPTIMIZATION #1] Data reduction: {total_cols} -> {essential_cols_count} columns ({reduction_pct:.1f}% reduction)")
         else:
             lightweight_data = {
                 'cache_key': cache_key,
@@ -975,11 +994,7 @@ def register_plot_callbacks(app):
         ranges_data = {'daily': [min_h, max_h], 'yearly': [min_d, max_d]}
         t_last = checkpoint('final') or t_last
 
-        if ENABLE_PROFILING and t_start:
-            total_time = (time.time() - t_start) * 1000
-            timing_str = f"⏱️  Plot Update Timing (total: {total_time:.1f}ms): "
-            for name, segment_time in t_checkpoint.items():
-                timing_str += f"{name}={segment_time:.1f}ms "
+        timer.stop(cache_df=dff)
 
         return fig, dff['cache_key'].iloc[
             0], max_clip_count, max_distance, new_indices_to_store, ranges_data, sampling_text, cluster_stats, None, False if should_force_defaults else no_update
@@ -1153,7 +1168,7 @@ def register_plot_callbacks(app):
          Input('table-click-data-store', 'data'),
          State('filtered-data', 'data')])
     def show_histogram_for_clicked_cluster(clickData, hist_type, time_scale, cluster_colors, label_colors, label_names, color_mode,
-                                           table_click_data, filtered_data_cache_key):
+                                           table_click_data, filtered_data_store):
 
         # Determine the effective clickData source
         triggered = dash.callback_context.triggered
@@ -1168,7 +1183,7 @@ def register_plot_callbacks(app):
             effective_click = None
 
         try:
-            if not effective_click or not filtered_data_cache_key:
+            if not effective_click or not filtered_data_store:
                 fig = go.Figure()
                 title = "Time of Day" if time_scale == 'daily' else "Week of Year"
                 fig.update_layout(
@@ -1329,7 +1344,7 @@ def register_plot_callbacks(app):
          State('merge-switch', 'on')],
         prevent_initial_call=True
     )
-    def save_manual_label(n_clicks, n_submit, table_label_values, label_text, clickData, filtered_data_cache_key, merge_on):
+    def save_manual_label(n_clicks, n_submit, table_label_values, label_text, clickData, filtered_data_store, merge_on):
         import json
 
         triggered = dash.callback_context.triggered
@@ -1558,6 +1573,7 @@ def register_plot_callbacks(app):
                                 return unique_trigger, f"No-op: Unlabeled", label_val
                         else:
                             MANUAL_LABELS_CACHE[instance_key] = label_val
+                            verification_success = (MANUAL_LABELS_CACHE.get(instance_key) == label_val)
                     else:
                         verification_success = True
                         unique_trigger = f"{time.time()}_{hash(label_val)}_1"

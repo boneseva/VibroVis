@@ -238,7 +238,40 @@ def create_layout(df):
 
                 # --- Scatter pane (graph only) ---
                 html.Div([
-                    dcc.Graph(id='scatter'),
+                    dcc.Loading(
+                        id='scatter-loading',
+                        type='circle',
+                        show_initially=False,
+                        parent_className='scatter-loading-parent',
+                        className='scatter-loading-spinner-container',
+                        parent_style={
+                            'flex': '1',
+                            'minHeight': '0',
+                            'width': '100%',
+                            'height': '100%',
+                            'display': 'flex',
+                            'flexDirection': 'column',
+                            'position': 'relative'
+                        },
+                        overlay_style={
+                            'visibility': 'visible',
+                            'opacity': 0.65,
+                            'transition': 'opacity 0.15s ease',
+                            'flex': '1',
+                            'minHeight': '0',
+                            'width': '100%',
+                            'height': '100%',
+                            'display': 'flex',
+                            'flexDirection': 'column'
+                        },
+                        custom_spinner=html.Div([
+                            html.Div(className='scatter-loading-spinner'),
+                            html.Span("Updating…", className='scatter-loading-text')
+                        ], className='scatter-loading-badge'),
+                        children=[
+                            dcc.Graph(id='scatter'),
+                        ]
+                    ),
                     html.Div(id='fft-warning', style={'color': 'red', 'margin': '0.1em'}),
                 ], id='scatter-pane', className='view-pane view-pane--active'),
 
