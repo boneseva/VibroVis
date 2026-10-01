@@ -137,19 +137,14 @@ def _hex_to_rgba(hex_color: str, alpha: float = 0.18) -> str:
     return f"rgba({r},{g},{b},{alpha})"
 
 
-def _label_color(label: str) -> str:
-    """Consistent per-label color using MD5-stable palette index."""
-    idx = int(hashlib.md5(str(label).encode()).hexdigest()[:4], 16) % len(CLUSTER_COLORS)
-    return CLUSTER_COLORS[idx]
-
-
 # ---------------------------------------------------------------------------
 # Render one page of the table with sortable headers
 # ---------------------------------------------------------------------------
 def _render_table(page_df: pd.DataFrame, visible_cols: list,
                   sort_col: str | None = None, sort_asc: bool = True,
                   page_offset: int = 0,
-                  color_mode: str = "cluster") -> html.Div:
+                  color_mode: str = "cluster", label_colors_data: dict = None,
+                  merge_on: bool = False) -> html.Div:
     if page_df.empty:
         return html.Div("No data to display.", style={"padding": "1rem", "color": "#888"})
 
@@ -212,7 +207,19 @@ def _render_table(page_df: pd.DataFrame, visible_cols: list,
 
     # Row background colors — by manual_label in manual mode, by cluster_id otherwise
     if color_mode == "manual" and "manual_label" in page_df.columns:
-        bg_colors = [_hex_to_rgba(_label_color(lbl)) for lbl in page_df["manual_label"].fillna("Unlabeled")]
+        def get_label_color(label):
+            """Get color for label from single source of truth (label-color-store)"""
+            label_str = str(label)
+            if label == 'Unlabeled':
+                return '#D9D9D9'  # Hardcoded protection
+            elif label_colors_data and label_str in label_colors_data:
+                return label_colors_data[label_str]
+            else:
+                # Fallback to CLUSTER_COLORS if not in store (rare edge case)
+                hash_val = int(hashlib.md5(label_str.encode('utf-8')).hexdigest(), 16)
+                return CLUSTER_COLORS[hash_val % len(CLUSTER_COLORS)]
+        
+        bg_colors = [_hex_to_rgba(get_label_color(lbl)) for lbl in page_df["manual_label"].fillna("Unlabeled")]
     else:
         cluster_ids = page_df["cluster_id"].astype(int)
         bg_colors = [_hex_to_rgba(CLUSTER_COLORS[cid % len(CLUSTER_COLORS)]) for cid in cluster_ids]
@@ -232,7 +239,13 @@ def _render_table(page_df: pd.DataFrame, visible_cols: list,
                         value=val,
                         id={"type": "table-inline-label", "index": actual_plot_id},
                         debounce=True,
-                        style={"width": "100%", "boxSizing": "border-box", "border": "none", "background": "transparent", "outline": "none"}
+                        disabled=merge_on,
+                        persistence=True,  # Persist value across re-renders
+                        persistence_type="memory",  # Store in memory only
+                        style={"width": "100%", "boxSizing": "border-box", "border": "none",
+                               "background": "transparent" if not merge_on else "#f0f0f0",
+                               "outline": "none", "cursor": "not-allowed" if merge_on else "text",
+                               "color": "#aaa" if merge_on else "inherit"}
                     )
                 ))
             else:
@@ -452,7 +465,7 @@ def register_table_callbacks(app):
                 empty_fig = go.Figure()
                 empty_fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                                         xaxis={'visible': False}, yaxis={'visible': False})
-                return ({"x": [], "y": [], "z": [], "info": "Error: Audio load failed",
+                return ({"info": "Error: Audio load failed",
                          "audio_path": "", "_rev": time.time_ns()},
                         empty_fig, None, "Error: Could not load audio segment.")
 
@@ -513,7 +526,6 @@ def register_table_callbacks(app):
             table_click_data = {"points": [{"customdata": [hist_key, None, None]}]}
 
             store_data = {
-                "x": t.tolist(), "y": f.tolist(), "z": Sxx_db.tolist(),
                 "audio_path": audio_path, "info": info,
                 "_rev": time.time_ns(),
             }
@@ -524,7 +536,7 @@ def register_table_callbacks(app):
             empty_fig = go.Figure()
             empty_fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                                     xaxis={'visible': False}, yaxis={'visible': False})
-            return ({"x": [], "y": [], "z": [], "info": "Error loading audio",
+            return ({"info": "Error loading audio",
                      "audio_path": "", "_rev": time.time_ns()},
                     empty_fig, None, "Error loading audio for selected row.")
 
@@ -536,16 +548,27 @@ def register_table_callbacks(app):
         Input("main-view-tabs", "data"),
         Input("filtered-data", "data"),
         Input('manual-labels-store', 'data'),
+        Input('label-color-store', 'data'),
         Input("table-column-selector", "value"),
         Input("table-page-store", "data"),
         Input("table-sort-store", "data"),
         Input("color-mode-radio", "value"),
+        State('merge-switch', 'on'),
         prevent_initial_call=True,
     )
-    def update_table(active_tab, filtered_data_payload, manual_labels_trigger, visible_cols, page,
-                     sort_state, color_mode):
+    def update_table(active_tab, filtered_data_key, manual_labels_trigger, label_colors_data,
+                     visible_cols, page, sort_state, color_mode, merge_on):
 
         if active_tab != "table-tab":
+            return no_update, no_update, no_update
+
+        triggered_prop_ids = [t['prop_id'] for t in ctx.triggered] if ctx.triggered else []
+
+        # FAST PATH: when ONLY manual-labels-store fires we can skip a full re-render
+        # because the scatter fast-path already updated server_cache in-place and
+        # the user's typed value is visible in the dcc.Input (persistence=True).
+        # If any other input triggered (e.g., color-mode change) we must re-render.
+        if triggered_prop_ids and set(triggered_prop_ids) == {'manual-labels-store.data'}:
             return no_update, no_update, no_update
 
         try:
@@ -607,10 +630,9 @@ def register_table_callbacks(app):
             page_df     = dff.iloc[page_offset : page_offset + PAGE_SIZE]
             page_info   = f"Page {page + 1} of {total_pages}  ({total_rows} rows)"
 
-            t0 = time.time()
             result = _render_table(page_df, visible_cols, sort_col, sort_asc, page_offset,
-                                   color_mode=color_mode or "cluster")
-            print(f"[TABLE] page {page+1}/{total_pages} rendered in {time.time()-t0:.3f}s")
+                                   color_mode=color_mode or "cluster", label_colors_data=label_colors_data,
+                                   merge_on=bool(merge_on))
 
             return result, page_info, total_pages
 
@@ -619,3 +641,51 @@ def register_table_callbacks(app):
             return (html.Div("Error building table — check the server console.",
                              style={"padding": "2rem", "color": "red"}),
                     "error", 1)
+
+    # -- RACE CONDITION FIX: Clientside callback to update individual input values --
+    # This prevents full table re-renders from interfering with user typing
+    app.clientside_callback(
+        """
+        function(manual_labels_trigger, filtered_data_key) {
+            // Skip if no trigger or data
+            if (!manual_labels_trigger || !filtered_data_key) {
+                return window.dash_clientside.no_update;
+            }
+            
+            // Check if this is a recent inline input change (within 200ms)
+            try {
+                var triggerTime = parseFloat(manual_labels_trigger);
+                var currentTime = Date.now() / 1000;
+                if (currentTime - triggerTime < 0.2) {
+                    // Recent inline change - preserve current input states
+                    var inputs = document.querySelectorAll('[id*="table-inline-label"]');
+                    var preservedValues = {};
+                    inputs.forEach(function(input) {
+                        if (input.id && input.value !== undefined) {
+                            preservedValues[input.id] = input.value;
+                        }
+                    });
+                    
+                    // Return preserved values to prevent overwrite
+                    setTimeout(function() {
+                        Object.keys(preservedValues).forEach(function(inputId) {
+                            var input = document.getElementById(inputId);
+                            if (input && input.value !== preservedValues[inputId]) {
+                                input.value = preservedValues[inputId];
+                            }
+                        });
+                    }, 50);
+                }
+            } catch (e) {
+                // Ignore parsing errors
+            }
+            
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output('table-race-condition-fix', 'data', allow_duplicate=True),
+        Input('manual-labels-store', 'data'),
+        State('filtered-data', 'data'),
+        prevent_initial_call=True
+    )
+
