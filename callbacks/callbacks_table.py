@@ -239,13 +239,13 @@ def _render_table(page_df: pd.DataFrame, visible_cols: list,
                         value=val,
                         id={"type": "table-inline-label", "index": actual_plot_id},
                         debounce=True,
-                        disabled=merge_on,
+                        disabled=False,
                         persistence=True,  # Persist value across re-renders
                         persistence_type="memory",  # Store in memory only
                         style={"width": "100%", "boxSizing": "border-box", "border": "none",
-                               "background": "transparent" if not merge_on else "#f0f0f0",
-                               "outline": "none", "cursor": "not-allowed" if merge_on else "text",
-                               "color": "#aaa" if merge_on else "inherit"}
+                               "background": "transparent",
+                               "outline": "none", "cursor": "text",
+                               "color": "inherit"}
                     )
                 ))
             else:
@@ -556,7 +556,7 @@ def register_table_callbacks(app):
         State('merge-switch', 'on'),
         prevent_initial_call=True,
     )
-    def update_table(active_tab, filtered_data_key, manual_labels_trigger, label_colors_data,
+    def update_table(active_tab, filtered_data_payload, manual_labels_trigger, label_colors_data,
                      visible_cols, page, sort_state, color_mode, merge_on):
 
         if active_tab != "table-tab":

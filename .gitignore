@@ -9,3 +9,9 @@
 /prepare_data/
 /.cursor/
 /data_multimon/
+
+/scratch/
+/cache/
+/temp/
+
+AGENTS.md

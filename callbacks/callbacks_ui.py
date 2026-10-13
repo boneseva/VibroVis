@@ -17,8 +17,8 @@ def register_ui_callbacks(app):
         Input('merge-switch', 'on'),
     )
     def disable_labeling_when_merged(merge_on):
-        """Disable manual labeling inputs when merge is ON (labels must map to raw clip instances)."""
-        return bool(merge_on), bool(merge_on)
+        """Keep manual labeling inputs enabled in both unmerged and merged views (Phase 1.6)."""
+        return False, False
 
     @app.callback(
         [Output('audio-player', 'autoPlay'),
@@ -150,7 +150,8 @@ def register_ui_callbacks(app):
                 const trace = new_fig.data[i];
                 if (trace.customdata) {
                     const opacity_array = [];
-                    const time_idx = (mode === 'yearly') ? 4 : 3;
+                    // Phase 0.8: row_idx removed, start_hour_float is idx 2, day_int is idx 3
+                    const time_idx = (mode === 'yearly') ? 3 : 2;
                     for (let j = 0; j < trace.customdata.length; j++) {
                         const point_time = trace.customdata[j][time_idx];
                         let dist = Math.abs(point_time - time_value);

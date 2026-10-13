@@ -25,127 +25,9 @@ CLUSTER_COLORS = ['#4E79A7', '#F28E2B', '#E15759', '#76B7B2', '#EDC948', '#B07AA
                   '#FFBE7D', '#9CD17D', '#D4B7A9', '#D9D9D9', '#FABFD2']
 
 
-def generate_date_selector(df, selected_dates=None):
-    """
-    Generates Date Selector.
-    If selected_dates is provided (list of strings 'YYYY-MM-DD'),
-    only checks those dates. Otherwise checks ALL.
-    """
-    if df is None or df.empty or 'day_dt' not in df.columns:
-        return html.Div("No date data found.")
-
-    dates = pd.to_datetime(df['day_dt']).dt.date.unique()
-    dates = sorted(dates)
-
-    selected_set = set(selected_dates) if selected_dates is not None else None
-
-    if len(dates) < 10:
-        all_values = [d.strftime('%Y-%m-%d') for d in dates]
-
-        if selected_set is not None:
-            current_value = [d for d in all_values if d in selected_set]
-        else:
-            current_value = all_values
-
-        options = [{'label': d.strftime('%Y-%m-%d'), 'value': d.strftime('%Y-%m-%d')} for d in dates]
-
-        return html.Div([
-            dcc.Dropdown(
-                id={'type': 'simple-date-dropdown', 'index': 0},
-                options=options,
-                value=current_value,
-                multi=True,
-                clearable=True,
-                placeholder="Select dates..."
-            )
-        ], style={'padding': '5px 0'})
-
-    year_dict = {}
-    for date in dates:
-        year = date.year
-        month = date.month
-        if year not in year_dict: year_dict[year] = {}
-        if month not in year_dict[year]: year_dict[year][month] = []
-        year_dict[year][month].append(date)
-
-    year_elements = []
-    for year in sorted(year_dict.keys()):
-        month_elements = []
-        for month in sorted(year_dict[year].keys()):
-            month_name = pd.Timestamp(year=year, month=month, day=1).strftime('%B')
-
-            day_options = []
-            day_values = []
-
-            current_month_dates = year_dict[year][month]
-            for d in current_month_dates:
-                d_str = d.strftime('%Y-%m-%d')
-                day_options.append({'label': f" {d.day:02d}", 'value': d_str})
-
-                if selected_set is None or d_str in selected_set:
-                    day_values.append(d_str)
-
-            month_select_all_val = []
-            if len(day_values) == len(current_month_dates) and len(day_values) > 0:
-                month_select_all_val = ['all']
-
-            month_elements.append(
-                html.Details([
-                    html.Summary(
-                        html.Div([
-                            dcc.Checklist(
-                                id={'type': 'month-select-all', 'year': year, 'month': month},
-                                options=[{'label': '', 'value': 'all'}],
-                                value=month_select_all_val,
-                                labelStyle={'display': 'inline-block', 'marginRight': '5px'},
-                                style={'display': 'inline-block', 'marginRight': '5px'},
-                                persistence=False
-                            ),
-                            html.Span(month_name, style={'cursor': 'pointer'})
-                        ], style={'display': 'flex', 'alignItems': 'center'}),
-                        style={'cursor': 'pointer', 'paddingLeft': '30px', 'listStyle': 'none'}
-                    ),
-                    html.Div([
-                        dcc.Checklist(
-                            id={'type': 'date-checklist', 'year': year, 'month': month},
-                            options=day_options,
-                            value=day_values,
-                            labelStyle={'display': 'block'},
-                            style={'paddingLeft': '40px'},
-                            persistence=False
-                        )
-                    ])
-                ], open=False, style={'marginBottom': '5px'})
-            )
-
-        year_elements.append(
-            html.Details([
-                html.Summary(
-                    html.Div([
-                        dcc.Checklist(
-                            id={'type': 'year-select-all', 'year': year},
-                            options=[{'label': '', 'value': 'all'}],
-                            value=['all'],
-                            labelStyle={'display': 'inline-block', 'marginRight': '5px'},
-                            style={'display': 'inline-block', 'marginRight': '5px'},
-                            persistence=False
-                        ),
-                        html.Span(str(year), style={'cursor': 'pointer', 'fontWeight': 'bold'})
-                    ], style={'display': 'flex', 'alignItems': 'center'}),
-                    style={'cursor': 'pointer', 'listStyle': 'none'}
-                ),
-                html.Div(month_elements, style={'paddingLeft': '15px'})
-            ], open=True, style={'marginBottom': '10px'})
-        )
-
-    return html.Div([
-        html.Div(
-            year_elements,
-            style={'maxHeight': '300px', 'overflow': 'auto', 'border': '1px solid #ddd', 'padding': '10px',
-                   'borderRadius': '4px'}
-        ),
-        dcc.Store(id='date-tree-structure', data=year_dict)
-    ])
+import hierarchy
+import read_data
+from callbacks.callbacks_date_selector import generate_date_selector
 
 def get_available_presets():
     """Helper to list JSON files in the presets folder"""
@@ -161,27 +43,39 @@ def create_layout(df):
     """
     preset_options = [{'label': p, 'value': p} for p in get_available_presets()]
 
-    all_locations = sorted(df['location'].dropna().unique())
+    # Discover projects dynamically from hierarchy
+    available_projects = hierarchy.get_available_projects()
+    project_options = [{'label': p.name, 'value': p.id} for p in available_projects]
+    default_project = available_projects[0].id if available_projects else None
+
+    # Load initial data for default project if df is empty
+    if (df is None or df.empty) and default_project:
+        df = read_data.get_initial_data_for_project(default_project)
+
+    all_locations = sorted(df['location'].dropna().unique()) if df is not None and not df.empty else []
     default_location = all_locations[0] if all_locations else None
 
-    models_for_location = []
-    default_model = None
-    if default_location:
+    if default_location and df is not None and not df.empty:
         models_for_location = sorted(df[df['location'] == default_location]['model_name'].dropna().unique())
-        default_model = models_for_location[0] if models_for_location else None
+    else:
+        models_for_location = sorted(df['model_name'].dropna().unique()) if df is not None and not df.empty else []
+    default_model = models_for_location[0] if models_for_location else None
 
     k_values = []
     default_k = None
-    if default_location and default_model:
-        k_values = sorted(df[
-                              (df['location'] == default_location) &
-                              (df['model_name'] == default_model)
-                              ]['cluster_num'].dropna().unique())
+    if default_model and df is not None and not df.empty:
+        if default_location:
+            k_values = sorted(df[
+                                  (df['location'] == default_location) &
+                                  (df['model_name'] == default_model)
+                                  ]['cluster_num'].dropna().unique())
+        if not k_values:
+            k_values = sorted(df[df['model_name'] == default_model]['cluster_num'].dropna().unique())
         default_k = k_values[0] if k_values else None
 
     cluster_options = []
     default_clusters = []
-    if default_k:
+    if default_k and df is not None and not df.empty:
         clusters = sorted(df[df['cluster_num'] == default_k]['cluster_id'].dropna().unique())
         default_clusters = [int(c) for c in clusters]
 
@@ -406,7 +300,25 @@ def create_layout(df):
                         html.Div(id='preset-message', style={'fontSize': '0.8em', 'color': '#666'}),
                     ], style={'marginBottom': '10px', 'borderBottom': '1px solid #eee', 'paddingBottom': '5px'}),
 
-            #    html.Div([
+                    html.Details([
+                        html.Summary("Project", className='section-title'),
+                        html.Div(id='project-filter-content', children=[
+                            html.Div([
+                                html.Label("Project"),
+                                html.Div(className="tooltip-container", children=[
+                                    html.Span(" ⓘ", className="info-icon"),
+                                    html.Span("Select the project.", className="tooltip-text")
+                                ])
+                            ], className="label-with-info", style={'marginTop': '0.5em'}),
+                            dcc.Dropdown(
+                                id='project-dropdown',
+                                options=project_options,
+                                value=default_project,
+                                clearable=False
+                            ),
+                        ])
+                    ], open=True),
+
                     html.Details([
                         html.Summary("Recordings", className='section-title'),
                         html.Div(id='recordings-filter-content', children=[
@@ -1002,6 +914,8 @@ def create_layout(df):
             ], id='filter-container', className='filters-expanded'),
         ], id='main-content'),
 
+        dcc.Store(id='project-metadata-store', data=None),
+        dcc.Store(id='dataset-metadata-store', data=None),
         dcc.Store(id='histogram-time-scale-store', data='daily'),
         dcc.Store(id='filtered-data'),
         dcc.Store(id='spectrogram-raw-data-store'),
@@ -1009,6 +923,7 @@ def create_layout(df):
         dcc.Store(id='merge-max-store'),
         dcc.Store(id='histogram-cache'),
         dcc.Store(id='model-data-ready-signal'),
+        dcc.Store(id='derived-model-metadata'),
         dcc.Store(id='sampled-indices-store'),
         dcc.Store(id='anim-ranges-store'),
         dcc.Store(id='is-anim-open-store', data=False),

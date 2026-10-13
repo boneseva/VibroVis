@@ -279,30 +279,351 @@ def merge_clips_vectorized(dff, merge_threshold):
     # Create clip_end for aggregation
     dff['clip_end'] = dff['clip_time'] + dff['clip_duration']
 
-    agg_dict = {
+    core_aggs = {
         'x': ('x', 'mean'), 'y': ('y', 'mean'),
         'clip_time': ('clip_time', 'first'), 'clip_end': ('clip_end', 'max'),
-        'recorder_type': ('recorder_type', 'first'), 'clip_count': ('clip_count', 'sum'),
+        'clip_count': ('clip_count', 'sum'),
         'cluster_id': ('cluster_id', 'first'), 'file_name': ('file_name', 'first'),
-        'channel': ('channel', 'first'), 'start_dt': ('start_dt', 'first'),
-        'time_of_day': ('time_of_day', 'first'), 'model_name': ('model_name', 'first'),
-        'mp3_file': ('mp3_file', 'first'), 'row_idx': ('row_idx', 'first'),
-        'cluster_num': ('cluster_num', 'first'),
-        'start_hour_float': ('start_hour_float', 'first'),
-        'location': ('location', 'first'),
-        'day_dt': ('day_dt', 'first'),
-        'microlocation': ('microlocation', 'first'),
+        'channel': ('channel', 'first'),
     }
+    agg_dict = {k: v for k, v in core_aggs.items() if k in dff.columns}
+    optional_cols = [
+        'recorder_type', 'start_dt', 'time_of_day', 'model_name',
+        'mp3_file', 'row_idx', 'cluster_num', 'start_hour_float',
+        'location', 'day_dt', 'microlocation', 'date_time_str', 'wav_file'
+    ]
+    for col in optional_cols:
+        if col in dff.columns:
+            agg_dict[col] = (col, 'first')
     
     grouped = dff.groupby(merge_groups).agg(**agg_dict).reset_index(drop=True)
     grouped['clip_duration'] = grouped['clip_end'] - grouped['clip_time']
     grouped = grouped.drop(columns=['clip_end'])
+
+    # Compute duration-weighted majority manual label and track constituent clips
+    group_starts = np.flatnonzero(~merge_mask)
+    group_ends = np.append(group_starts[1:], len(dff))
     
+    times = dff['clip_time'].to_numpy(dtype=float)
+    durations = dff['clip_duration'].to_numpy(dtype=float)
+    
+    constituent_clips = []
+    has_labels = 'manual_label' in dff.columns
+    if has_labels:
+        labels = dff['manual_label'].to_numpy()
+        majority_labels = []
+    
+    for st, en in zip(group_starts, group_ends):
+        if en - st == 1:
+            if 'constituent_clips' in dff.columns and isinstance(dff['constituent_clips'].iloc[st], list):
+                constituent_clips.append(dff['constituent_clips'].iloc[st])
+            else:
+                constituent_clips.append(None)
+            if has_labels:
+                lbl = labels[st]
+                majority_labels.append(str(lbl) if (pd.notna(lbl) and str(lbl).strip() != '') else 'Unlabeled')
+        else:
+            flat_constituents = []
+            for r in range(st, en):
+                if 'constituent_clips' in dff.columns and isinstance(dff['constituent_clips'].iloc[r], list):
+                    flat_constituents.extend(dff['constituent_clips'].iloc[r])
+                else:
+                    flat_constituents.append((times[r], durations[r]))
+            constituent_clips.append(flat_constituents)
+            if has_labels:
+                sub_lbls = labels[st:en]
+                sub_durs = durations[st:en]
+                dur_map = {}
+                for l, d in zip(sub_lbls, sub_durs):
+                    if pd.notna(l) and str(l).strip() != '' and str(l) != 'Unlabeled':
+                        l_str = str(l)
+                        dur_map[l_str] = dur_map.get(l_str, 0.0) + float(d)
+                if not dur_map:
+                    majority_labels.append('Unlabeled')
+                else:
+                    max_d = max(dur_map.values())
+                    candidates = sorted([k for k, v in dur_map.items() if v == max_d])
+                    majority_labels.append(candidates[0])
+                    
+    grouped['constituent_clips'] = constituent_clips
+    if has_labels:
+        grouped['manual_label'] = majority_labels
+        
     return grouped
 
 
-def register_data_callbacks(app):
+def get_logical_filtered_data(
+    dff_raw,
+    selected_num_clusters=None,
+    selected_microlocations=None,
+    selected_recorders=None,
+    selected_channels=None,
+    selected_dates=None,
+    hour_range=None,
+    merge_on=False,
+    merge_threshold=15.0,
+    clip_count_threshold=1,
+    selected_clusters=None,
+    selected_labels=None,
+    manual_labels_cache=None,
+):
+    """
+    Canonical filtering and merge pipeline shared by visualization and export.
+    Returns the logical DataFrame representing what the user sees, without visual sampling.
+    """
+    if dff_raw is None or dff_raw.empty:
+        return pd.DataFrame()
+
+    valid_k_values = sorted(dff_raw['cluster_num'].dropna().unique()) if 'cluster_num' in dff_raw.columns else []
+    active_k = None
+    if selected_num_clusters:
+        try:
+            if int(selected_num_clusters) in valid_k_values:
+                active_k = int(selected_num_clusters)
+        except Exception:
+            pass
+    if active_k is None and valid_k_values:
+        active_k = int(valid_k_values[0])
+
+    dff_base = dff_raw
+    mask = pd.Series(True, index=dff_base.index)
+
+    if active_k is not None and 'cluster_num' in dff_base.columns:
+        mask &= (dff_base['cluster_num'] == active_k)
+
+    if selected_microlocations is not None:
+        if not selected_microlocations:
+            mask &= False
+        elif 'microlocation' in dff_base.columns:
+            mask &= dff_base['microlocation'].isin(selected_microlocations)
+
+    if selected_recorders is not None:
+        if not selected_recorders:
+            mask &= False
+        elif 'recorder_type' in dff_base.columns:
+            mask &= dff_base['recorder_type'].isin(selected_recorders)
+
+    if selected_channels is not None:
+        if selected_channels and 'channel' in dff_base.columns:
+            mask &= dff_base['channel'].isin(selected_channels)
+
+    if selected_dates is not None:
+        if not selected_dates:
+            mask &= False
+        else:
+            if 'day_dt_str' in dff_base.columns:
+                mask &= dff_base['day_dt_str'].isin(selected_dates)
+            elif 'day_dt' in dff_base.columns:
+                try:
+                    valid_dates_in_data = set(pd.to_datetime(dff_base['day_dt']).dt.strftime('%Y-%m-%d'))
+                    relevant_dates = [d for d in selected_dates if d in valid_dates_in_data]
+                    if relevant_dates:
+                        selected_datetimes = pd.to_datetime(relevant_dates)
+                        mask &= dff_base['day_dt'].isin(selected_datetimes)
+                    else:
+                        mask &= False
+                except Exception:
+                    pass
+
+    if hour_range and 'start_hour_float' in dff_base.columns:
+        mask &= (dff_base['start_hour_float'] >= hour_range[0]) & (dff_base['start_hour_float'] <= hour_range[1])
+
+    dff_filtered = dff_base[mask].copy()
+    if dff_filtered.empty:
+        return dff_filtered
+
+    if 'clip_duration' not in dff_filtered.columns:
+        dff_filtered['clip_duration'] = 5.0
+    else:
+        dff_filtered['clip_duration'] = pd.to_numeric(dff_filtered['clip_duration'], errors='coerce').fillna(5.0)
+
+    # 1. Apply raw persistent manual labels before merge
+    dff_filtered = utils.apply_manual_labels_efficiently(dff_filtered, manual_labels_cache)
+
+    # 2. Cluster visibility filtering (if selected_clusters specified)
+    if selected_clusters:
+        sel_c = set()
+        for sc in selected_clusters:
+            sel_c.add(str(sc))
+            try:
+                sel_c.add(int(sc))
+            except Exception:
+                pass
+        if 'cluster_id' in dff_filtered.columns:
+            dff_filtered = dff_filtered[
+                dff_filtered['cluster_id'].isin(sel_c) | dff_filtered['cluster_id'].astype(str).isin(sel_c)
+            ]
+        if dff_filtered.empty:
+            return dff_filtered
+
+    # 3. Canonical merge logic
+    if merge_on:
+        th = float(merge_threshold) if merge_threshold is not None else 15.0
+        dff_logical = merge_clips_vectorized(dff_filtered, merge_threshold=th)
+        if clip_count_threshold and clip_count_threshold > 1:
+            dff_logical = dff_logical[dff_logical['clip_count'] >= int(clip_count_threshold)]
+    else:
+        dff_logical = dff_filtered
+        if clip_count_threshold and clip_count_threshold > 1 and 'clip_count' in dff_logical.columns:
+            dff_logical = dff_logical[dff_logical['clip_count'] >= int(clip_count_threshold)]
+
+    # 4. Label visibility filtering (if selected_labels specified)
+    if selected_labels is not None and len(selected_labels) > 0:
+        sel_l = {str(x) for x in selected_labels}
+        if 'manual_label' in dff_logical.columns:
+            dff_logical = dff_logical[dff_logical['manual_label'].astype(str).isin(sel_l)]
+
+    return dff_logical
+
+
+def format_export_dataframe(dff_filtered):
+    """Format logical filtered DataFrame to the canonical 6-column CSV export schema."""
+    if dff_filtered is None or dff_filtered.empty:
+        return pd.DataFrame(columns=['wav_file', 'date_time', 'timestamp_start', 'timestamp_end', 'manual_label', 'cluster_id'])
     
+    export_df = pd.DataFrame()
+    if 'wav_file' in dff_filtered.columns:
+        export_df['wav_file'] = dff_filtered['wav_file'].astype(str)
+    elif 'mp3_file' in dff_filtered.columns:
+        mp3_str = dff_filtered['mp3_file'].astype(str)
+        export_df['wav_file'] = mp3_str.str.replace(r'_ch\d+\.mp3$', '.wav', regex=True)
+    elif 'file_name' in dff_filtered.columns:
+        export_df['wav_file'] = dff_filtered['file_name'].astype(str)
+    else:
+        export_df['wav_file'] = ''
+        
+    if 'day_dt' in dff_filtered.columns and 'start_dt' in dff_filtered.columns:
+        day_dt = pd.to_datetime(dff_filtered['day_dt'])
+        start_dt = pd.to_datetime(dff_filtered['start_dt'])
+        start_time_str = start_dt.dt.strftime('%H:%M:%S')
+        day_str = day_dt.dt.strftime('%Y-%m-%d')
+        wav_start_datetime = pd.to_datetime(day_str + ' ' + start_time_str, errors='coerce')
+        export_df['date_time'] = wav_start_datetime.dt.strftime('%Y-%m-%d %H:%M:%S')
+    else:
+        export_df['date_time'] = ''
+
+    def format_seconds_as_time(seconds):
+        if pd.isna(seconds) or seconds < 0:
+            return ''
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        return f'{hours:02d}:{minutes:02d}:{secs:02d}'
+    
+    if 'clip_time' in dff_filtered.columns:
+        export_df['timestamp_start'] = dff_filtered['clip_time'].apply(format_seconds_as_time)
+    else:
+        export_df['timestamp_start'] = ''
+    
+    if 'clip_duration' in dff_filtered.columns and 'clip_time' in dff_filtered.columns:
+        clip_end_time = dff_filtered['clip_time'] + dff_filtered['clip_duration']
+        export_df['timestamp_end'] = clip_end_time.apply(format_seconds_as_time)
+    else:
+        export_df['timestamp_end'] = ''
+
+    export_df['manual_label'] = dff_filtered['manual_label'] if 'manual_label' in dff_filtered.columns else 'Unlabeled'
+    export_df['cluster_id'] = dff_filtered['cluster_id'].astype(str) if 'cluster_id' in dff_filtered.columns else ''
+
+    sort_cols = [c for c in ['wav_file', 'date_time', 'timestamp_start'] if c in export_df.columns]
+    if sort_cols:
+        export_df = export_df.sort_values(sort_cols).reset_index(drop=True)
+
+    return export_df
+
+
+def build_filtered_data_export_df(
+    dff_raw,
+    selected_num_clusters=None,
+    selected_microlocations=None,
+    selected_recorders=None,
+    selected_channels=None,
+    selected_dates=None,
+    hour_range=None,
+    merge_on=False,
+    merge_threshold=15.0,
+    clip_count_threshold=1,
+    selected_clusters=None,
+    manual_labels_cache=None,
+):
+    """Build and format the full CSV export DataFrame using the canonical pipeline."""
+    dff_logical = get_logical_filtered_data(
+        dff_raw=dff_raw,
+        selected_num_clusters=selected_num_clusters,
+        selected_microlocations=selected_microlocations,
+        selected_recorders=selected_recorders,
+        selected_channels=selected_channels,
+        selected_dates=selected_dates,
+        hour_range=hour_range,
+        merge_on=bool(merge_on),
+        merge_threshold=merge_threshold,
+        clip_count_threshold=clip_count_threshold,
+        selected_clusters=selected_clusters,
+        manual_labels_cache=manual_labels_cache
+    )
+    if dff_logical.empty:
+        return pd.DataFrame()
+    return format_export_dataframe(dff_logical)
+
+
+def extract_model_metadata(model_df):
+    """
+    Extract lightweight UI metadata (channels, dates, microlocations, recorders, hour bounds)
+    from the raw model DataFrame in a single fast pass (<10 ms).
+    """
+    if model_df is None or model_df.empty:
+        return {
+            'dates': [],
+            'microlocations': [],
+            'channels': [],
+            'recorders': [],
+            'hour_min': 0,
+            'hour_max': 24
+        }
+
+    # Dates
+    if 'day_dt_str' in model_df.columns:
+        dates = sorted(model_df['day_dt_str'].dropna().unique().tolist())
+    elif 'day_dt' in model_df.columns:
+        dates = sorted(pd.to_datetime(model_df['day_dt']).dt.strftime('%Y-%m-%d').unique().tolist())
+    else:
+        dates = []
+
+    # Microlocations
+    if 'microlocation' in model_df.columns:
+        micros = sorted([
+            str(m) for m in model_df['microlocation'].dropna().unique().tolist()
+            if str(m).strip() and str(m).strip().lower() != 'default'
+        ])
+    else:
+        micros = []
+
+    # Channels
+    channels = sorted(model_df['channel'].dropna().unique().tolist()) if 'channel' in model_df.columns else []
+
+    # Recorder types
+    recorders = sorted(model_df['recorder_type'].dropna().unique().tolist()) if 'recorder_type' in model_df.columns else []
+
+    # Hours
+    if 'start_hour_float' in model_df.columns and not model_df.empty:
+        min_v = model_df['start_hour_float'].min()
+        max_v = model_df['start_hour_float'].max()
+        hour_min = int(min_v) if pd.notna(min_v) else 0
+        hour_max = int(max_v) + 1 if pd.notna(max_v) else 24
+    else:
+        hour_min, hour_max = 0, 24
+
+    return {
+        'dates': dates,
+        'microlocations': micros,
+        'channels': channels,
+        'recorders': recorders,
+        'hour_min': hour_min,
+        'hour_max': hour_max
+    }
+
+
+def register_data_callbacks(app):
+
     @app.server.route("/audio_segment_normalized/<path:filename>/<int:channel>/<float:start>/<float:end>")
     def serve_audio_segment_normalized(filename, channel, start, end):
         try:
@@ -334,23 +655,62 @@ def register_data_callbacks(app):
             return flask.abort(500)
 
     @app.callback(
-        Output('model-data-ready-signal', 'data'),
-        Input('model-dropdown', 'value'),
-        Input('location-dropdown', 'value')
+        [Output('model-data-ready-signal', 'data'),
+         Output('derived-model-metadata', 'data')],
+        [Input('model-dropdown', 'value'),
+         Input('location-dropdown', 'value'),
+         Input('project-dropdown', 'value')]
     )
-    def load_data_into_server_cache(selected_model, selected_location):
+    def load_data_into_server_cache(selected_model, selected_location, selected_project=None, selected_dataset=None):
+        metadata = extract_model_metadata(None)
         if not selected_model or not selected_location:
             MODEL_DATA_CACHE['df'] = None
+            MODEL_DATA_CACHE['metadata'] = metadata
+            MODEL_DATA_CACHE['key'] = None
+            return time.time(), metadata
+
+        if selected_project:
+            expected_key = (selected_project, selected_location, selected_model)
+            with time_block("data_load_project", extra_info=f"proj='{selected_project}', loc='{selected_location}', model='{selected_model}'"):
+                try:
+                    model_df = read_data.load_project_model_data(
+                        project_id=selected_project,
+                        selected_model=selected_model,
+                        selected_location=selected_location
+                    )
+                    if model_df is None or model_df.empty:
+                        MODEL_DATA_CACHE['df'] = None
+                        MODEL_DATA_CACHE['metadata'] = metadata
+                        MODEL_DATA_CACHE['key'] = None
+                    else:
+                        MODEL_DATA_CACHE['df'] = model_df
+                        metadata = extract_model_metadata(model_df)
+                        MODEL_DATA_CACHE['metadata'] = metadata
+                        MODEL_DATA_CACHE['key'] = expected_key
+                except Exception as e:
+                    print(f"Error loading project model data: {e}")
+                    MODEL_DATA_CACHE['df'] = None
+                    MODEL_DATA_CACHE['metadata'] = metadata
+                    MODEL_DATA_CACHE['key'] = None
         else:
+            # Legacy compatibility path using flat SAVE_PATH
             data_path = read_data.SAVE_PATH
             if not os.path.exists(data_path):
+                # Fallback to vibro project cache if flat data/cache/final_data.parquet was moved/migrated
+                vibro_path = os.path.join("data", "vibro", "cache", "final_data.parquet")
+                if os.path.exists(vibro_path):
+                    data_path = vibro_path
+            expected_key = (None, selected_location, selected_model)
+            if not os.path.exists(data_path):
                 MODEL_DATA_CACHE['df'] = None
+                MODEL_DATA_CACHE['metadata'] = metadata
+                MODEL_DATA_CACHE['key'] = None
             else:
                 cols_to_load = ['x', 'y', 'location', 'microlocation', 'model_name', 'channel',
                                 'cluster_num', 'cluster_id', 'day_dt', 'start_hour_float',
                                 'file_name', 'clip_time', 'clip_duration', 'mp3_file', 'row_idx',
                                 'start_dt', 'time_of_day', 'recorder_type', 'wav_file']
-                with time_block("data_load", extra_info=f"model='{selected_model}', location='{selected_location}'"):
+                with time_block("data_load_legacy", extra_info=f"model='{selected_model}', location='{selected_location}'"):
                     try:
                         model_df = pd.read_parquet(
                             data_path,
@@ -360,27 +720,19 @@ def register_data_callbacks(app):
                             ],
                             columns=cols_to_load
                         )
-                        model_df = model_df.reset_index(drop=True)
-                        
-                        if 'day_dt' in model_df.columns:
-                            model_df['day_dt_str'] = pd.to_datetime(model_df['day_dt']).dt.strftime('%Y-%m-%d')
-                        
-                        if 'cluster_id' in model_df.columns:
-                            model_df['cluster_id_str'] = model_df['cluster_id'].astype(str)
-                        
-                        if 'clip_count' not in model_df.columns:
-                            model_df['clip_count'] = 1
-                        
-                        if 'file_name' in model_df.columns and model_df['file_name'].dtype != 'category':
-                            model_df['file_name'] = model_df['file_name'].astype('category')
-                        if 'channel' in model_df.columns and model_df['channel'].dtype != 'category':
-                            model_df['channel'] = model_df['channel'].astype('category')
+                        model_df = read_data.process_loaded_model_dataframe(model_df)
                         
                         MODEL_DATA_CACHE['df'] = model_df
+                        metadata = extract_model_metadata(model_df)
+                        MODEL_DATA_CACHE['metadata'] = metadata
+                        MODEL_DATA_CACHE['key'] = expected_key
                     except Exception as e:
-                        print(f"Error loading data: {e}")
+                        print(f"Error loading legacy data: {e}")
                         MODEL_DATA_CACHE['df'] = None
-        return time.time()
+                        MODEL_DATA_CACHE['metadata'] = metadata
+                        MODEL_DATA_CACHE['key'] = None
+
+        return time.time(), metadata
 
     @app.callback(
         Output("download-csv", "data"),
@@ -415,192 +767,33 @@ def register_data_callbacks(app):
         if dff_raw is None or dff_raw.empty:
             return dash.no_update
 
-        # Replicate the filtering logic from update_figure
-        # Determine active k
-        valid_k_values = sorted(dff_raw['cluster_num'].dropna().unique())
-        active_k = None
-        if selected_num_clusters:
-            try:
-                if int(selected_num_clusters) in valid_k_values:
-                    active_k = int(selected_num_clusters)
-            except:
-                pass
-        if active_k is None and valid_k_values:
-            active_k = int(valid_k_values[0])
-
-        # For export, always use raw data (not pre-merged) so we can apply our own merge logic
-        # that ignores spatial position and always merges based on cluster, file, and channel
-        dff_base = dff_raw
-
-        # Apply filters
-        mask = pd.Series(True, index=dff_base.index)
-
-        if active_k is not None:
-            try:
-                mask &= (dff_base['cluster_num'] == active_k)
-            except:
-                pass
-
-        if selected_microlocations is not None:
-            if not selected_microlocations:
-                mask &= False
-            else:
-                mask &= dff_base['microlocation'].isin(selected_microlocations)
-
-        if selected_recorders is not None:
-            if not selected_recorders:
-                mask &= False
-            else:
-                mask &= dff_base['recorder_type'].isin(selected_recorders)
-
-        if selected_channels:
-            mask &= dff_base['channel'].isin(selected_channels)
-
-        if selected_dates:
-            if 'day_dt_str' in dff_base.columns:
-                mask &= dff_base['day_dt_str'].isin(selected_dates)
-            else:
-                valid_dates_in_data = set(pd.to_datetime(dff_base['day_dt']).dt.strftime('%Y-%m-%d'))
-                relevant_dates = [d for d in selected_dates if d in valid_dates_in_data]
-                if relevant_dates:
-                    selected_datetimes = pd.to_datetime(relevant_dates).normalize()
-                    mask &= dff_base['day_dt'].isin(selected_datetimes)
-
-        if hour_range:
-            mask &= (dff_base['start_hour_float'] >= hour_range[0]) & (dff_base['start_hour_float'] <= hour_range[1])
-
-        if clip_count_threshold and clip_count_threshold > 1:
-            mask &= (dff_base['clip_count'] >= int(clip_count_threshold))
-
-        # Get filtered data (this is dff_macro - full filtered, not sampled)
-        dff_filtered = dff_base[mask].copy()
-
-        # Apply cluster filter if checkboxes are used
+        # Process cluster checkboxes similar to callbacks_presets.py
         selected_clusters = []
         if cluster_checkbox_values and cluster_checkbox_ids:
-            # Process cluster checkboxes similar to callbacks_presets.py
             for val, id_dict in zip(cluster_checkbox_values, cluster_checkbox_ids):
                 if val and len(val) > 0 and 'on' in val:
                     try:
                         selected_clusters.append(int(id_dict['index']))
-                    except:
+                    except Exception:
                         pass
 
-        if selected_clusters:
-            dff_filtered = dff_filtered[dff_filtered['cluster_id'].isin(selected_clusters)]
+        export_df = build_filtered_data_export_df(
+            dff_raw=dff_raw,
+            selected_num_clusters=selected_num_clusters,
+            selected_microlocations=selected_microlocations,
+            selected_recorders=selected_recorders,
+            selected_channels=selected_channels,
+            selected_dates=selected_dates,
+            hour_range=hour_range,
+            merge_on=bool(merge_on),
+            merge_threshold=merge_threshold,
+            clip_count_threshold=clip_count_threshold,
+            selected_clusters=selected_clusters,
+            manual_labels_cache=None
+        )
 
-        if dff_filtered.empty:
+        if export_df.empty:
             return dash.no_update
-
-        if not dff_filtered.empty and 'file_name' in dff_filtered.columns and 'channel' in dff_filtered.columns:
-            dff_filtered = dff_filtered.sort_values(['file_name', 'channel', 'cluster_id', 'clip_time']).reset_index(drop=True)
-            
-            # Ensure clip_duration is present
-            if 'clip_duration' not in dff_filtered.columns:
-                dff_filtered['clip_duration'] = 5.0
-            else:
-                 dff_filtered['clip_duration'] = pd.to_numeric(dff_filtered['clip_duration'], errors='coerce').fillna(5.0)
-
-            # OPTIMIZATION: Vectorized merge group calculation (replacing iterrows loop)
-            # Create shifted columns for comparison with previous row
-            prev_file = dff_filtered['file_name'].shift(1)
-            prev_channel = dff_filtered['channel'].shift(1)
-            prev_cluster = dff_filtered['cluster_id'].shift(1)
-            prev_clip_end = (dff_filtered['clip_time'] + dff_filtered['clip_duration']).shift(1)
-            
-            # Vectorized comparison: can this row merge with the previous one?
-            same_context = (
-                (dff_filtered['file_name'] == prev_file) &
-                (dff_filtered['channel'] == prev_channel) &
-                (dff_filtered['cluster_id'] == prev_cluster)
-            )
-            temporal_overlap = dff_filtered['clip_time'] <= prev_clip_end
-            can_merge = same_context & temporal_overlap & prev_clip_end.notna()
-            
-            # Create merge groups: increment group number where can_merge is False
-            # This preserves the exact same grouping logic as the original loop
-            merge_groups = (~can_merge).cumsum()
-            dff_filtered['merge_group'] = merge_groups
-            dff_filtered['clip_end'] = dff_filtered['clip_time'] + dff_filtered['clip_duration']
-            
-            agg_dict = {
-                'clip_time': ('clip_time', 'first'),
-                'clip_end': ('clip_end', 'max'),
-                'file_name': ('file_name', 'first'),
-                'channel': ('channel', 'first'),
-                'cluster_id': ('cluster_id', 'first'),
-                'start_dt': ('start_dt', 'first'),
-                'day_dt': ('day_dt', 'first'),
-                'clip_count': ('clip_count', 'sum') if 'clip_count' in dff_filtered.columns else ('clip_time', 'count')
-            }
-            
-            for col in ['wav_file', 'mp3_file', 'recorder_type', 'microlocation', 'model_name', 'cluster_num']:
-                if col in dff_filtered.columns:
-                    agg_dict[col] = (col, 'first')
-            
-            dff_merged = dff_filtered.groupby('merge_group').agg(**agg_dict).reset_index(drop=True)
-            dff_merged['clip_duration'] = dff_merged['clip_end'] - dff_merged['clip_time']
-            dff_merged = dff_merged.drop(columns=['clip_end'])
-            dff_filtered = dff_merged
-
-        export_df = pd.DataFrame()
-
-        if 'wav_file' in dff_filtered.columns:
-            export_df['wav_file'] = dff_filtered['wav_file'].astype(str)
-        elif 'mp3_file' in dff_filtered.columns:
-            mp3_str = dff_filtered['mp3_file'].astype(str)
-            export_df['wav_file'] = mp3_str.str.replace(r'_ch\d+\.mp3$', '.wav', regex=True)
-        elif 'file_name' in dff_filtered.columns:
-            export_df['wav_file'] = dff_filtered['file_name'].astype(str)
-        else:
-            export_df['wav_file'] = ''
-            
-        if 'day_dt' in dff_filtered.columns and 'start_dt' in dff_filtered.columns:
-            day_dt = pd.to_datetime(dff_filtered['day_dt'])
-            start_dt = pd.to_datetime(dff_filtered['start_dt'])
-            start_time_str = start_dt.dt.strftime('%H:%M:%S')
-            day_str = day_dt.dt.strftime('%Y-%m-%d')
-            
-            wav_start_datetime = pd.to_datetime(day_str + ' ' + start_time_str, errors='coerce')
-            export_df['date_time'] = wav_start_datetime.dt.strftime('%Y-%m-%d %H:%M:%S')
-            
-            def format_seconds_as_time(seconds):
-                """Convert seconds to HH:MM:SS format."""
-                if pd.isna(seconds) or seconds < 0:
-                    return ''
-                hours = int(seconds // 3600)
-                minutes = int((seconds % 3600) // 60)
-                secs = int(seconds % 60)
-                return f'{hours:02d}:{minutes:02d}:{secs:02d}'
-            
-            if 'clip_time' in dff_filtered.columns:
-                export_df['timestamp_start'] = dff_filtered['clip_time'].apply(format_seconds_as_time)
-            else:
-                export_df['timestamp_start'] = ''
-            
-            if 'clip_duration' in dff_filtered.columns and 'clip_time' in dff_filtered.columns:
-                clip_end_time = dff_filtered['clip_time'] + dff_filtered['clip_duration']
-                export_df['timestamp_end'] = clip_end_time.apply(format_seconds_as_time)
-            else:
-                export_df['timestamp_end'] = ''
-        else:
-            export_df['date_time'] = ''
-            export_df['timestamp_start'] = ''
-            export_df['timestamp_end'] = ''
-
-        # Apply manual labels
-        if 'clip_duration' not in dff_filtered.columns:
-             dff_filtered['clip_duration'] = 5.0
-        
-        # We need to import the function dynamically or use utils if available
-        # It is available as utils.apply_manual_labels_efficiently
-        dff_filtered = utils.apply_manual_labels_efficiently(dff_filtered)
-        
-        export_df['manual_label'] = dff_filtered['manual_label'] if 'manual_label' in dff_filtered.columns else 'Unlabeled'
-
-
-        export_df['cluster_id'] = dff_filtered['cluster_id'].astype(str) if 'cluster_id' in dff_filtered.columns else ''
-        export_df = export_df.sort_values(['wav_file', 'date_time'])
 
         return dcc.send_data_frame(export_df.to_csv, "filtered_data_export.csv", index=False)
 

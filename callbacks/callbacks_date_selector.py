@@ -60,6 +60,7 @@ def generate_date_selector(df, selected_dates=None):
     year_elements = []
     for year in sorted(year_dict.keys()):
         month_elements = []
+        all_months_in_year_selected = True
         for month in sorted(year_dict[year].keys()):
             month_name = pd.Timestamp(year=year, month=month, day=1).strftime('%B')
 
@@ -77,6 +78,8 @@ def generate_date_selector(df, selected_dates=None):
             month_select_all_val = []
             if len(day_values) == len(current_month_dates) and len(day_values) > 0:
                 month_select_all_val = ['all']
+            else:
+                all_months_in_year_selected = False
 
             month_elements.append(
                 html.Details([
@@ -107,6 +110,7 @@ def generate_date_selector(df, selected_dates=None):
                 ], open=False, style={'marginBottom': '5px'})
             )
 
+        year_select_all_val = ['all'] if (len(month_elements) > 0 and all_months_in_year_selected) else []
         year_elements.append(
             html.Details([
                 html.Summary(
@@ -114,7 +118,7 @@ def generate_date_selector(df, selected_dates=None):
                         dcc.Checklist(
                             id={'type': 'year-select-all', 'year': year},
                             options=[{'label': '', 'value': 'all'}],
-                            value=['all'],
+                            value=year_select_all_val,
                             labelStyle={'display': 'inline-block', 'marginRight': '5px'},
                             style={'display': 'inline-block', 'marginRight': '5px'},
                             persistence=False
@@ -137,40 +141,102 @@ def generate_date_selector(df, selected_dates=None):
     ])
 
 
+def sync_year_hierarchy_state(triggered_type, triggered_month, year_val, months_vals, dates_vals, options_list, month_ids, date_ids):
+    """
+    Pure state-transition function for the year/month/date hierarchy.
+    Returns (new_dates_vals, new_months_vals, new_year_val).
+    """
+    month_to_idx = {mid['month']: i for i, mid in enumerate(month_ids) if isinstance(mid, dict) and 'month' in mid}
+    date_to_idx = {did['month']: i for i, did in enumerate(date_ids) if isinstance(did, dict) and 'month' in did}
+
+    new_dates_vals = [list(d) if d else [] for d in dates_vals]
+    new_months_vals = [list(m) if m else [] for m in months_vals]
+
+    if triggered_type == 'year-select-all':
+        is_all = ('all' in year_val) if year_val else False
+        if is_all:
+            for m, d_idx in date_to_idx.items():
+                if options_list and d_idx < len(options_list) and options_list[d_idx]:
+                    new_dates_vals[d_idx] = [opt['value'] for opt in options_list[d_idx]]
+            for m, m_idx in month_to_idx.items():
+                new_months_vals[m_idx] = ['all']
+            new_year_val = ['all']
+            return new_dates_vals, new_months_vals, new_year_val
+        else:
+            all_prev_months_selected = all(('all' in m if m else False) for m in months_vals) if months_vals else False
+            if all_prev_months_selected:
+                for m, d_idx in date_to_idx.items():
+                    new_dates_vals[d_idx] = []
+                for m, m_idx in month_to_idx.items():
+                    new_months_vals[m_idx] = []
+            return new_dates_vals, new_months_vals, []
+
+    if triggered_type == 'month-select-all':
+        m_idx = month_to_idx.get(triggered_month)
+        if m_idx is not None:
+            is_month_all = ('all' in months_vals[m_idx]) if months_vals[m_idx] else False
+            d_idx = date_to_idx.get(triggered_month)
+            if d_idx is not None and options_list and d_idx < len(options_list) and options_list[d_idx]:
+                new_dates_vals[d_idx] = [opt['value'] for opt in options_list[d_idx]] if is_month_all else []
+            new_months_vals[m_idx] = ['all'] if is_month_all else []
+
+    elif triggered_type == 'date-checklist':
+        d_idx = date_to_idx.get(triggered_month)
+        if d_idx is not None:
+            opts_set = set(opt['value'] for opt in options_list[d_idx]) if options_list and d_idx < len(options_list) and options_list[d_idx] else set()
+            vals_set = set(dates_vals[d_idx]) if dates_vals and d_idx < len(dates_vals) and dates_vals[d_idx] else set()
+            m_idx = month_to_idx.get(triggered_month)
+            if m_idx is not None:
+                new_months_vals[m_idx] = ['all'] if (vals_set == opts_set and len(opts_set) > 0) else []
+
+    all_months_selected = all(('all' in m if m else False) for m in new_months_vals) if new_months_vals else False
+    new_year_val = ['all'] if all_months_selected else []
+    return new_dates_vals, new_months_vals, new_year_val
+
+
 def register_date_selector_callbacks(app):
-    
-    @app.callback(
-        [Output({'type': 'date-checklist', 'year': MATCH, 'month': MATCH}, 'value'),
-         Output({'type': 'month-select-all', 'year': MATCH, 'month': MATCH}, 'value')],
-        [Input({'type': 'date-checklist', 'year': MATCH, 'month': MATCH}, 'value'),
-         Input({'type': 'month-select-all', 'year': MATCH, 'month': MATCH}, 'value')],
-        [State({'type': 'date-checklist', 'year': MATCH, 'month': MATCH}, 'options')],
-        prevent_initial_call=True
-    )
-    def sync_month_and_dates(selected_dates_in, month_select_in, options):
-        triggered_id = dash.callback_context.triggered_id
-        if isinstance(triggered_id, dict):
-            triggered_type = triggered_id.get('type')
-            if triggered_type == 'month-select-all':
-                if options is None: return dash.no_update, dash.no_update
-                all_dates = [opt['value'] for opt in options]
-                return (all_dates, dash.no_update) if month_select_in == ['all'] else ([], dash.no_update)
-            elif triggered_type == 'date-checklist':
-                if options is None: return dash.no_update, dash.no_update
-                selected_dates_set = set() if selected_dates_in is None else set(selected_dates_in)
-                all_options_set = set(opt['value'] for opt in options)
-                return (dash.no_update, ['all']) if selected_dates_set == all_options_set else (dash.no_update, [])
-        return dash.no_update, dash.no_update
 
     @app.callback(
-        Output({'type': 'year-select-all', 'year': MATCH}, 'value'),
-        Input({'type': 'month-select-all', 'year': MATCH, 'month': ALL}, 'value'),
+        [Output({'type': 'date-checklist', 'year': MATCH, 'month': ALL}, 'value'),
+         Output({'type': 'month-select-all', 'year': MATCH, 'month': ALL}, 'value'),
+         Output({'type': 'year-select-all', 'year': MATCH}, 'value')],
+        [Input({'type': 'year-select-all', 'year': MATCH}, 'value'),
+         Input({'type': 'month-select-all', 'year': MATCH, 'month': ALL}, 'value'),
+         Input({'type': 'date-checklist', 'year': MATCH, 'month': ALL}, 'value')],
+        [State({'type': 'date-checklist', 'year': MATCH, 'month': ALL}, 'options'),
+         State({'type': 'date-checklist', 'year': MATCH, 'month': ALL}, 'id'),
+         State({'type': 'month-select-all', 'year': MATCH, 'month': ALL}, 'id')],
         prevent_initial_call=True
     )
-    def update_year_checkbox(all_month_checkboxes):
-        if not all_month_checkboxes: return []
-        all_months_selected = all(['all' in month_val if month_val else False for month_val in all_month_checkboxes])
-        return ['all'] if all_months_selected and len(all_month_checkboxes) > 0 else []
+    def sync_year_hierarchy(year_in, months_in, dates_in, options_list, date_ids, month_ids):
+        ctx = dash.callback_context
+        if not ctx.triggered:
+            return dash.no_update
+        triggered_id = ctx.triggered_id
+        if not isinstance(triggered_id, dict):
+            return dash.no_update
+
+        t_type = triggered_id.get('type')
+        t_month = triggered_id.get('month')
+
+        new_dates, new_months, new_year = sync_year_hierarchy_state(
+            t_type, t_month, year_in, months_in, dates_in, options_list, month_ids, date_ids
+        )
+
+        if new_dates == dates_in and new_months == months_in and new_year == year_in:
+            return dash.no_update
+
+        out_dates = [
+            n if n != o else dash.no_update
+            for n, o in zip(new_dates, dates_in)
+        ] if dates_in else []
+        out_months = [
+            n if n != o else dash.no_update
+            for n, o in zip(new_months, months_in)
+        ] if months_in else []
+        out_year = new_year if new_year != year_in else dash.no_update
+
+        return out_dates, out_months, out_year
 
     @app.callback(
         Output({'type': 'month-container-wrapper', 'year': MATCH, 'month': MATCH}, 'style'),

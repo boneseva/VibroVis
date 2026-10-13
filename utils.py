@@ -22,8 +22,22 @@ def load_audio_segment(mp3_file_relative_path, clip_time, clip_duration, channel
     full_path = os.path.join(read_data.DATA_DIR, mp3_file_relative_path)
     
     if not os.path.exists(full_path):
-        print(f"Warning: Audio file not found at {full_path}")
-        return None, None
+        # Check canonical recordings/ directory structure
+        candidate_paths = [
+            os.path.join(read_data.BASE_DATA_DIR, "recordings", mp3_file_relative_path),
+            os.path.join(read_data.BASE_DATA_DIR, "zabe", "recordings", mp3_file_relative_path),
+            os.path.join(read_data.BASE_DATA_DIR, "vibro", "recordings", mp3_file_relative_path),
+            os.path.join(read_data.BASE_DATA_DIR, "vibro", "mp3", mp3_file_relative_path),
+        ]
+        found = False
+        for cand in candidate_paths:
+            if os.path.exists(cand):
+                full_path = cand
+                found = True
+                break
+        if not found:
+            print(f"Warning: Audio file not found at {full_path}")
+            return None, None
 
     try:
         # Suppress stderr from mpg123 decoder to prevent console clutter
@@ -336,6 +350,26 @@ def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels
 
             indices = dff.index[mask]
             if indices.empty:
+                continue
+
+            # Detect if legacy key (loc, micro, f_base, chan) matches multiple canonical recordings
+            if 'recording_id' in dff.columns:
+                rec_ids = dff.loc[indices, 'recording_id'].dropna().unique()
+            elif 'wav_file' in dff.columns:
+                rec_ids = dff.loc[indices, 'wav_file'].dropna().unique()
+            elif 'mp3_file' in dff.columns:
+                rec_ids = dff.loc[indices, 'mp3_file'].dropna().unique()
+            else:
+                rec_ids = []
+
+            if len(rec_ids) > 1:
+                # Ambiguous legacy key matches multiple canonical recordings!
+                # Never broadcast an ambiguous legacy label.
+                import logging
+                logging.getLogger(__name__).warning(
+                    "[labels] Ambiguous legacy key %s matches %d recordings (%s). Not broadcasting.",
+                    (loc, micro, f_base, chan), len(rec_ids), list(rec_ids)[:3]
+                )
                 continue
 
             # Vectorize candidate starts/ends for this group
