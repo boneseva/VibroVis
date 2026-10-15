@@ -202,7 +202,7 @@ def compute_spectrogram(segment, samplerate, scale='log', fft_window_size=1024, 
 
 
 # --- *** MANUAL LABELING HELPERS *** ---
-def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels_lock=None):
+def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels_lock=None, clip_duration_cache=None):
     """
     Apply manual labels to dff using a high-performance vectorized approach.
     Optimized to handle 1M+ rows without redundant string scans or console flooding.
@@ -263,14 +263,17 @@ def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels
     # Most dffs in the app only represent one location at a time.
     current_locations = dff['location'].unique() if 'location' in dff.columns else []
 
-    # 1. Import the duration cache (plain dict, no lock needed).
+    # 1. Import the duration cache.
     #    Keys are the same 5-tuples as MANUAL_LABELS_CACHE.
-    #    Values are float clip durations written at label-save time.
+    #    Values are (dur, model_name) written at label-save time.
     #    Falls back gracefully to an empty dict if not available.
-    try:
-        from callbacks.callbacks_constants import CLIP_DURATION_CACHE as _dur_cache
-    except Exception:
-        _dur_cache = {}
+    if clip_duration_cache is not None:
+        _dur_cache = clip_duration_cache
+    else:
+        try:
+            from callbacks.callbacks_constants import CLIP_DURATION_CACHE as _dur_cache
+        except Exception:
+            _dur_cache = {}
 
     # 2. Group labels by (loc, micro, f_base, chan).
     #    Key precision: round(clip_time * 10) → 0.1 s units (stored as int).
@@ -382,6 +385,22 @@ def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels
             labeled_items = []
             max_labeled_span = 0
             for labeled_start, (lbl, labeled_end, labeled_model) in clip_map.items():
+                # Derive missing duration/model metadata from authoritative loaded data if possible
+                if labeled_end is None and cand_starts.size > 0:
+                    exact_cand_matches = np.nonzero(cand_starts == labeled_start)[0]
+                    if exact_cand_matches.size > 0:
+                        first_idx = exact_cand_matches[0]
+                        derived_dur = float(cand_cds[first_idx]) / 10.0
+                        derived_model = current_model or (str(dff.loc[indices[first_idx], 'model_name']) if 'model_name' in dff.columns else None)
+                        labeled_end = labeled_start + round(derived_dur * 10)
+                        labeled_model = derived_model
+                        # Cache the derived metadata back into _dur_cache
+                        k_tuple = (loc, micro, f_base, chan, labeled_start)
+                        try:
+                            _dur_cache[k_tuple] = (derived_dur, derived_model)
+                        except Exception:
+                            pass
+
                 span = (labeled_end - labeled_start) if (labeled_end is not None) else 0
                 if span > max_labeled_span:
                     max_labeled_span = span

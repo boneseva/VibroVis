@@ -563,7 +563,7 @@ def create_layout(df):
                                 persistence=False
                             ),
 
-                            html.Div(id='merge-threshold-container', children=[
+                            html.Div(id='merge-threshold-container', style={'display': 'none'}, children=[
                                 html.Div([
                                     html.Label("Merge threshold"),
                                     html.Div(className="tooltip-container", children=[
@@ -578,7 +578,7 @@ def create_layout(df):
                                            marks={i: str(i) for i in range(0, 101, 20)})
                             ]),
 
-                            html.Div(id='clip-count-threshold-container', children=[
+                            html.Div(id='clip-count-threshold-container', style={'display': 'none'}, children=[
                                 html.Div([
                                     html.Label("Clip count threshold"),
                                     html.Div(className="tooltip-container", children=[

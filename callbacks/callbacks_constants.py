@@ -16,7 +16,7 @@ server_cache = {}
 
 # Thread-safe manual labels cache using diskcache for Gunicorn production
 # This ensures all threads see the same state immediately
-cache_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'cache', 'manual_labels')
+cache_dir = os.environ.get('VIBROVIS_MANUAL_LABELS_DIR') or os.path.join(os.path.dirname(os.path.dirname(__file__)), 'cache', 'manual_labels')
 MANUAL_LABELS_CACHE = dc.Cache(cache_dir)
 MANUAL_LABELS_LOCK = threading.RLock()  # Reentrant lock for thread safety
 
@@ -25,11 +25,10 @@ CLUSTER_COLORS = ['#4E79A7', '#F28E2B', '#E15759', '#76B7B2', '#EDC948', '#B07AA
                   '#BADCBD', '#59A14F', '#9C755F', '#BAB0AC', '#D37295', '#A0CBE8',
                   '#FFBE7D', '#9CD17D', '#D4B7A9', '#D9D9D9', '#FABFD2']
 
-# In-memory map: label key → clip duration (seconds, float).
-# Written at label-save time so apply_manual_labels_efficiently can do
-# overlap-based matching between models that use different clip lengths.
-# Plain dict — no lock needed (GIL protects simple writes; stale reads are benign).
-CLIP_DURATION_CACHE: dict = {}
+# Persistent map: label key → (clip duration, model_name).
+# Stored in diskcache so cross-model overlap matching survives application restarts.
+dur_cache_dir = os.environ.get('VIBROVIS_CLIP_DURATIONS_DIR') or os.path.join(os.path.dirname(os.path.dirname(__file__)), 'cache', 'clip_durations')
+CLIP_DURATION_CACHE = dc.Cache(dur_cache_dir)
 
 # Authoritative Customdata Column Definitions for Scattergl traces (Phase 0.8)
 # row_idx was removed as dead data (duplicate of plot_id).

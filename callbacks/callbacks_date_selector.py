@@ -18,10 +18,10 @@ def generate_date_selector(df, selected_dates=None):
         return html.Div("No date data found.")
 
     if 'day_dt_str' in df.columns:
-        date_strings = sorted(df['day_dt_str'].unique())
+        date_strings = sorted([str(d) for d in df['day_dt_str'].dropna().unique() if str(d).strip()])
         dates = [pd.to_datetime(d).date() for d in date_strings]
     elif 'day_dt' in df.columns:
-        dates = pd.to_datetime(df['day_dt']).dt.date.unique()
+        dates = pd.to_datetime(df['day_dt'].dropna()).dt.date.unique()
         dates = sorted(dates)
         date_strings = [d.strftime('%Y-%m-%d') for d in dates]
     else:

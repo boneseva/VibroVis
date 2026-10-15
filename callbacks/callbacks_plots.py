@@ -3,6 +3,7 @@ Plot-related callbacks: scatter plot, spectrogram, and histogram.
 """
 import time
 import os
+import sys
 import traceback # Added for debugutils
 import math
 import hashlib
@@ -39,7 +40,7 @@ def get_label_for_clip(loc, micro, file_basename, channel, clip_time):
     Content-based: keyed on round(clip_time * 10) so the same physical clip is
     labelled consistently across model/K switches.
     """
-    key = (loc, micro, file_basename, int(channel), round(float(clip_time) * 10))
+    key = (sys.intern(str(loc)), sys.intern(str(micro)), sys.intern(str(file_basename)), int(channel), round(float(clip_time) * 10))
     label = MANUAL_LABELS_CACHE.get(key)
     return label if label and label != 'Unlabeled' else 'Unlabeled'
 
@@ -401,6 +402,7 @@ def register_plot_callbacks(app):
             clip_count_threshold = 1
             cluster_checkbox_values = []
             stored_indices = None
+            merge_on = False
 
         if is_fresh_load:
             stored_indices = None
@@ -1481,7 +1483,7 @@ def register_plot_callbacks(app):
                     with MANUAL_LABELS_LOCK:
                         for ct, dur in clips_to_update:
                             clip_time_key = round(ct * 10)
-                            instance_key = (loc, micro, file_basename, int(channel), clip_time_key)
+                            instance_key = (sys.intern(str(loc)), sys.intern(str(micro)), sys.intern(str(file_basename)), int(channel), clip_time_key)
                             if label_val == 'Unlabeled':
                                 if instance_key in MANUAL_LABELS_CACHE:
                                     try:
@@ -1564,7 +1566,7 @@ def register_plot_callbacks(app):
                 with MANUAL_LABELS_LOCK:
                     for ct, dur in clips_to_update:
                         clip_time_key = round(ct * 10)
-                        instance_key = (loc, micro, file_basename, int(channel), clip_time_key)
+                        instance_key = (sys.intern(str(loc)), sys.intern(str(micro)), sys.intern(str(file_basename)), int(channel), clip_time_key)
                         if label_val == 'Unlabeled':
                             if instance_key in MANUAL_LABELS_CACHE:
                                 try:
@@ -1642,15 +1644,39 @@ def register_plot_callbacks(app):
             else:
                 plot_id = None
             
+            if plot_id not in dff.index:
+                try:
+                    if int(plot_id) in dff.index:
+                        plot_id = int(plot_id)
+                except Exception:
+                    pass
+
             if plot_id in dff.index:
                 row = dff.loc[plot_id]
+                if isinstance(row, pd.DataFrame):
+                    row = row.iloc[0]
+
+                # 1. Prefer the already-resolved manual_label on the selected row
+                # (e.g. from cross-model overlap propagation or direct assignment)
+                resolved_label = row.get('manual_label')
+                if pd.notna(resolved_label):
+                    resolved_label_str = str(resolved_label).strip()
+                    if resolved_label_str and resolved_label_str != 'Unlabeled':
+                        return resolved_label_str
+
+                # 2. Fall back to exact-key lookup if row label is absent or Unlabeled
                 loc = row.get('location', 'Unknown')
                 if pd.isna(loc): loc = 'Unknown'
                 micro = row.get('microlocation', 'Unknown') 
                 if pd.isna(micro): micro = 'Unknown'
-                file_basename = str(row['mp3_file']).replace('\\', '/').split('/')[-1]
+                if 'mp3_file' in row and pd.notna(row['mp3_file']):
+                    file_basename = str(row['mp3_file']).replace('\\', '/').split('/')[-1]
+                elif 'file_name' in row and pd.notna(row['file_name']):
+                    file_basename = str(row['file_name']).replace('\\', '/').split('/')[-1]
+                else:
+                    file_basename = 'Unknown'
                 channel = int(row['channel'])
-                # Content-based lookup: same clip_time = same label across models
+                # Content-based lookup fallback: same clip_time = same label across models
                 lbl = get_label_for_clip(loc, micro, file_basename, channel, row['clip_time'])
                 return "" if lbl == 'Unlabeled' else lbl
             return ""
