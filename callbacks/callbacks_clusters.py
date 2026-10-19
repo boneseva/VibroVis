@@ -2,11 +2,13 @@
 Cluster-related callbacks: rendering, colors, names, and checkboxes.
 """
 import time
+from collections import Counter
 import dash
 from dash import Input, Output, State, html, dcc, ALL
 import pandas as pd
 
 from callbacks.callbacks_constants import MODEL_DATA_CACHE, initial_df, CLUSTER_COLORS, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK
+from utils import apply_manual_labels_efficiently
 
 
 def register_cluster_callbacks(app):
@@ -27,22 +29,142 @@ def register_cluster_callbacks(app):
          State('cluster-name-store', 'data'),
          State('last-preset-load-time', 'data'),
          State({'type': 'cluster-checkbox', 'index': ALL}, 'value'),
-         State({'type': 'cluster-checkbox', 'index': ALL}, 'id')]
+         State({'type': 'cluster-checkbox', 'index': ALL}, 'id'),
+         State({'type': 'label-checkbox', 'index': ALL}, 'value'),
+         State({'type': 'label-checkbox', 'index': ALL}, 'id')]
     )
     def render_cluster_controls(num_clusters, model_ready, preset_selected_ids, cluster_stats,
                                 color_mode, manual_labels_trigger, label_names_data, label_colors_data,
                                 current_colors, current_names, last_preset_time, 
-                                current_checkbox_values, current_checkbox_ids):
+                                current_checkbox_values, current_checkbox_ids,
+                                current_label_checkbox_values=None, current_label_checkbox_ids=None):
         try:
             dff = MODEL_DATA_CACHE.get('df')
             if dff is None or dff.empty: dff = initial_df
             if dff.empty: return []
 
             is_manual = (color_mode == 'manual')
-            clusters = []
+            triggered_ids = []
+            try:
+                if dash.callback_context and dash.callback_context.triggered:
+                    triggered_ids = [t['prop_id'] for t in dash.callback_context.triggered]
+            except Exception:
+                pass
+            
+            is_mode_change = any('color-mode-radio' in t_id for t_id in triggered_ids)
+            is_reset_trigger = any('num-cluster-dropdown' in t_id for t_id in triggered_ids) or \
+                               any('model-data-ready-signal' in t_id for t_id in triggered_ids) or \
+                               is_mode_change
 
-            # ALWAYS show cluster IDs regardless of color mode.
-            # In manual mode we colour each cluster by the most-common label assigned to it.
+            if is_manual:
+                # -----------------------------------------------------------------
+                # MANUAL LABELS MODE: Display human-readable manual labels in legend
+                # -----------------------------------------------------------------
+                with MANUAL_LABELS_LOCK:
+                    cache_keys = list(MANUAL_LABELS_CACHE.iterkeys())
+                    unique_labels = []
+                    for key in cache_keys:
+                        try:
+                            unique_labels.append(MANUAL_LABELS_CACHE[key])
+                        except KeyError:
+                            continue
+                    unique_labels = sorted(set(unique_labels))
+
+                if 'manual_label' in dff.columns:
+                    for l in dff['manual_label'].dropna().unique():
+                        if l not in unique_labels:
+                            unique_labels.append(l)
+                    unique_labels = sorted(set(unique_labels))
+
+                if 'Unlabeled' not in unique_labels:
+                    unique_labels.append('Unlabeled')
+                if 'Unlabeled' in unique_labels:
+                    unique_labels.remove('Unlabeled')
+                    unique_labels.append('Unlabeled')
+
+                previously_selected = set()
+                previously_rendered = set()
+                if (not is_reset_trigger) and current_label_checkbox_values and current_label_checkbox_ids:
+                    for val, id_dict in zip(current_label_checkbox_values, current_label_checkbox_ids):
+                        if val and 'on' in val:
+                            previously_selected.add(str(id_dict['index']))
+                        previously_rendered.add(str(id_dict['index']))
+
+                labeled_total = 0
+                if cluster_stats and '__labeled_total__' in cluster_stats:
+                    labeled_total = int(cluster_stats['__labeled_total__'])
+                no_labels_applied = (labeled_total == 0)
+
+                children = []
+                for lbl in unique_labels:
+                    lbl_str = str(lbl)
+
+                    if lbl == 'Unlabeled':
+                        default_color = '#D9D9D9'
+                    elif label_colors_data and lbl_str in label_colors_data:
+                        default_color = label_colors_data[lbl_str]
+                    else:
+                        non_unlabeled = [l for l in unique_labels if l != 'Unlabeled']
+                        idx = non_unlabeled.index(lbl) if lbl in non_unlabeled else 0
+                        default_color = CLUSTER_COLORS[idx % len(CLUSTER_COLORS)]
+
+                    color_val = default_color
+                    name_val = label_names_data.get(lbl_str, lbl_str) if label_names_data else lbl_str
+
+                    if lbl_str in previously_rendered:
+                        is_checked = (lbl_str in previously_selected)
+                    else:
+                        is_checked = True
+
+                    percent_str = ""
+                    count = int(cluster_stats.get(lbl_str, 0)) if cluster_stats else 0
+                    if lbl_str != 'Unlabeled' and labeled_total > 0:
+                        pct = (count / labeled_total) * 100
+                        percent_str = f" ({count:,}, {pct:.1f}%)"
+                    elif lbl_str == 'Unlabeled' and no_labels_applied:
+                        percent_str = " (No labels applied yet)"
+                    elif lbl_str == 'Unlabeled' and count > 0:
+                        percent_str = f" ({count:,})"
+
+                    row = html.Div([
+                        dcc.Checklist(
+                            id={'type': 'label-checkbox', 'index': lbl},
+                            options=[{'label': '', 'value': 'on'}],
+                            value=['on'] if is_checked else [],
+                            style={'margin': '0', 'padding': '0', 'display': 'flex', 'transform': 'scale(1)', 'marginRight': '8px'}
+                        ),
+                        dcc.Input(
+                            id={'type': 'label-color-picker', 'index': lbl},
+                            type='color',
+                            value=color_val,
+                            disabled=(lbl == 'Unlabeled'),
+                            style={'width': '40px', 'height': '24px', 'padding': '0', 'border': 'none',
+                                   'cursor': 'pointer' if lbl != 'Unlabeled' else 'not-allowed',
+                                   'marginLeft': '5px', 'backgroundColor': 'transparent', 'flexShrink': 0,
+                                   'opacity': 0.6 if lbl == 'Unlabeled' else 1.0}
+                        ),
+                        dcc.Input(
+                            id={'type': 'label-name-input', 'index': lbl},
+                            type='text',
+                            value=name_val,
+                            debounce=True,
+                            placeholder=lbl_str,
+                            style={'flex': '1', 'minWidth': '80px', 'border': 'none', 'backgroundColor': 'transparent',
+                                   'fontSize': '0.85em', 'color': '#333', 'marginLeft': '8px', 'textAlign': 'left'}
+                        ),
+                        html.Span(
+                            percent_str,
+                            style={'fontSize': '0.8em', 'color': '#666', 'marginLeft': 'auto', 'marginRight': '16px', 'whiteSpace': 'nowrap'}
+                        )
+                    ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'space-between', 'backgroundColor': '#f0f0f0', 'borderRadius': '5px',
+                               'padding': '4px 8px', 'border': '1px solid #ccc', 'whiteSpace': 'nowrap',
+                               'width': '100%', 'height': '40px', 'minHeight': '40px', 'boxSizing': 'border-box', 'overflow': 'hidden'})
+                    children.append(row)
+                return children
+
+            # -----------------------------------------------------------------
+            # CLUSTER MODE: Display cluster controls, mapping to label if applicable
+            # -----------------------------------------------------------------
             if not num_clusters:
                 return []
             try:
@@ -54,23 +176,29 @@ def register_cluster_callbacks(app):
             except Exception:
                 return []
 
+            # Check if any cluster unambiguously corresponds 100% to a single manual label
+            cluster_to_single_label = {}
+            with MANUAL_LABELS_LOCK:
+                has_cached_labels = bool(MANUAL_LABELS_CACHE)
+            if has_cached_labels and 'cluster_id' in dff.columns:
+                if 'manual_label' not in dff.columns:
+                    dff_labeled = apply_manual_labels_efficiently(dff.copy())
+                else:
+                    dff_labeled = dff
+                for c in clusters:
+                    c_rows = dff_labeled[dff_labeled['cluster_id'] == c]
+                    if not c_rows.empty and 'manual_label' in c_rows.columns:
+                        non_unlabeled = c_rows[c_rows['manual_label'] != 'Unlabeled']['manual_label'].unique()
+                        unlabeled_cnt = (c_rows['manual_label'] == 'Unlabeled').sum()
+                        if len(non_unlabeled) == 1 and unlabeled_cnt == 0:
+                            cluster_to_single_label[c] = str(non_unlabeled[0])
+
+            shared_label_counts = Counter(cluster_to_single_label.values())
 
             children = []
-
             is_preset_active = last_preset_time and (time.time() - last_preset_time < 6.0)
             effective_preset_ids = preset_selected_ids if is_preset_active else None
-            
-            ctx = dash.callback_context
-            triggered_ids = [t['prop_id'] for t in ctx.triggered] if ctx.triggered else []
-            
-            # Reset logic:
-            # If mode changed, we should probably reset/select all.
-            is_mode_change = any('color-mode-radio' in t_id for t_id in triggered_ids)
-            is_reset_trigger = any('num-cluster-dropdown' in t_id for t_id in triggered_ids) or \
-                               any('model-data-ready-signal' in t_id for t_id in triggered_ids) or \
-                               is_mode_change
 
-            # Map previous selection state
             previously_selected = set()
             previously_rendered = set()
             should_preserve = (not is_preset_active) and (not is_reset_trigger) and current_checkbox_values and current_checkbox_ids
@@ -78,10 +206,7 @@ def register_cluster_callbacks(app):
             if should_preserve:
                 for val, id_dict in zip(current_checkbox_values, current_checkbox_ids):
                     if val and 'on' in val:
-                        # Use stringified index for reliable matching
                         previously_selected.add(str(id_dict['index']))
-                
-                # Also track what was rendered to distinguish "Unchecked" from "New"
                 for id_dict in current_checkbox_ids:
                     previously_rendered.add(str(id_dict['index']))
 
@@ -90,15 +215,12 @@ def register_cluster_callbacks(app):
                 total_clips = cluster_stats['total']
 
             for i, c in enumerate(clusters):
-                # c is always a cluster_id (int or float)
                 try:
                     c_idx = int(c) if not hasattr(c, 'item') else c.item()
                 except Exception:
                     c_idx = c
                 c_label_str = str(c_idx)
 
-                # Determine color — always use CLUSTER_COLORS by cluster index,
-                # regardless of whether we are in cluster or manual label mode.
                 try:
                     default_color = CLUSTER_COLORS[c_idx % len(CLUSTER_COLORS)]
                 except Exception:
@@ -106,30 +228,36 @@ def register_cluster_callbacks(app):
 
                 color_val = current_colors.get(c_label_str, default_color) if current_colors else default_color
 
-                # Display name: always show the cluster ID (or a user-set custom name)
-                name_val = current_names.get(c_label_str, c_label_str) if current_names else c_label_str
+                # Display name:
+                # 1. Custom user name in cluster-name-store takes priority
+                # 2. Cluster unambiguously corresponding to a single manual label
+                #    (with cluster ID prefix if multiple clusters share the same label)
+                # 3. Numeric cluster ID
+                if current_names and c_label_str in current_names:
+                    name_val = current_names[c_label_str]
+                elif c in cluster_to_single_label or c_idx in cluster_to_single_label:
+                    mapped_lbl = cluster_to_single_label.get(c, cluster_to_single_label.get(c_idx))
+                    if shared_label_counts.get(mapped_lbl, 0) > 1:
+                        name_val = f"{c_label_str} ({mapped_lbl})"
+                    else:
+                        name_val = mapped_lbl
+                else:
+                    name_val = c_label_str
 
                 is_checked = True
-                # Ensure reliable comparison key (string)
                 c_key_for_check = str(c_idx)
                  
                 if is_preset_active:
                      if effective_preset_ids is not None:
                          is_checked = c_idx in effective_preset_ids
                 elif should_preserve:
-                    # New Logic:
-                    # 1. If it was selected before -> True.
-                    # 2. If it was NOT selected but WAS rendered -> False (Explicitly unchecked).
-                    # 3. If it was NOT rendered -> True (New item).
                     if c_key_for_check in previously_selected:
                         is_checked = True
                     elif c_key_for_check in previously_rendered:
                         is_checked = False
                     else:
-                        # New item — default to checked
                         is_checked = True
 
-                # Percentage of clips in this cluster
                 percent_str = ""
                 if cluster_stats and c_label_str in cluster_stats and total_clips > 0:
                     count = cluster_stats[c_label_str]
@@ -137,14 +265,12 @@ def register_cluster_callbacks(app):
                     percent_str = f" ({pct:.1f}%)"
 
                 row = html.Div([
-                    # Checkbox (scaled for better visibility)
                     dcc.Checklist(
                         id={'type': 'cluster-checkbox', 'index': c_idx},
                         options=[{'label': '', 'value': 'on'}],
                         value=['on'] if is_checked else [],
                         style={'margin': '0', 'padding': '0', 'display': 'flex', 'transform': 'scale(1)', 'marginRight': '8px'}
                     ),
-                    # Color picker (small square)
                     dcc.Input(
                         id={'type': 'cluster-color-picker', 'index': c_idx},
                         type='color',
@@ -152,7 +278,6 @@ def register_cluster_callbacks(app):
                         style={'width': '40px', 'height': '24px', 'padding': '0', 'border': 'none', 'cursor': 'pointer',
                                'marginLeft': '5px', 'backgroundColor': 'transparent', 'flexShrink': 0}
                     ),
-                    # Name / ID input – expands to fill remaining space
                     dcc.Input(
                         id={'type': 'cluster-name-input', 'index': c_idx},
                         type='text',
@@ -162,7 +287,6 @@ def register_cluster_callbacks(app):
                         style={'flex': '1', 'minWidth': '80px', 'border': 'none', 'backgroundColor': 'transparent',
                                'fontSize': '0.85em', 'color': '#333', 'marginLeft': '8px', 'textAlign': 'left'}
                     ),
-                    # Percentage – pushed to far right
                     html.Span(
                         percent_str,
                         style={'fontSize': '0.8em', 'color': '#666', 'marginLeft': 'auto', 'marginRight': '16px', 'whiteSpace': 'nowrap'}
@@ -220,28 +344,50 @@ def register_cluster_callbacks(app):
         return color_map
 
     @app.callback(
+        Output({'type': 'cluster-checkbox', 'index': ALL}, 'value'),
+        Input('all-or-none-cluster', 'value'),
+        State({'type': 'cluster-checkbox', 'index': ALL}, 'options'),
+        prevent_initial_call=True
+    )
+    def handle_cluster_select_all(cluster_select_all, cluster_opts):
+        is_selected = bool(cluster_select_all and len(cluster_select_all) > 0)
+        return [['on'] if is_selected else [] for _ in (cluster_opts or [])]
+
+    @app.callback(
         Output({'type': 'label-checkbox', 'index': ALL}, 'value'),
-        Input('all-or-none-label', 'value'),
+        [Input('all-or-none-cluster', 'value'),
+         Input('all-or-none-label', 'value')],
         State({'type': 'label-checkbox', 'index': ALL}, 'options'),
         prevent_initial_call=True
     )
-    def handle_label_select_all(select_all_value, options_list):
-        is_selected = (len(select_all_value) > 0)
-        new_values = []
-        for _ in options_list:
-            if is_selected:
-                new_values.append(['on'])
-            else:
-                new_values.append([])
-        return new_values
+    def handle_label_select_all(cluster_select_all, label_select_all, label_opts):
+        triggered_id = 'all-or-none-cluster'
+        try:
+            if dash.callback_context and dash.callback_context.triggered:
+                triggered_id = dash.callback_context.triggered[0]['prop_id'].split('.')[0]
+        except Exception:
+            pass
+        if triggered_id == 'all-or-none-label':
+            is_selected = bool(label_select_all and len(label_select_all) > 0)
+        else:
+            is_selected = bool(cluster_select_all and len(cluster_select_all) > 0)
+        return [['on'] if is_selected else [] for _ in (label_opts or [])]
+
+    @app.callback(
+        [Output('cluster-legend-header-label', 'children'),
+         Output('cluster-legend-tooltip-text', 'children')],
+        Input('color-mode-radio', 'value')
+    )
+    def update_legend_header(color_mode):
+        if color_mode == 'manual':
+            return "Manual Labels", "Select specific manual labels to display. Click the color block to change the label color."
+        return "Clusters", "Select specific clusters to display from the chosen model. Click the color block to change the cluster color."
 
     @app.callback(
         Output('label-filter-section', 'style'),
         Input('color-mode-radio', 'value')
     )
     def toggle_label_filter_section(color_mode):
-        if color_mode == 'manual':
-            return {'display': 'block'}
         return {'display': 'none'}
 
     @app.callback(
@@ -257,128 +403,8 @@ def register_cluster_callbacks(app):
          State({'type': 'label-checkbox', 'index': ALL}, 'id'),
          State('color-mode-radio', 'value')]
     )
-    def render_label_controls(manual_labels_trigger, cluster_colors_data, cluster_names_data,
-                              label_colors_data, label_names_data, cluster_stats, model_ready,
-                              current_values, current_ids, color_mode):
-        try:
-            # unique_labels from cache
-            with MANUAL_LABELS_LOCK:
-                cache_keys = list(MANUAL_LABELS_CACHE.iterkeys())
-                unique_labels = []
-                for key in cache_keys:
-                    try:
-                        label = MANUAL_LABELS_CACHE[key]
-                        unique_labels.append(label)
-                    except KeyError:
-                        # Key was deleted during iteration, skip it
-                        continue
-                unique_labels = sorted(set(unique_labels))
-            if 'Unlabeled' not in unique_labels:
-                unique_labels.append('Unlabeled')
-            
-            # Move Unlabeled to end
-            if 'Unlabeled' in unique_labels:
-                unique_labels.remove('Unlabeled')
-                unique_labels.append('Unlabeled')
-
-            # Map previous selection state
-            previously_selected = set()
-            previously_rendered = set()
-            
-            if current_values and current_ids:
-                for val, id_dict in zip(current_values, current_ids):
-                    if val and 'on' in val:
-                        previously_selected.add(str(id_dict['index']))
-                    previously_rendered.add(str(id_dict['index']))
-
-            labeled_total = 0
-            if cluster_stats and '__labeled_total__' in cluster_stats:
-                labeled_total = int(cluster_stats['__labeled_total__'])
-            no_labels_applied = (labeled_total == 0)
-
-            children = []
-            for lbl in unique_labels:
-                lbl_str = str(lbl)
-                
-                # Determine color
-                # Priority: 1. label_colors_data (single source of truth), 2. CLUSTER_COLORS sequential
-                if lbl == 'Unlabeled':
-                    default_color = '#D9D9D9'  # Locked to gray
-                elif label_colors_data and lbl_str in label_colors_data:
-                    default_color = label_colors_data[lbl_str]
-                else:
-                    # Fallback: same sequential assignment as sync_label_colors uses.
-                    # Use alphabetical position among non-Unlabeled labels as the index.
-                    non_unlabeled = [l for l in unique_labels if l != 'Unlabeled']
-                    idx = non_unlabeled.index(lbl) if lbl in non_unlabeled else 0
-                    default_color = CLUSTER_COLORS[idx % len(CLUSTER_COLORS)]
-
-                color_val = default_color
-
-                # Determine name
-                name_val = label_names_data.get(lbl_str, lbl_str) if label_names_data else lbl_str
-
-                is_checked = True
-                if lbl_str in previously_rendered:
-                    is_checked = lbl_str in previously_selected
-                else:
-                    is_checked = True
-
-                # Percentage
-                percent_str = ""
-                count = int(cluster_stats.get(lbl_str, 0)) if cluster_stats else 0
-                if lbl_str != 'Unlabeled' and labeled_total > 0:
-                    pct = (count / labeled_total) * 100
-                    percent_str = f" ({count:,}, {pct:.1f}%)"
-                elif lbl_str == 'Unlabeled' and no_labels_applied:
-                    percent_str = " (No labels applied yet)"
-                elif lbl_str == 'Unlabeled' and count > 0:
-                    percent_str = f" ({count:,})"
-
-                row = html.Div([
-                    # Checkbox
-                    dcc.Checklist(
-                        id={'type': 'label-checkbox', 'index': lbl},
-                        options=[{'label': '', 'value': 'on'}],
-                        value=['on'] if is_checked else [],
-                        style={'margin': '0', 'padding': '0', 'display': 'flex', 'transform': 'scale(1)', 'marginRight': '8px'}
-                    ),
-                    # Color picker
-                    dcc.Input(
-                        id={'type': 'label-color-picker', 'index': lbl},
-                        type='color',
-                        value=color_val,
-                        disabled=(lbl == 'Unlabeled'),  # Lock Unlabeled color
-                        style={'width': '40px', 'height': '24px', 'padding': '0', 'border': 'none', 
-                               'cursor': 'pointer' if lbl != 'Unlabeled' else 'not-allowed',
-                               'marginLeft': '5px', 'backgroundColor': 'transparent', 'flexShrink': 0,
-                               'opacity': 0.6 if lbl == 'Unlabeled' else 1.0}
-                    ),
-                    # Name Input
-                    dcc.Input(
-                        id={'type': 'label-name-input', 'index': lbl},
-                        type='text',
-                        value=name_val,
-                        debounce=True,
-                        placeholder=lbl_str,
-                        style={'flex': '1', 'minWidth': '80px', 'border': 'none', 'backgroundColor': 'transparent',
-                               'fontSize': '0.85em', 'color': '#333', 'marginLeft': '8px', 'textAlign': 'left'}
-                    ),
-                    # Percentage text
-                    html.Span(
-                        percent_str,
-                        style={'fontSize': '0.8em', 'color': '#666', 'marginLeft': 'auto', 'marginRight': '16px', 'whiteSpace': 'nowrap'}
-                    )
-                ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'space-between', 'backgroundColor': '#f0f0f0', 'borderRadius': '5px',
-                           'padding': '4px 8px', 'border': '1px solid #ccc', 'whiteSpace': 'nowrap',
-                           'width': '100%', 'height': '40px', 'minHeight': '40px', 'boxSizing': 'border-box', 'overflow': 'hidden'})
-
-                children.append(row)
-            return children
-        except Exception:
-            import traceback
-            traceback.print_exc()
-            return []
+    def render_label_controls(*args):
+        return []
 
     @app.callback(
         [Output('label-name-store', 'data'),

@@ -48,11 +48,21 @@ def create_layout(df):
     project_options = [{'label': p.name, 'value': p.id} for p in available_projects]
     default_project = available_projects[0].id if available_projects else None
 
-    # Load initial data for default project if df is empty
-    if (df is None or df.empty) and default_project:
-        df = read_data.get_initial_data_for_project(default_project)
+    # Load initial data for default project if df is empty or does not match default_project
+    if default_project:
+        is_df_matching_project = False
+        if df is not None and not df.empty and 'location' in df.columns:
+            first_loc = df['location'].dropna().iloc[0] if len(df['location'].dropna()) > 0 else None
+            if first_loc and read_data.is_valid_project_location(default_project, str(first_loc)):
+                is_df_matching_project = True
+        if not is_df_matching_project:
+            df = read_data.get_initial_data_for_project(default_project)
 
-    all_locations = sorted(df['location'].dropna().unique()) if df is not None and not df.empty else []
+    initial_project_metadata = None
+    if default_project:
+        initial_project_metadata = read_data.get_project_metadata_summary(default_project)
+
+    all_locations = sorted([str(loc) for loc in df['location'].dropna().unique()]) if df is not None and not df.empty else []
     default_location = all_locations[0] if all_locations else None
 
     if default_location and df is not None and not df.empty:
@@ -451,11 +461,11 @@ def create_layout(df):
                             ),
 
                             html.Div([
-                                html.Label("Clusters"),
+                                html.Label("Clusters", id='cluster-legend-header-label'),
                                 html.Div(className="tooltip-container", children=[
                                     html.Span(" ⓘ", className="info-icon"),
                                     html.Span("Select specific clusters to display from the chosen model. Click the color block to change the cluster color.",
-                                              className="tooltip-text")
+                                              className="tooltip-text", id='cluster-legend-tooltip-text')
                                 ])
                             ], className="label-with-info", style={'marginTop': '1em'}),
                             dcc.Checklist(id="all-or-none-cluster", options=[{"label": "Select All", "value": "All"}],
@@ -914,8 +924,8 @@ def create_layout(df):
             ], id='filter-container', className='filters-expanded'),
         ], id='main-content'),
 
-        dcc.Store(id='project-metadata-store', data=None),
-        dcc.Store(id='dataset-metadata-store', data=None),
+        dcc.Store(id='project-metadata-store', data=initial_project_metadata),
+        dcc.Store(id='dataset-metadata-store', data=initial_project_metadata),
         dcc.Store(id='histogram-time-scale-store', data='daily'),
         dcc.Store(id='filtered-data'),
         dcc.Store(id='spectrogram-raw-data-store'),

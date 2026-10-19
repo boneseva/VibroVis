@@ -208,20 +208,9 @@ def register_filter_callbacks(app):
         import read_data
         if not selected_project:
             return None, None
-        df = read_data.get_initial_data_for_project(selected_project)
-        if df is None or df.empty:
+        payload = read_data.get_project_metadata_summary(selected_project)
+        if not payload or not payload.get('locations'):
             return None, None
-        locations = sorted([str(loc) for loc in df['location'].dropna().unique()])
-        models = sorted([str(m) for m in df['model_name'].dropna().unique()])
-        # Deduplicate records to unique tuples needed by dropdown options
-        meta_df = df[['location', 'model_name', 'cluster_num']].dropna(subset=['location', 'model_name']).drop_duplicates()
-        records = meta_df.to_dict('records')
-        payload = {
-            'project_id': selected_project,
-            'locations': locations,
-            'models': models,
-            'records': records
-        }
         return payload, payload
 
     @app.callback(

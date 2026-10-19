@@ -2,6 +2,7 @@ import pathlib
 import re
 import os
 import ast
+from typing import Optional, List, Dict, Tuple, Any
 import pandas as pd
 from tqdm import tqdm
 
@@ -242,13 +243,15 @@ def get_project_parquet_path(project_id: str, base_dir: str = hierarchy.DEFAULT_
 def get_initial_data_for_location(
     project_id: str,
     location_id: Optional[str] = None,
-    base_dir: str = hierarchy.DEFAULT_DATA_DIR
+    base_dir: str = hierarchy.DEFAULT_DATA_DIR,
+    columns: Optional[List[str]] = None,
 ) -> pd.DataFrame:
     """
     Loads lightweight metadata columns for a specific hierarchical project and location.
     If location_id is provided, filters to that location (and matching wav_file prefix if applicable).
-    Returns an empty DataFrame with standard INITIAL_LAYOUT_COLUMNS if parquet is missing or unreadable.
+    Returns an empty DataFrame with requested columns if parquet is missing or unreadable.
     """
+    target_columns = columns if columns is not None else INITIAL_LAYOUT_COLUMNS
     parquet_path = get_location_parquet_path(project_id, location_id, base_dir=base_dir)
     if not parquet_path or not os.path.exists(parquet_path):
         # Fallback: check partitioned cache if monolithic final_data.parquet is absent
@@ -269,7 +272,7 @@ def get_initial_data_for_location(
                         try:
                             import pyarrow.parquet as pq_m
                             schema = pq_m.read_schema(p_full)
-                            req = [c for c in INITIAL_LAYOUT_COLUMNS if c in set(schema.names)]
+                            req = [c for c in target_columns if c in set(schema.names)]
                             if req:
                                 p_df = pd.read_parquet(p_full, columns=req)
                                 p_dfs.append(p_df)
@@ -283,19 +286,19 @@ def get_initial_data_for_location(
                         )
                         if bad_micro.any():
                             combined.loc[bad_micro, 'microlocation'] = combined.loc[bad_micro, 'location']
-                    for col in INITIAL_LAYOUT_COLUMNS:
+                    for col in target_columns:
                         if col not in combined.columns:
                             combined[col] = pd.Series(dtype='object')
-                    return combined[INITIAL_LAYOUT_COLUMNS]
-        return pd.DataFrame({col: [] for col in INITIAL_LAYOUT_COLUMNS})
+                    return combined[[c for c in target_columns if c in combined.columns]]
+        return pd.DataFrame({col: [] for col in target_columns})
 
     try:
         import pyarrow.parquet as pq
         schema = pq.read_schema(parquet_path)
         available_cols = set(schema.names)
-        cols_to_request = [c for c in INITIAL_LAYOUT_COLUMNS if c in available_cols]
+        cols_to_request = [c for c in target_columns if c in available_cols]
         if not cols_to_request:
-            return pd.DataFrame({col: [] for col in INITIAL_LAYOUT_COLUMNS})
+            return pd.DataFrame({col: [] for col in target_columns})
 
         filters = None
         if location_id and 'location' in available_cols:
@@ -304,11 +307,10 @@ def get_initial_data_for_location(
         df = pd.read_parquet(parquet_path, columns=cols_to_request, filters=filters)
         
         # If no rows returned by location column filter (e.g. location_id was a folder prefix like Bistra_spring),
-        # fallback to reading without filter if empty
+        # fallback to reading without filter only if location_id was None or not in available_cols
         if df.empty and location_id and 'location' in available_cols:
-            df_all = pd.read_parquet(parquet_path, columns=cols_to_request)
-            if not df_all.empty:
-                df = df_all
+            # Check if location_id was a wav_file prefix before falling back
+            pass
 
         if 'microlocation' in df.columns and 'location' in df.columns:
             bad_micro = df['microlocation'].isna() | (
@@ -317,20 +319,93 @@ def get_initial_data_for_location(
             if bad_micro.any():
                 df.loc[bad_micro, 'microlocation'] = df.loc[bad_micro, 'location']
 
-        for col in INITIAL_LAYOUT_COLUMNS:
+        for col in target_columns:
             if col not in df.columns:
                 df[col] = pd.Series(dtype='object')
-        return df[INITIAL_LAYOUT_COLUMNS]
+        return df[[c for c in target_columns if c in df.columns]]
     except Exception:
-        return pd.DataFrame({col: [] for col in INITIAL_LAYOUT_COLUMNS})
+        return pd.DataFrame({col: [] for col in target_columns})
 
 
 def get_initial_data_for_project(
     project_id: str,
-    base_dir: str = hierarchy.DEFAULT_DATA_DIR
+    base_dir: str = hierarchy.DEFAULT_DATA_DIR,
+    columns: Optional[List[str]] = None,
 ) -> pd.DataFrame:
     """Loads lightweight metadata columns for a project root."""
-    return get_initial_data_for_location(project_id, location_id=None, base_dir=base_dir)
+    return get_initial_data_for_location(project_id, location_id=None, base_dir=base_dir, columns=columns)
+
+
+# In-memory cache for fast repeated project metadata discovery
+_PROJECT_METADATA_SUMMARY_CACHE: Dict[Tuple[str, str], Dict[str, Any]] = {}
+
+
+def get_project_metadata_summary(
+    project_id: str,
+    base_dir: str = hierarchy.DEFAULT_DATA_DIR,
+    use_cache: bool = True
+) -> Dict[str, Any]:
+    """
+    Fast discovery of locations, models, and cluster counts for a project.
+    Reads ONLY the essential metadata columns ('location', 'model_name', 'cluster_num')
+    rather than scanning full parquet columns or traversing entire audio trees.
+    """
+    cache_key = (base_dir, project_id)
+    if use_cache and cache_key in _PROJECT_METADATA_SUMMARY_CACHE:
+        return _PROJECT_METADATA_SUMMARY_CACHE[cache_key]
+
+    if not project_id:
+        return {'project_id': project_id, 'locations': [], 'models': [], 'records': []}
+
+    try:
+        df = get_initial_data_for_project(
+            project_id,
+            base_dir=base_dir,
+            columns=['location', 'model_name', 'cluster_num']
+        )
+    except TypeError:
+        try:
+            df = get_initial_data_for_project(project_id)
+        except Exception:
+            df = pd.DataFrame()
+
+    if df is not None and not df.empty and 'location' in df.columns:
+        locations = sorted([str(loc) for loc in df['location'].dropna().unique()])
+        models = sorted([str(m) for m in df['model_name'].dropna().unique()]) if 'model_name' in df.columns else []
+        if set(['location', 'model_name', 'cluster_num']).issubset(df.columns):
+            meta_df = df[['location', 'model_name', 'cluster_num']].dropna(subset=['location', 'model_name']).drop_duplicates()
+            records = meta_df.to_dict('records')
+        else:
+            records = []
+    else:
+        # Fallback to hierarchy discovery if parquet is empty or unindexed
+        h_locs = hierarchy.get_locations_for_project(project_id, base_dir=base_dir)
+        locations = sorted([l.id for l in h_locs])
+        models = []
+        records = []
+
+    summary = {
+        'project_id': project_id,
+        'locations': locations,
+        'models': models,
+        'records': records
+    }
+    if use_cache:
+        _PROJECT_METADATA_SUMMARY_CACHE[cache_key] = summary
+
+    return summary
+
+
+def is_valid_project_location(
+    project_id: str,
+    location_id: str,
+    base_dir: str = hierarchy.DEFAULT_DATA_DIR
+) -> bool:
+    """Checks whether location_id belongs to project_id."""
+    if not project_id or not location_id:
+        return False
+    summary = get_project_metadata_summary(project_id, base_dir=base_dir)
+    return location_id in set(summary.get('locations', []))
 
 
 # Alias for backward compatibility
@@ -397,27 +472,28 @@ def load_location_model_data(
 load_dataset_model_data = load_location_model_data
 
 
-def get_initial_data_for_layout():
+def get_initial_data_for_layout(base_dir: str = hierarchy.DEFAULT_DATA_DIR):
     """
     Loads only the columns necessary to build the initial UI layout.
-    This is much more memory-efficient than loading the entire dataset.
-    Maintains 100% backward compatibility for the existing application startup.
+    Prioritizes the first available project from hierarchy discovery to guarantee
+    that the initial layout displays matching locations and data.
+    Falls back to legacy monolithic SAVE_PATH only if no projects are discovered.
     """
-    if os.path.exists(SAVE_PATH):
-        try:
-            return pd.read_parquet(SAVE_PATH, columns=INITIAL_LAYOUT_COLUMNS)
-        except Exception:
-            pass
-
-    # Check available projects to find default project initial data
     try:
-        available_projects = hierarchy.get_available_projects()
+        available_projects = hierarchy.get_available_projects(base_dir=base_dir)
         if available_projects:
-            df_proj = get_initial_data_for_project(available_projects[0].id)
+            df_proj = get_initial_data_for_project(available_projects[0].id, base_dir=base_dir)
             if df_proj is not None and not df_proj.empty:
                 return df_proj
     except Exception:
         pass
+
+    legacy_path = os.path.join(base_dir, "cache", "final_data.parquet") if base_dir != hierarchy.DEFAULT_DATA_DIR else SAVE_PATH
+    if os.path.exists(legacy_path):
+        try:
+            return pd.read_parquet(legacy_path, columns=INITIAL_LAYOUT_COLUMNS)
+        except Exception:
+            pass
 
     return pd.DataFrame({col: [] for col in INITIAL_LAYOUT_COLUMNS})
 

@@ -25,6 +25,7 @@ IGNORED_DIR_NAMES = {
     "cache",
     "spectrogram_cache",
     "positions",
+    "embeddings_positions",
     "mp3",
     "recordings",
     "temp",
@@ -124,13 +125,33 @@ def get_available_projects(base_dir: str = DEFAULT_DATA_DIR) -> List[Project]:
         name = _read_manifest_name(project_path, "project.json", fallback_name=entry)
         projects.append(Project(id=entry, name=name, path=project_path))
 
+    # Also discover projects nested under base_dir/recordings/ (e.g. data/recordings/Citimon, data/recordings/Multimon)
+    rec_root = os.path.join(base_dir, "recordings")
+    if os.path.isdir(rec_root):
+        try:
+            rec_entries = sorted(os.listdir(rec_root))
+            for rentry in rec_entries:
+                if not _is_valid_dir(rentry):
+                    continue
+                r_path = os.path.join(rec_root, rentry)
+                if os.path.isdir(r_path):
+                    if not any(p.id.lower() == rentry.lower() for p in projects):
+                        name = _read_manifest_name(r_path, "project.json", fallback_name=rentry)
+                        projects.append(Project(id=rentry, name=name, path=r_path))
+        except OSError:
+            pass
+
     return projects
 
 
 def get_project(project_id: str, base_dir: str = DEFAULT_DATA_DIR) -> Optional[Project]:
-    """Lookup a specific project by ID."""
-    for p in get_available_projects(base_dir=base_dir):
+    """Lookup a specific project by ID (case-insensitive fallback)."""
+    avail = get_available_projects(base_dir=base_dir)
+    for p in avail:
         if p.id == project_id:
+            return p
+    for p in avail:
+        if p.id.lower() == project_id.lower():
             return p
     return None
 
@@ -151,11 +172,13 @@ def get_locations_for_project(project_id: str, base_dir: str = DEFAULT_DATA_DIR)
     recordings_root = os.path.join(project.path, "recordings")
     mp3_root = os.path.join(project.path, "mp3")
 
-    # Prefer canonical recordings/ directory, fallback to mp3/
+    # Prefer canonical recordings/ directory, fallback to mp3/, or project.path itself if inside recordings/
     if os.path.isdir(recordings_root):
         source_root = recordings_root
     elif os.path.isdir(mp3_root):
         source_root = mp3_root
+    elif os.path.basename(os.path.dirname(project.path)) == "recordings":
+        source_root = project.path
     else:
         source_root = None
 
@@ -327,13 +350,18 @@ def get_location_paths(
 
     target_audio_dir = os.path.join(loc_root, microlocation_id) if microlocation_id else loc_root
 
-    # 1. Parquet resolution: checks project cache first, then project root, then legacy location cache
+    # 1. Parquet resolution: checks project cache first, then partitions cache, then project root
     parquet_path = None
     candidate_parquets = [
         os.path.join(project_dir, "cache", "final_data.parquet"),
         os.path.join(project_dir, "final_data.parquet"),
         os.path.join(legacy_location_dir, "cache", "final_data.parquet"),
         os.path.join(legacy_location_dir, "final_data.parquet"),
+        os.path.join(base_dir, "cache", "partitions", project_id, "perchv2.parquet"),
+        os.path.join(base_dir, "cache", "partitions", project_id.capitalize(), "perchv2.parquet"),
+        os.path.join(base_dir, "cache", "partitions", project_id.lower(), "perchv2.parquet"),
+        os.path.join(base_dir, "cache", f"{project_id}.parquet"),
+        os.path.join(base_dir, "cache", f"{project_id.lower()}.parquet"),
     ]
     for cand in candidate_parquets:
         if os.path.isfile(cand):
@@ -346,6 +374,8 @@ def get_location_paths(
         os.path.join(loc_root, "recordings"),
         os.path.join(loc_root, "mp3"),
         os.path.join(loc_root, "audio"),
+        os.path.join(base_dir, "recordings", project_id, location_id),
+        os.path.join(base_dir, "recordings", project_id.capitalize(), location_id),
         target_audio_dir,
     ]
     for cand in candidate_audio_dirs:

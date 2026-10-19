@@ -86,7 +86,9 @@ def register_plot_callbacks(app):
          State('last-preset-load-time', 'data'),
          State({'type': 'cluster-checkbox', 'index': ALL}, 'id'),
          State({'type': 'label-checkbox', 'index': ALL}, 'id'),
-         State('filtered-data', 'data')],
+         State('filtered-data', 'data'),
+         State('project-dropdown', 'value'),
+         State('model-dropdown', 'value')],
         prevent_initial_call='initial_duplicate'
     )
     def update_figure(model_ready_signal, selected_channels, selected_num_clusters,
@@ -98,7 +100,8 @@ def register_plot_callbacks(app):
                       label_checkbox_values,
                       current_figure_state, stored_indices,
                       selected_location, last_preset_time, cluster_checkbox_ids,
-                      label_checkbox_ids, current_filtered_key):
+                      label_checkbox_ids, current_filtered_key=None,
+                      selected_project=None, selected_model=None, *args, **kwargs):
         try:
             return _update_figure_impl(model_ready_signal, selected_channels, selected_num_clusters,
                       cluster_checkbox_values, cluster_colors_data, cluster_names_data,
@@ -109,7 +112,8 @@ def register_plot_callbacks(app):
                       label_checkbox_values,
                       current_figure_state, stored_indices,
                       selected_location, last_preset_time, cluster_checkbox_ids,
-                      label_checkbox_ids, current_filtered_key)
+                      label_checkbox_ids, current_filtered_key,
+                      selected_project, selected_model, *args, **kwargs)
         except Exception:
             import traceback
             traceback.print_exc()
@@ -124,7 +128,8 @@ def register_plot_callbacks(app):
                       label_checkbox_values,
                       current_figure_state, stored_indices,
                       selected_location, last_preset_time, cluster_checkbox_ids,
-                      label_checkbox_ids, current_filtered_key=None):
+                      label_checkbox_ids, current_filtered_key=None,
+                      selected_project=None, selected_model=None, *args, **kwargs):
 
         timer = PipelineTimer("update_figure").start()
         t_start = time.time() if ENABLE_PROFILING else None
@@ -327,7 +332,7 @@ def register_plot_callbacks(app):
         is_fresh_load = any('model-data-ready-signal' in t_id for t_id in all_triggered_ids)
         is_resample_click = any('resample-btn' in t_id for t_id in all_triggered_ids)
         is_k_change = any('num-cluster-dropdown' in t_id for t_id in all_triggered_ids)
-        is_cluster_checkbox_click = any('cluster-checkbox' in t_id for t_id in all_triggered_ids)
+        is_cluster_checkbox_click = any('cluster-checkbox' in t_id or 'label-checkbox' in t_id for t_id in all_triggered_ids)
         is_preset_active = last_preset_time and (time.time() - last_preset_time < 6.0)
         should_force_defaults = is_fresh_load and not is_preset_active
 
@@ -375,15 +380,19 @@ def register_plot_callbacks(app):
                 fig.update_yaxes(visible=False)
                 return fig, None, 1, 100, [], None, msg, {'total': 0}, None, False if should_force_defaults else no_update
 
-        if dff_raw is None:
-            msg = "Select a model and location to begin."
+        if dff_raw is None or dff_raw.empty:
+            if selected_location and selected_model:
+                proj_part = f"project '{selected_project}', " if selected_project else ""
+                msg = f"No data found for {proj_part}location '{selected_location}', model '{selected_model}'."
+            else:
+                msg = "Select a model and location to begin."
             timer.stop(extra_info="select_model_location")
             if current_figure_state and current_figure_state.get('data'):
                 # Non-destructive: preserve existing figure if raw data is momentarily reloading
                 return dash.no_update, no_update, no_update, no_update, no_update, no_update, msg, no_update, None, False if should_force_defaults else no_update
             fig = go.Figure()
             fig.update_layout(
-                annotations=[{"text": "Select a model and location to begin.", "xref": "paper", "yref": "paper",
+                annotations=[{"text": msg, "xref": "paper", "yref": "paper",
                               "showarrow": False, "font": {"size": 16}}],
                 paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
             )
@@ -660,8 +669,8 @@ def register_plot_callbacks(app):
         if do_filter:
             # Filter dff_macro BEFORE sampling so resamples pull 100% quota from visible groups
             if not dff_macro.empty:
-                # 1. Filter by Cluster
-                if 'cluster_id' in dff_macro.columns:
+                # 1. Filter by Cluster (only if cluster checkboxes are rendered in UI)
+                if cluster_checkbox_ids and 'cluster_id' in dff_macro.columns:
                     dff_macro = dff_macro[dff_macro['cluster_id'].astype(str).isin(selected_clusters)]
                 
                 # 2. Filter by Label

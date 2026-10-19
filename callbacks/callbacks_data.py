@@ -670,6 +670,12 @@ def register_data_callbacks(app):
             return time.time(), metadata
 
         if selected_project:
+            # Validate that selected_location belongs to selected_project
+            if not read_data.is_valid_project_location(selected_project, selected_location):
+                # Reject stale/mismatched location during transition (e.g. Citimon + Banjšice)
+                # Avoid clearing cache or loading empty data while location-dropdown updates
+                return dash.no_update, dash.no_update
+
             expected_key = (selected_project, selected_location, selected_model)
             with time_block("data_load_project", extra_info=f"proj='{selected_project}', loc='{selected_location}', model='{selected_model}'"):
                 try:

@@ -704,7 +704,8 @@ class OverviewMetadataIndex(dict):
             if str_k in self.ext_norm_lookup:
                 rec = self.ext_norm_lookup[str_k]
                 rec_loc = str(rec.get("location", "")).strip()
-                if loc and rec_loc and loc.lower() != rec_loc.lower():
+                path_confirms_loc = bool(rec_loc and str_ext.lower().startswith(rec_loc.lower() + "/"))
+                if loc and rec_loc and loc.lower() != rec_loc.lower() and not path_confirms_loc:
                     return None, "AMBIGUOUS"
                 return rec, "STRIPPED_PREFIX"
 
@@ -720,12 +721,23 @@ class OverviewMetadataIndex(dict):
         return super().get(key, default)
 
 
-def load_overview_metadata(project_dir: str) -> Tuple[OverviewMetadataIndex, Optional[str]]:
+def load_overview_metadata(
+    project_dir: str,
+    overview_tsv_override: Optional[str] = None,
+) -> Tuple[OverviewMetadataIndex, Optional[str]]:
     """
-    Search for project overview TSV (e.g. Rok_spring_summer.tsv or zabe+hyla.tsv)
+    Search for project overview TSV (e.g. zabe+hyla+citimon.tsv, Rok_spring_summer.tsv or zabe+hyla.tsv)
     and return populated OverviewMetadataIndex and found_tsv_path.
     """
+    if overview_tsv_override:
+        if os.path.isfile(overview_tsv_override):
+            return OverviewMetadataIndex(overview_tsv_override), overview_tsv_override
+        cand_in_proj = os.path.join(project_dir, overview_tsv_override)
+        if os.path.isfile(cand_in_proj):
+            return OverviewMetadataIndex(cand_in_proj), cand_in_proj
+
     candidates = [
+        "zabe+hyla+citimon.tsv",
         "Rok_spring_summer.tsv",
         "zabe+hyla.tsv",
         "zabe_combined.tsv",
@@ -1115,6 +1127,7 @@ class SingleFileCacheBuilder:
         num_workers: int = 8,
         force: bool = False,
         dry_run: bool = False,
+        overview_tsv: Optional[str] = None,
     ):
         self.project = project
         self.base_dir = base_dir
@@ -1132,7 +1145,7 @@ class SingleFileCacheBuilder:
         self.final_path = os.path.join(self.cache_dir, "final_data.parquet")
         self.tmp_output_path = self.final_path + ".tmp"
 
-        self.overview_meta, self.overview_tsv_path = load_overview_metadata(self.project_dir)
+        self.overview_meta, self.overview_tsv_path = load_overview_metadata(self.project_dir, overview_tsv_override=overview_tsv)
         self.diagnostics: List[Tuple[str, str]] = []
         self.duplicate_manifest: Dict[str, Any] = {}
 
@@ -1781,6 +1794,7 @@ class CacheBuilder:
         location_filter: Optional[str] = None,
         model_filter: Optional[str] = None,
         force: bool = False,
+        overview_tsv: Optional[str] = None,
     ):
         self.project = project
         self.base_dir = base_dir
@@ -1797,7 +1811,7 @@ class CacheBuilder:
         self.partitions_dir = os.path.join(self.cache_dir, "partitions")
         self.manifest_path = os.path.join(self.cache_dir, "manifest.json")
 
-        self.overview_meta, self.overview_tsv_path = load_overview_metadata(self.project_dir)
+        self.overview_meta, self.overview_tsv_path = load_overview_metadata(self.project_dir, overview_tsv_override=overview_tsv)
         self.diagnostics: List[Tuple[str, str]] = []  # (level, message)
 
     def log(self, level: str, msg: str):
@@ -2507,6 +2521,7 @@ def main():
     parser.add_argument("--location", default=None, help="Optional location restriction (for --partitioned)")
     parser.add_argument("--model", default=None, help="Optional model restriction (for --partitioned)")
     parser.add_argument("--rollback", action="store_true", help="Execute safe rollback for specified location/model")
+    parser.add_argument("--overview-tsv", default=None, help="Explicit path or filename for master overview TSV (e.g. data/zabe/zabe+hyla+citimon.tsv)")
     parser.add_argument(
         "--target-existed-before-pilot",
         choices=["true", "false", "unknown"],
@@ -2546,6 +2561,7 @@ def main():
                 location_filter=args.location,
                 model_filter=args.model,
                 force=args.force,
+                overview_tsv=args.overview_tsv,
             )
             if args.validate or args.dry_run:
                 ok = builder.validate()
@@ -2572,6 +2588,7 @@ def main():
                 num_workers=args.workers,
                 force=args.force,
                 dry_run=args.dry_run or args.validate,
+                overview_tsv=args.overview_tsv,
             )
             summary = s_builder.build()
             if not summary:

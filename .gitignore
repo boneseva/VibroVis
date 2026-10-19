@@ -1,6 +1,7 @@
 /data/
 /vibro/
 /data_test/
+/data_vibro/
 /__pycache__/
 *.pyc
 .idea/
@@ -15,3 +16,5 @@
 /temp/
 
 AGENTS.md
+
+*.mp3

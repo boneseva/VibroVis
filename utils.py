@@ -25,6 +25,10 @@ def load_audio_segment(mp3_file_relative_path, clip_time, clip_duration, channel
         # Check canonical recordings/ directory structure
         candidate_paths = [
             os.path.join(read_data.BASE_DATA_DIR, "recordings", mp3_file_relative_path),
+            os.path.join(read_data.BASE_DATA_DIR, "recordings", "Citimon", mp3_file_relative_path),
+            os.path.join(read_data.BASE_DATA_DIR, "recordings", "citimon", mp3_file_relative_path),
+            os.path.join(read_data.BASE_DATA_DIR, "recordings", "Multimon", mp3_file_relative_path),
+            os.path.join(read_data.BASE_DATA_DIR, "recordings", "multimon", mp3_file_relative_path),
             os.path.join(read_data.BASE_DATA_DIR, "zabe", "recordings", mp3_file_relative_path),
             os.path.join(read_data.BASE_DATA_DIR, "vibro", "recordings", mp3_file_relative_path),
             os.path.join(read_data.BASE_DATA_DIR, "vibro", "mp3", mp3_file_relative_path),
