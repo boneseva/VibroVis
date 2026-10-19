@@ -12,9 +12,15 @@
 /data_multimon/
 
 /scratch/
-/cache/
+/cache/backups/
+/cache/clip_durations/
+/cache/partitions/
+/cache/*.parquet
+cache/manual_labels/*.db-wal
+cache/manual_labels/*.db-shm
 /temp/
 
 AGENTS.md
 
 *.mp3
+*.log
