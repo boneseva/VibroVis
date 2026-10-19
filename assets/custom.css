@@ -19,6 +19,23 @@ body {
     display: flex;
 }
 
+/* Make the visible-columns dropdown menu tall enough to show all options */
+#table-column-selector .Select-menu {
+    max-height: 420px !important;
+}
+
+#table-column-selector .Select-menu-outer {
+    max-height: 420px !important;
+}
+
+#table-column-selector .react-select__menu {
+    max-height: 420px !important;
+}
+
+#table-column-selector .react-select__menu-list {
+    max-height: 420px !important;
+}
+
 /* === Simple Tab Pane Show/Hide === */
 .view-pane {
     display: none;
@@ -451,3 +468,71 @@ body {
 .cluster-table th:hover {
     background: #e8ecf5;
 }
+
+/* === Non-Destructive Scatter Loading Overlay === */
+.scatter-loading-parent {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+}
+
+#scatter-loading {
+    pointer-events: none;
+    z-index: 10;
+}
+
+.scatter-loading-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 18px;
+    background: rgba(255, 255, 255, 0.94);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border: 1px solid #d0d7de;
+    border-radius: 20px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    color: #2a3f5f;
+    pointer-events: none;
+    user-select: none;
+    animation: fadeInBadge 0.15s ease-out;
+}
+
+.scatter-loading-spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(75, 138, 242, 0.25);
+    border-top-color: #4b8af2;
+    border-radius: 50%;
+    animation: scatterSpinnerRotate 0.75s linear infinite;
+    flex-shrink: 0;
+}
+
+.scatter-loading-text {
+    letter-spacing: 0.2px;
+}
+
+@keyframes scatterSpinnerRotate {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes fadeInBadge {
+    from {
+        opacity: 0;
+        transform: scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+

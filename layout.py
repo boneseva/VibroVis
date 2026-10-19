@@ -25,127 +25,9 @@ CLUSTER_COLORS = ['#4E79A7', '#F28E2B', '#E15759', '#76B7B2', '#EDC948', '#B07AA
                   '#FFBE7D', '#9CD17D', '#D4B7A9', '#D9D9D9', '#FABFD2']
 
 
-def generate_date_selector(df, selected_dates=None):
-    """
-    Generates Date Selector.
-    If selected_dates is provided (list of strings 'YYYY-MM-DD'),
-    only checks those dates. Otherwise checks ALL.
-    """
-    if df is None or df.empty or 'day_dt' not in df.columns:
-        return html.Div("No date data found.")
-
-    dates = pd.to_datetime(df['day_dt']).dt.date.unique()
-    dates = sorted(dates)
-
-    selected_set = set(selected_dates) if selected_dates is not None else None
-
-    if len(dates) < 10:
-        all_values = [d.strftime('%Y-%m-%d') for d in dates]
-
-        if selected_set is not None:
-            current_value = [d for d in all_values if d in selected_set]
-        else:
-            current_value = all_values
-
-        options = [{'label': d.strftime('%Y-%m-%d'), 'value': d.strftime('%Y-%m-%d')} for d in dates]
-
-        return html.Div([
-            dcc.Dropdown(
-                id={'type': 'simple-date-dropdown', 'index': 0},
-                options=options,
-                value=current_value,
-                multi=True,
-                clearable=True,
-                placeholder="Select dates..."
-            )
-        ], style={'padding': '5px 0'})
-
-    year_dict = {}
-    for date in dates:
-        year = date.year
-        month = date.month
-        if year not in year_dict: year_dict[year] = {}
-        if month not in year_dict[year]: year_dict[year][month] = []
-        year_dict[year][month].append(date)
-
-    year_elements = []
-    for year in sorted(year_dict.keys()):
-        month_elements = []
-        for month in sorted(year_dict[year].keys()):
-            month_name = pd.Timestamp(year=year, month=month, day=1).strftime('%B')
-
-            day_options = []
-            day_values = []
-
-            current_month_dates = year_dict[year][month]
-            for d in current_month_dates:
-                d_str = d.strftime('%Y-%m-%d')
-                day_options.append({'label': f" {d.day:02d}", 'value': d_str})
-
-                if selected_set is None or d_str in selected_set:
-                    day_values.append(d_str)
-
-            month_select_all_val = []
-            if len(day_values) == len(current_month_dates) and len(day_values) > 0:
-                month_select_all_val = ['all']
-
-            month_elements.append(
-                html.Details([
-                    html.Summary(
-                        html.Div([
-                            dcc.Checklist(
-                                id={'type': 'month-select-all', 'year': year, 'month': month},
-                                options=[{'label': '', 'value': 'all'}],
-                                value=month_select_all_val,
-                                labelStyle={'display': 'inline-block', 'marginRight': '5px'},
-                                style={'display': 'inline-block', 'marginRight': '5px'},
-                                persistence=False
-                            ),
-                            html.Span(month_name, style={'cursor': 'pointer'})
-                        ], style={'display': 'flex', 'alignItems': 'center'}),
-                        style={'cursor': 'pointer', 'paddingLeft': '30px', 'listStyle': 'none'}
-                    ),
-                    html.Div([
-                        dcc.Checklist(
-                            id={'type': 'date-checklist', 'year': year, 'month': month},
-                            options=day_options,
-                            value=day_values,
-                            labelStyle={'display': 'block'},
-                            style={'paddingLeft': '40px'},
-                            persistence=False
-                        )
-                    ])
-                ], open=False, style={'marginBottom': '5px'})
-            )
-
-        year_elements.append(
-            html.Details([
-                html.Summary(
-                    html.Div([
-                        dcc.Checklist(
-                            id={'type': 'year-select-all', 'year': year},
-                            options=[{'label': '', 'value': 'all'}],
-                            value=['all'],
-                            labelStyle={'display': 'inline-block', 'marginRight': '5px'},
-                            style={'display': 'inline-block', 'marginRight': '5px'},
-                            persistence=False
-                        ),
-                        html.Span(str(year), style={'cursor': 'pointer', 'fontWeight': 'bold'})
-                    ], style={'display': 'flex', 'alignItems': 'center'}),
-                    style={'cursor': 'pointer', 'listStyle': 'none'}
-                ),
-                html.Div(month_elements, style={'paddingLeft': '15px'})
-            ], open=True, style={'marginBottom': '10px'})
-        )
-
-    return html.Div([
-        html.Div(
-            year_elements,
-            style={'maxHeight': '300px', 'overflow': 'auto', 'border': '1px solid #ddd', 'padding': '10px',
-                   'borderRadius': '4px'}
-        ),
-        dcc.Store(id='date-tree-structure', data=year_dict)
-    ])
+import hierarchy
+import read_data
+from callbacks.callbacks_date_selector import generate_date_selector
 
 def get_available_presets():
     """Helper to list JSON files in the presets folder"""
@@ -161,27 +43,49 @@ def create_layout(df):
     """
     preset_options = [{'label': p, 'value': p} for p in get_available_presets()]
 
-    all_locations = sorted(df['location'].dropna().unique())
+    # Discover projects dynamically from hierarchy
+    available_projects = hierarchy.get_available_projects()
+    project_options = [{'label': p.name, 'value': p.id} for p in available_projects]
+    default_project = available_projects[0].id if available_projects else None
+
+    # Load initial data for default project if df is empty or does not match default_project
+    if default_project:
+        is_df_matching_project = False
+        if df is not None and not df.empty and 'location' in df.columns:
+            first_loc = df['location'].dropna().iloc[0] if len(df['location'].dropna()) > 0 else None
+            if first_loc and read_data.is_valid_project_location(default_project, str(first_loc)):
+                is_df_matching_project = True
+        if not is_df_matching_project:
+            df = read_data.get_initial_data_for_project(default_project)
+
+    initial_project_metadata = None
+    if default_project:
+        initial_project_metadata = read_data.get_project_metadata_summary(default_project)
+
+    all_locations = sorted([str(loc) for loc in df['location'].dropna().unique()]) if df is not None and not df.empty else []
     default_location = all_locations[0] if all_locations else None
 
-    models_for_location = []
-    default_model = None
-    if default_location:
+    if default_location and df is not None and not df.empty:
         models_for_location = sorted(df[df['location'] == default_location]['model_name'].dropna().unique())
-        default_model = models_for_location[0] if models_for_location else None
+    else:
+        models_for_location = sorted(df['model_name'].dropna().unique()) if df is not None and not df.empty else []
+    default_model = models_for_location[0] if models_for_location else None
 
     k_values = []
     default_k = None
-    if default_location and default_model:
-        k_values = sorted(df[
-                              (df['location'] == default_location) &
-                              (df['model_name'] == default_model)
-                              ]['cluster_num'].dropna().unique())
+    if default_model and df is not None and not df.empty:
+        if default_location:
+            k_values = sorted(df[
+                                  (df['location'] == default_location) &
+                                  (df['model_name'] == default_model)
+                                  ]['cluster_num'].dropna().unique())
+        if not k_values:
+            k_values = sorted(df[df['model_name'] == default_model]['cluster_num'].dropna().unique())
         default_k = k_values[0] if k_values else None
 
     cluster_options = []
     default_clusters = []
-    if default_k:
+    if default_k and df is not None and not df.empty:
         clusters = sorted(df[df['cluster_num'] == default_k]['cluster_id'].dropna().unique())
         default_clusters = [int(c) for c in clusters]
 
@@ -238,7 +142,40 @@ def create_layout(df):
 
                 # --- Scatter pane (graph only) ---
                 html.Div([
-                    dcc.Graph(id='scatter'),
+                    dcc.Loading(
+                        id='scatter-loading',
+                        type='circle',
+                        show_initially=False,
+                        parent_className='scatter-loading-parent',
+                        className='scatter-loading-spinner-container',
+                        parent_style={
+                            'flex': '1',
+                            'minHeight': '0',
+                            'width': '100%',
+                            'height': '100%',
+                            'display': 'flex',
+                            'flexDirection': 'column',
+                            'position': 'relative'
+                        },
+                        overlay_style={
+                            'visibility': 'visible',
+                            'opacity': 0.65,
+                            'transition': 'opacity 0.15s ease',
+                            'flex': '1',
+                            'minHeight': '0',
+                            'width': '100%',
+                            'height': '100%',
+                            'display': 'flex',
+                            'flexDirection': 'column'
+                        },
+                        custom_spinner=html.Div([
+                            html.Div(className='scatter-loading-spinner'),
+                            html.Span("Updating…", className='scatter-loading-text')
+                        ], className='scatter-loading-badge'),
+                        children=[
+                            dcc.Graph(id='scatter'),
+                        ]
+                    ),
                     html.Div(id='fft-warning', style={'color': 'red', 'margin': '0.1em'}),
                 ], id='scatter-pane', className='view-pane view-pane--active'),
 
@@ -263,12 +200,15 @@ def create_layout(df):
                                 {'label': 'Clip Count',    'value': 'clip_count'},
                             ],
                             value=['file_name', 'date', 'recording_time',
-                                   'cluster_start', 'cluster_end', 'duration', 'cluster_id'],
+                                   'cluster_start', 'cluster_id',
+                                   'manual_label'],
                             multi=True,
                             clearable=False,
-                            style={'flex': '1'},
+                            optionHeight=32,
+                            maxHeight=420,
+                            style={'flex': '1', 'minHeight': '60px'},
                         ),
-                    ], style={'display': 'flex', 'alignItems': 'center', 'padding': '8px 0',
+                    ], style={'display': 'flex', 'alignItems': 'flex-start', 'padding': '8px 0',
                               'borderBottom': '1px solid #e0e0e0', 'flexShrink': '0'}),
                     # Pagination bar
                     html.Div([
@@ -370,7 +310,25 @@ def create_layout(df):
                         html.Div(id='preset-message', style={'fontSize': '0.8em', 'color': '#666'}),
                     ], style={'marginBottom': '10px', 'borderBottom': '1px solid #eee', 'paddingBottom': '5px'}),
 
-            #    html.Div([
+                    html.Details([
+                        html.Summary("Project", className='section-title'),
+                        html.Div(id='project-filter-content', children=[
+                            html.Div([
+                                html.Label("Project"),
+                                html.Div(className="tooltip-container", children=[
+                                    html.Span(" ⓘ", className="info-icon"),
+                                    html.Span("Select the project.", className="tooltip-text")
+                                ])
+                            ], className="label-with-info", style={'marginTop': '0.5em'}),
+                            dcc.Dropdown(
+                                id='project-dropdown',
+                                options=project_options,
+                                value=default_project,
+                                clearable=False
+                            ),
+                        ])
+                    ], open=True),
+
                     html.Details([
                         html.Summary("Recordings", className='section-title'),
                         html.Div(id='recordings-filter-content', children=[
@@ -503,11 +461,11 @@ def create_layout(df):
                             ),
 
                             html.Div([
-                                html.Label("Clusters"),
+                                html.Label("Clusters", id='cluster-legend-header-label'),
                                 html.Div(className="tooltip-container", children=[
                                     html.Span(" ⓘ", className="info-icon"),
                                     html.Span("Select specific clusters to display from the chosen model. Click the color block to change the cluster color.",
-                                              className="tooltip-text")
+                                              className="tooltip-text", id='cluster-legend-tooltip-text')
                                 ])
                             ], className="label-with-info", style={'marginTop': '1em'}),
                             dcc.Checklist(id="all-or-none-cluster", options=[{"label": "Select All", "value": "All"}],
@@ -571,9 +529,9 @@ def create_layout(df):
                                 ])
                             ], className="label-with-info"),
                             html.Div([
-                                dcc.Input(id='max-points', type='number', min=1, value=10000,
+                                dcc.Input(id='max-points', type='number', min=1, value=10000, debounce=False,
                                           style={'width': '80px', 'marginRight': '1em'},
-                            className='input-field'),
+                                          className='input-field'),
                                 html.Button('Resample', id='resample-btn', n_clicks=0, className='app-button'),
                             ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '5px'}),
 
@@ -582,6 +540,21 @@ def create_layout(df):
                                 style={'fontSize': '0.85em', 'color': '#666', 'fontStyle': 'italic',
                                        'marginBottom': '10px'}
                             ),
+
+                            html.Div([
+                                dcc.Checklist(
+                                    id='priority-sampling-toggle',
+                                    options=[{'label': ' Label priority sampling ', 'value': 'on'}],
+                                    value=['on'],
+                                    style={'display': 'inline-block', 'marginRight': '5px'}
+                                ),
+                                html.Div(className="tooltip-container", children=[
+                                    html.Span("ⓘ", className="info-icon"),
+                                    html.Span(
+                                        "When on, manually labeled clips are prioritized to always be shown. When off, a completely random sample is drawn.",
+                                        className="tooltip-text")
+                                ])
+                            ], className="label-with-info", style={'marginBottom': '15px'}),
 
                             html.Div([
                                 html.Label("Merge consecutive clips"),
@@ -600,7 +573,7 @@ def create_layout(df):
                                 persistence=False
                             ),
 
-                            html.Div(id='merge-threshold-container', children=[
+                            html.Div(id='merge-threshold-container', style={'display': 'none'}, children=[
                                 html.Div([
                                     html.Label("Merge threshold"),
                                     html.Div(className="tooltip-container", children=[
@@ -615,7 +588,7 @@ def create_layout(df):
                                            marks={i: str(i) for i in range(0, 101, 20)})
                             ]),
 
-                            html.Div(id='clip-count-threshold-container', children=[
+                            html.Div(id='clip-count-threshold-container', style={'display': 'none'}, children=[
                                 html.Div([
                                     html.Label("Clip count threshold"),
                                     html.Div(className="tooltip-container", children=[
@@ -647,60 +620,99 @@ def create_layout(df):
                     html.Details([
                         html.Summary("Labeling", className='section-title'),
                         html.Div(children=[
-                            # Row 1: Input and Apply
+                            # Apply Labels - Primary action
                             html.Div([
-                                 dcc.Input(id='manual-label-input', type='text', placeholder='Enter label...', list='manual-label-datalist', className='input-field', style={'flex': '1', 'marginRight': '5px'}),
-                                 html.Datalist(id='manual-label-datalist'),
-                                 html.Button('Apply', id='save-label-btn', n_clicks=0, className='app-button'),
-                            ], style={'display': 'flex', 'marginBottom': '10px'}),
+                                html.Label("Apply label to selected clip:", style={'fontSize': '0.9em', 'marginBottom': '5px'}),
+                                html.Div([
+                                    dcc.Input(id='manual-label-input', type='text', placeholder='Enter label...', list='manual-label-datalist', className='input-field', style={'flex': '1', 'marginRight': '5px'}),
+                                    html.Datalist(id='manual-label-datalist'),
+                                    html.Button('Apply', id='save-label-btn', n_clicks=0, className='app-button'),
+                                ], style={'display': 'flex'}),
+                            ], style={'marginBottom': '15px', 'paddingBottom': '10px', 'borderBottom': '1px solid #eee'}),
 
-                            # Row 2: Load (Dropdown + Button)
-                            html.Div([
-                                dcc.Dropdown(
-                                    id='label-load-dropdown',
-                                    options=[],
-                                    placeholder="Load labels...",
-                                    style={'flex': '1', 'minWidth': '100px', 'fontSize': '0.9em'},
-                                    clearable=False
-                                ),
-                                html.Button(
-                                    'Load',
-                                    id='label-load-btn',
-                                    className='app-button',
-                                    style={'marginLeft': '5px', 'padding': '2px 10px', 'height': '36px'}
-                                ),
-                            ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '5px'}),
-
-                            # Row 3: Save (Input + Button)
+                            # Label Sets - All save/load operations
                             html.Details([
-                                html.Summary("Save current labels...", style={
-                                    'fontSize': '0.85em', 'color': '#888', 'cursor': 'pointer', 'marginBottom': '5px',
+                                html.Summary("Manage Label Sets", style={
+                                    'fontSize': '0.9em', 'cursor': 'pointer', 'marginBottom': '8px',
                                     'userSelect': 'none'
                                 }),
                                 html.Div([
-                                    dcc.Input(
-                                        id='label-save-name',
-                                        type='text',
-                                        placeholder='Label set name...',
-                                        className='input-field',
-                                        style={'flex': '1', 'marginRight': '5px'}
-                                    ),
-                                    html.Button('Save', id='label-save-btn-server', className='app-button'),
-                                ], style={'display': 'flex', 'marginBottom': '5px'}),
-                                html.Div(id='label-save-message', style={'fontSize': '0.8em', 'color': '#666'}),
-                            ], style={'marginBottom': '10px', 'borderBottom': '1px solid #eee', 'paddingBottom': '5px'}),
-                            
-                            # Row 4: Reset
-                            html.Div([
-                                 html.Button('Reset Labels', id='btn-reset-labels', className='app-button', style={'width': '80%', 'backgroundColor': '#d9534f', 'color': 'white'}),
-                                 dcc.ConfirmDialog(
-                                      id='confirm-reset-labels',
-                                      message='Are you sure you want to RESET all manual labels?\n\nThis will clear all labels from memory.\nMake sure you have saved your labels if you want to keep them.',
-                                 ),
-                            ], style={'marginBottom': '5px'}),
+                                    # Server-based sets
+                                    html.Div([
+                                        html.Label("Saved label sets:", style={'fontSize': '0.85em', 'color': '#666', 'marginBottom': '3px'}),
+                                        html.Div([
+                                            dcc.Dropdown(
+                                                id='label-load-dropdown',
+                                                options=[],
+                                                placeholder="Load from server...",
+                                                style={'flex': '1', 'minWidth': '100px', 'fontSize': '0.9em'},
+                                                clearable=False
+                                            ),
+                                            html.Button('Load', id='label-load-btn', className='app-button', style={'marginLeft': '5px', 'padding': '2px 8px', 'height': '36px'}),
+                                        ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '8px'}),
+                                        
+                                        html.Div([
+                                            dcc.Input(
+                                                id='label-save-name',
+                                                type='text',
+                                                placeholder='Save as new set...',
+                                                className='input-field',
+                                                style={'flex': '1', 'marginRight': '5px'}
+                                            ),
+                                            html.Button('Save', id='label-save-btn-server', className='app-button'),
+                                        ], style={'display': 'flex', 'marginBottom': '8px'}),
+                                        html.Div(id='label-save-message', style={'fontSize': '0.8em', 'color': '#666', 'marginBottom': '10px'}),
+                                    ]),
+                                    
+                                    # File import/export
+                                    html.Div([
+                                        html.Label("Import/Export files:", style={'fontSize': '0.85em', 'color': '#666', 'marginBottom': '3px'}),
+                                        html.Div([
+                                            html.Button('Export to File', id='download-labels-btn', className='app-button', style={'flex': '1', 'marginRight': '5px'}),
+                                            dcc.Upload(
+                                                id='upload-labels-json',
+                                                children=html.Button('Import from File', className='app-button', style={'flex': '1'}),
+                                                multiple=False,
+                                                style={'flex': '1'}
+                                            ),
+                                        ], style={'display': 'flex', 'marginBottom': '5px'}),
+                                        dcc.Download(id='download-labels-json'),
+                                    ]),
+                                ], style={'padding': '8px', 'backgroundColor': '#f8f9fa', 'borderRadius': '4px'})
+                            ], style={'marginBottom': '15px'}),
 
-                            # Status Message
-                            html.Div(id='label-saved-msg', style={'color':'#28a745', 'fontSize':'0.9em', 'fontWeight': 'bold', 'textAlign': 'center', 'minHeight': '1.2em'})
+                            # Browser Backup - Automatic safety feature
+                            html.Div([
+                                html.Label("Browser Backup:", style={'fontSize': '0.9em', 'marginBottom': '5px'}),
+                                html.Div(id='label-backup-msg', style={'color': '#6c757d', 'fontSize': '0.8em', 'marginBottom': '5px', 'minHeight': '1.1em'}),
+                                html.Button('Restore from Browser Backup', id='restore-local-labels-btn', className='app-button', style={'width': '100%'}),
+                            ], style={'marginBottom': '15px', 'paddingBottom': '10px', 'borderBottom': '1px solid #eee'}),
+
+                            # Conflict resolution panel (shown only when needed)
+                            html.Div([
+                                 html.Div(id='label-conflict-text', style={'fontSize': '0.82em', 'marginBottom': '6px'}),
+                                 html.Div([
+                                      html.Button('Keep Current', id='label-conflict-keep-btn', className='app-button', style={'marginRight': '5px'}),
+                                      html.Button('Use Incoming', id='label-conflict-use-btn', className='app-button')
+                                 ], style={'display': 'flex', 'marginBottom': '5px'}),
+                                 html.Div([
+                                      html.Button('Keep All Remaining', id='label-conflict-keep-all-btn', className='app-button', style={'marginRight': '5px'}),
+                                      html.Button('Use All Remaining', id='label-conflict-use-all-btn', className='app-button')
+                                 ], style={'display': 'flex', 'marginBottom': '5px'}),
+                                 html.Button('Cancel Import', id='label-conflict-cancel-btn', className='app-button', style={'width': '100%', 'backgroundColor': '#f0ad4e', 'color': 'white'}),
+                            ], id='label-conflict-panel', style={'display': 'none', 'border': '2px solid #ffc107', 'borderRadius': '4px', 'padding': '8px', 'marginBottom': '15px', 'backgroundColor': '#fff8e1'}),
+
+                            # Reset - Destructive action
+                            html.Div([
+                                html.Button('Reset All Labels', id='btn-reset-labels', className='app-button', style={'width': '100%', 'backgroundColor': '#dc3545', 'color': 'white'}),
+                                dcc.ConfirmDialog(
+                                    id='confirm-reset-labels',
+                                    message='Are you sure you want to RESET all manual labels?\n\nThis will clear all labels from memory.\nMake sure you have saved your labels if you want to keep them.',
+                                ),
+                            ], style={'marginBottom': '10px'}),
+
+                            # Status messages
+                            html.Div(id='label-saved-msg', style={'color':'#28a745', 'fontSize':'0.9em', 'textAlign': 'center', 'minHeight': '1.2em', 'padding': '5px', 'borderRadius': '3px'})
 
                         ], style={'padding': '10px'})
                     ], open=True),
@@ -912,6 +924,8 @@ def create_layout(df):
             ], id='filter-container', className='filters-expanded'),
         ], id='main-content'),
 
+        dcc.Store(id='project-metadata-store', data=initial_project_metadata),
+        dcc.Store(id='dataset-metadata-store', data=initial_project_metadata),
         dcc.Store(id='histogram-time-scale-store', data='daily'),
         dcc.Store(id='filtered-data'),
         dcc.Store(id='spectrogram-raw-data-store'),
@@ -919,6 +933,7 @@ def create_layout(df):
         dcc.Store(id='merge-max-store'),
         dcc.Store(id='histogram-cache'),
         dcc.Store(id='model-data-ready-signal'),
+        dcc.Store(id='derived-model-metadata'),
         dcc.Store(id='sampled-indices-store'),
         dcc.Store(id='anim-ranges-store'),
         dcc.Store(id='is-anim-open-store', data=False),
@@ -928,7 +943,9 @@ def create_layout(df):
         dcc.Store(id='preset-cluster-selection'),
         dcc.Store(id='cluster-stats-store'),
         dcc.Store(id='last-preset-load-time', data=0),
+        dcc.Store(id='local-labels-store', storage_type='local'),
         dcc.Store(id='manual-labels-store', data={}),
+        dcc.Store(id='label-import-session-store', data=None),
         dcc.Store(id='label-color-store', data={}),
         dcc.Store(id='label-name-store', data={}),
         dcc.Store(id='label-last-action'),
@@ -937,4 +954,8 @@ def create_layout(df):
         dcc.Store(id='table-total-pages-store', data=1),
         dcc.Store(id='table-sort-store', data={'col': None, 'asc': True}),
         dcc.Store(id='table-click-data-store', data=None),
+        dcc.Store(id='table-race-condition-fix', data=None),
+        dcc.Store(id='focused-row-store'),
+        dcc.Input(id='focused-row-trigger-input', type='text',
+                  style={'display': 'none'}, value=''),
     ], id='main-container')

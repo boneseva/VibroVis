@@ -55,16 +55,19 @@ def register_filter_callbacks(app):
     @app.callback(
         [Output('microlocation-dropdown', 'options', allow_duplicate=True),
          Output('microlocation-dropdown', 'value', allow_duplicate=True)],
-        Input('model-data-ready-signal', 'data'),
+        Input('derived-model-metadata', 'data'),
         [State('microlocation-dropdown', 'value'),
          State('last-preset-load-time', 'data')],
         prevent_initial_call=True
     )
-    def update_microlocation_options(model_ready, current_micros, last_preset_time):
-        dff = MODEL_DATA_CACHE.get('df')
-        if dff is None or dff.empty: return [], []
+    def update_microlocation_options(metadata, current_micros, last_preset_time):
+        if isinstance(metadata, dict) and 'microlocations' in metadata:
+            micros = [m for m in metadata['microlocations'] if str(m).strip() and str(m).strip().lower() != 'default']
+        else:
+            dff = MODEL_DATA_CACHE.get('df')
+            if dff is None or dff.empty: return [], []
+            micros = [m for m in sorted(dff['microlocation'].dropna().unique()) if str(m).strip() and str(m).strip().lower() != 'default']
 
-        micros = sorted(dff['microlocation'].dropna().unique())
         options = [{'label': m, 'value': m} for m in micros]
 
         is_preset_active = last_preset_time and (time.time() - last_preset_time < 6.0)
@@ -77,24 +80,28 @@ def register_filter_callbacks(app):
     @app.callback(
         [Output('recorder-type-dropdown', 'options', allow_duplicate=True),
          Output('recorder-type-dropdown', 'value', allow_duplicate=True)],
-        [Input('model-data-ready-signal', 'data'),
+        [Input('derived-model-metadata', 'data'),
          Input('microlocation-dropdown', 'value')],
         [State('recorder-type-dropdown', 'value'),
          State('last-preset-load-time', 'data')],
         prevent_initial_call=True
     )
-    def update_recorder_options(model_ready, selected_microlocation, current_recorders, last_preset_time):
+    def update_recorder_options(metadata, selected_microlocation, current_recorders, last_preset_time):
         dff = MODEL_DATA_CACHE.get('df')
         if dff is None or dff.empty: return [], []
 
-        mask = pd.Series(True, index=dff.index)
-        if selected_microlocation is not None:
-            if not selected_microlocation: # Empty list
-                return [], []
-            mask &= dff['microlocation'].isin(selected_microlocation)
-        if not mask.any(): return [], []
+        # If no specific microlocation filter is applied, fast-path using metadata
+        if (selected_microlocation is None or (isinstance(metadata, dict) and set(selected_microlocation) == set(metadata.get('microlocations', [])))) and isinstance(metadata, dict) and 'recorders' in metadata:
+            recorders = metadata['recorders']
+        else:
+            mask = pd.Series(True, index=dff.index)
+            if selected_microlocation is not None:
+                if not selected_microlocation: # Empty list
+                    return [], []
+                mask &= dff['microlocation'].isin(selected_microlocation)
+            if not mask.any(): return [], []
+            recorders = sorted(dff.loc[mask, 'recorder_type'].dropna().unique())
 
-        recorders = sorted(dff.loc[mask, 'recorder_type'].dropna().unique())
         options = [{'label': m, 'value': m} for m in recorders]
 
         is_preset_active = last_preset_time and (time.time() - last_preset_time < 6.0)
@@ -107,25 +114,29 @@ def register_filter_callbacks(app):
     @app.callback(
         [Output('channel-checklist', 'options', allow_duplicate=True),
          Output('channel-checklist', 'value', allow_duplicate=True)],
-        Input('model-data-ready-signal', 'data'),
+        Input('derived-model-metadata', 'data'),
         State("all-or-none-channel", "value"),
         State('channel-checklist', 'value'),
         prevent_initial_call=True
     )
-    def update_channel_options_and_values(model_ready, select_all, current_channels):
-        dff = MODEL_DATA_CACHE.get('df')
-        if dff is None or dff.empty:
-            dff = callbacks_constants.initial_df
+    def update_channel_options_and_values(metadata, select_all, current_channels):
+        if isinstance(metadata, dict) and 'channels' in metadata:
+            channels = metadata['channels']
+        else:
+            dff = MODEL_DATA_CACHE.get('df')
+            if dff is None or dff.empty:
+                dff = callbacks_constants.initial_df
 
-        if dff.empty:
-            return [], []
+            if dff.empty:
+                return [], []
 
-        channels = sorted(dff['channel'].dropna().unique())
+            channels = sorted(dff['channel'].dropna().unique())
+
         options = [{'label': str(c), 'value': c} for c in channels]
 
-        if current_channels:
+        if current_channels is not None:
             valid_channels = [c for c in current_channels if c in channels]
-            if len(valid_channels) == len(current_channels) and len(valid_channels) > 0:
+            if len(valid_channels) == len(current_channels):
                 return options, dash.no_update
             elif len(valid_channels) > 0:
                 return options, valid_channels
@@ -147,23 +158,28 @@ def register_filter_callbacks(app):
          Output('hour-slider', 'max', allow_duplicate=True),
          Output('hour-slider', 'value', allow_duplicate=True),
          Output('hour-slider', 'marks', allow_duplicate=True)],
-        Input('model-data-ready-signal', 'data'),
+        Input('derived-model-metadata', 'data'),
         [State('hour-slider', 'value'),
          State('last-preset-load-time', 'data')],
         prevent_initial_call=True
     )
-    def update_hour_slider_configuration(model_ready, current_value, last_preset_time):
-        dff = MODEL_DATA_CACHE.get('df')
-        if dff is None or dff.empty:
-            return 0, 24, [0, 24], {h: f"{h:02d}:00" for h in range(0, 25, 6)}
+    def update_hour_slider_configuration(metadata, current_value, last_preset_time):
+        if isinstance(metadata, dict) and 'hour_min' in metadata and 'hour_max' in metadata:
+            min_h = metadata['hour_min']
+            max_h = metadata['hour_max']
+        else:
+            dff = MODEL_DATA_CACHE.get('df')
+            if dff is None or dff.empty:
+                return 0, 24, [0, 24], {h: f"{h:02d}:00" for h in range(0, 25, 6)}
 
-        min_val = dff['start_hour_float'].min()
-        max_val = dff['start_hour_float'].max()
-        if pd.isna(min_val) or pd.isna(max_val):
-            return 0, 24, [0, 24], {h: f"{h:02d}:00" for h in range(0, 25, 6)}
+            min_val = dff['start_hour_float'].min()
+            max_val = dff['start_hour_float'].max()
+            if pd.isna(min_val) or pd.isna(max_val):
+                return 0, 24, [0, 24], {h: f"{h:02d}:00" for h in range(0, 25, 6)}
 
-        min_h = int(min_val);
-        max_h = int(max_val) + 1
+            min_h = int(min_val)
+            max_h = int(max_val) + 1
+
         duration = max_h - min_h
         tick_step = 6
         if duration <= 6:
@@ -183,19 +199,60 @@ def register_filter_callbacks(app):
         return min_h, max_h, [min_h, max_h], marks
 
     @app.callback(
+        [Output('project-metadata-store', 'data'),
+         Output('dataset-metadata-store', 'data', allow_duplicate=True)],
+        Input('project-dropdown', 'value'),
+        prevent_initial_call=True
+    )
+    def load_project_metadata_store(selected_project):
+        import read_data
+        if not selected_project:
+            return None, None
+        payload = read_data.get_project_metadata_summary(selected_project)
+        if not payload or not payload.get('locations'):
+            return None, None
+        return payload, payload
+
+    @app.callback(
+        [Output('location-dropdown', 'options', allow_duplicate=True),
+         Output('location-dropdown', 'value', allow_duplicate=True)],
+        Input('project-metadata-store', 'data'),
+        State('location-dropdown', 'value'),
+        prevent_initial_call=True
+    )
+    def update_location_options_from_metadata(meta_data, current_loc):
+        if meta_data and isinstance(meta_data, dict) and 'locations' in meta_data:
+            locations = meta_data['locations']
+        else:
+            initial_df = callbacks_constants.initial_df
+            locations = sorted(initial_df['location'].dropna().unique()) if initial_df is not None and not initial_df.empty else []
+
+        options = [{'label': str(loc), 'value': loc} for loc in locations]
+        if current_loc in locations:
+            return options, dash.no_update
+        return options, locations[0] if locations else None
+
+    @app.callback(
         [Output('model-dropdown', 'options', allow_duplicate=True),
          Output('model-dropdown', 'value', allow_duplicate=True)],
-        Input('location-dropdown', 'value'),
+        [Input('location-dropdown', 'value'),
+         Input('project-metadata-store', 'data')],
         State('model-dropdown', 'value'),
         prevent_initial_call=True
     )
-    def update_model_options(selected_location, current_model):
+    def update_model_options(selected_location, meta_data, current_model):
         if not selected_location:
             return [], None
 
-        initial_df = callbacks_constants.initial_df
-        dff_loc = initial_df[initial_df['location'] == selected_location]
-        models = sorted(dff_loc['model_name'].dropna().unique())
+        if meta_data and isinstance(meta_data, dict) and 'records' in meta_data and meta_data['records']:
+            dff_records = pd.DataFrame(meta_data['records'])
+            dff_loc = dff_records[dff_records['location'] == selected_location]
+            models = sorted(dff_loc['model_name'].dropna().unique())
+        else:
+            initial_df = callbacks_constants.initial_df
+            dff_loc = initial_df[initial_df['location'] == selected_location]
+            models = sorted(dff_loc['model_name'].dropna().unique())
+
         options = [{'label': m, 'value': m} for m in models]
 
         if current_model in models:
@@ -207,20 +264,30 @@ def register_filter_callbacks(app):
         [Output('num-cluster-dropdown', 'options', allow_duplicate=True),
          Output('num-cluster-dropdown', 'value', allow_duplicate=True)],
         [Input('location-dropdown', 'value'),
-         Input('model-dropdown', 'value')],
+         Input('model-dropdown', 'value'),
+         Input('project-metadata-store', 'data')],
         State('num-cluster-dropdown', 'value'),
         prevent_initial_call=True
     )
-    def update_num_cluster_options(selected_location, selected_model, current_k):
+    def update_num_cluster_options(selected_location, selected_model, meta_data, current_k):
         if not selected_location or not selected_model:
             return [], None
 
-        initial_df = callbacks_constants.initial_df
-        dff_model = initial_df[
-            (initial_df['location'] == selected_location) &
-            (initial_df['model_name'] == selected_model)
+        if meta_data and isinstance(meta_data, dict) and 'records' in meta_data and meta_data['records']:
+            dff_records = pd.DataFrame(meta_data['records'])
+            dff_model = dff_records[
+                (dff_records['location'] == selected_location) &
+                (dff_records['model_name'] == selected_model)
             ]
-        num_clusters = sorted(dff_model['cluster_num'].dropna().unique())
+            num_clusters = sorted(dff_model['cluster_num'].dropna().unique())
+        else:
+            initial_df = callbacks_constants.initial_df
+            dff_model = initial_df[
+                (initial_df['location'] == selected_location) &
+                (initial_df['model_name'] == selected_model)
+            ]
+            num_clusters = sorted(dff_model['cluster_num'].dropna().unique())
+
         options = [{'label': str(int(c)), 'value': int(c)} for c in num_clusters]
 
         if current_k and num_clusters:

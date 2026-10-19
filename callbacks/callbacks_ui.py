@@ -12,6 +12,15 @@ from .callbacks_constants import MODEL_DATA_CACHE
 def register_ui_callbacks(app):
     
     @app.callback(
+        Output('manual-label-input', 'disabled'),
+        Output('save-label-btn', 'disabled'),
+        Input('merge-switch', 'on'),
+    )
+    def disable_labeling_when_merged(merge_on):
+        """Keep manual labeling inputs enabled in both unmerged and merged views (Phase 1.6)."""
+        return False, False
+
+    @app.callback(
         [Output('audio-player', 'autoPlay'),
          Output('autoplay-toggle-btn', 'children'),
          Output('autoplay-toggle-btn', 'className')],
@@ -141,7 +150,8 @@ def register_ui_callbacks(app):
                 const trace = new_fig.data[i];
                 if (trace.customdata) {
                     const opacity_array = [];
-                    const time_idx = (mode === 'yearly') ? 4 : 3;
+                    // Phase 0.8: row_idx removed, start_hour_float is idx 2, day_int is idx 3
+                    const time_idx = (mode === 'yearly') ? 3 : 2;
                     for (let j = 0; j < trace.customdata.length; j++) {
                         const point_time = trace.customdata[j][time_idx];
                         let dist = Math.abs(point_time - time_value);

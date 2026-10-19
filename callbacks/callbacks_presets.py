@@ -108,7 +108,7 @@ def register_preset_callbacks(app):
          Output('model-dropdown', 'value', allow_duplicate=True),
          Output('num-cluster-dropdown', 'value', allow_duplicate=True),
          Output('max-points', 'value'),
-         Output('merge-switch', 'on'),
+         Output('merge-switch', 'on', allow_duplicate=True),
          Output('merge-threshold', 'value'),
          Output('clip-count-threshold', 'value', allow_duplicate=True),
          Output('frequency-scale', 'value'),
@@ -178,21 +178,27 @@ def register_preset_callbacks(app):
 
     @app.callback(
         Output('date-dropdown', 'data', allow_duplicate=True),
-        Input('model-data-ready-signal', 'data'),
+        Input('derived-model-metadata', 'data'),
         [State('date-dropdown', 'data'),
          State('last-preset-load-time', 'data')],
         prevent_initial_call=True
     )
-    def reset_date_filter_on_load(model_ready, current_dates, last_preset_time):
-        dff = MODEL_DATA_CACHE.get('df')
-        if dff is None or dff.empty: return []
+    def reset_date_filter_on_load(metadata, current_dates, last_preset_time):
+        if isinstance(metadata, dict) and 'dates' in metadata:
+            available_dates = metadata['dates']
+        else:
+            dff = MODEL_DATA_CACHE.get('df')
+            if dff is None or dff.empty: return []
 
-        available_dates_set = set(pd.to_datetime(dff['day_dt']).dt.strftime('%Y-%m-%d'))
+            if 'day_dt_str' in dff.columns:
+                available_dates = sorted(dff['day_dt_str'].dropna().unique().tolist())
+            else:
+                available_dates = sorted(pd.to_datetime(dff['day_dt']).dt.strftime('%Y-%m-%d').unique().tolist())
 
         is_preset_active = last_preset_time and (time.time() - last_preset_time < 6.0)
 
         if is_preset_active:
             return dash.no_update
 
-        return list(available_dates_set)
+        return list(available_dates)
 
