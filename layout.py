@@ -249,7 +249,7 @@ def create_layout(df):
             html.Div([
                 
                 html.Div([
-                    html.Img(src="/assets/logo.svg", alt="VibroVis Logo",
+                    html.Img(src="/assets/logo.svg", alt="RanaVis Logo",
                              style={'height': '80px', 'marginRight': '10px'}),
                     html.A(
                         "ℹ️",

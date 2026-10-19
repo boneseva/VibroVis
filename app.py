@@ -9,7 +9,7 @@ import read_data
 from callbacks import set_initial_data, register_callbacks
 
 app = Dash(__name__)
-app.title = "VibroVis"
+app.title = "RanaVis"
 server = app.server
 server.secret_key = 'vibrovis-secure-key-change-this-in-env'
 server.config['WTF_CSRF_ENABLED'] = False
