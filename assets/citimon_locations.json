@@ -1,0 +1,317 @@
+{
+  "Draga": {
+    "latitude": 45.9375,
+    "longitude": 14.55,
+    "altitude": 310
+  },
+  "Log": {
+    "latitude": 46.0261,
+    "longitude": 14.4619,
+    "altitude": 339
+  },
+  "Strajanov_Breg": {
+    "latitude": 45.95095755,
+    "longitude": 14.59514086,
+    "altitude": 300
+  },
+  "Crnojelsevje_NIB": {
+    "latitude": 46.05244,
+    "longitude": 14.46874,
+    "altitude": 300
+  },
+  "Dobrava": {
+    "latitude": 45.93939,
+    "longitude": 15.63829,
+    "altitude": 300
+  },
+  "Krakovski_gozd-2025": {
+    "latitude": 45.86676,
+    "longitude": 15.40318,
+    "altitude": 300
+  },
+  "Prekmurje": {
+    "latitude": 46,
+    "longitude": 15,
+    "altitude": 300
+  },
+  "Racki_ribniki": {
+    "latitude": 46.42646,
+    "longitude": 15.6733,
+    "altitude": 300
+  },
+  "Skofljica": {
+    "latitude": 45.97382233,
+    "longitude": 14.56600579,
+    "altitude": 300
+  },
+  "Snaga": {
+    "latitude": 46,
+    "longitude": 15,
+    "altitude": 300
+  },
+  "2026_02-C13": {
+    "latitude": 45.773555,
+    "longitude": 14.833371,
+    "altitude": 300
+  },
+  "2026_03-C02": {
+    "latitude": 45.98588773,
+    "longitude": 14.53717731,
+    "altitude": 300
+  },
+  "2026_03-C03": {
+    "latitude": 45.7131,
+    "longitude": 13.9574,
+    "altitude": 300
+  },
+  "2026_03-C06": {
+    "latitude": 45.92388648,
+    "longitude": 14.97111,
+    "altitude": 300
+  },
+  "2026_03-C08": {
+    "latitude": 45.98575038,
+    "longitude": 14.38891955,
+    "altitude": 300
+  },
+  "2026_03-C09": {
+    "latitude": 46.56086,
+    "longitude": 16.22511,
+    "altitude": 300
+  },
+  "2026_03-C11": {
+    "latitude": 46.039019,
+    "longitude": 15.614503,
+    "altitude": 300
+  },
+  "2026_03-C13": {
+    "latitude": 45.773555,
+    "longitude": 14.833371,
+    "altitude": 300
+  },
+  "2026_03-C16": {
+    "latitude": 45.66,
+    "longitude": 14.22,
+    "altitude": 300
+  },
+  "2026_03-C18": {
+    "latitude": 45.5608302,
+    "longitude": 13.776366,
+    "altitude": 300
+  },
+  "2026_03-C19": {
+    "latitude": 46.7625,
+    "longitude": 16.04056,
+    "altitude": 300
+  },
+  "2026_03-C19-2": {
+    "latitude": 46.7625,
+    "longitude": 16.04056,
+    "altitude": 300
+  },
+  "2026_03-C23": {
+    "latitude": 46.176306,
+    "longitude": 14.445722,
+    "altitude": 300
+  },
+  "2026_03-C24": {
+    "latitude": 46.0218895,
+    "longitude": 14.486286,
+    "altitude": 300
+  },
+  "2026_03-C25": {
+    "latitude": 45.84922,
+    "longitude": 15.27405,
+    "altitude": 300
+  },
+  "2026_03-C27": {
+    "latitude": 46.361306,
+    "longitude": 15.67275,
+    "altitude": 300
+  },
+  "2026_03-C29": {
+    "latitude": 45.922793,
+    "longitude": 14.172334,
+    "altitude": 300
+  },
+  "2026_03-C31": {
+    "latitude": 45.537348,
+    "longitude": 13.761006,
+    "altitude": 300
+  },
+  "2026_03-C33": {
+    "latitude": null,
+    "longitude": null,
+    "altitude": null
+  },
+  "2026_03-C35": {
+    "latitude": 45.971172,
+    "longitude": 14.308008,
+    "altitude": 300
+  },
+  "2026_03-C36": {
+    "latitude": null,
+    "longitude": null,
+    "altitude": null
+  },
+  "2026_03-C38": {
+    "latitude": 46.572389,
+    "longitude": 15.646806,
+    "altitude": 300
+  },
+  "2026_03-C39": {
+    "latitude": 46.375512,
+    "longitude": 15.099916,
+    "altitude": 300
+  },
+  "2026_03-C46": {
+    "latitude": 46.203056,
+    "longitude": 14.632864,
+    "altitude": 300
+  },
+  "2026_03-C47": {
+    "latitude": 45.92,
+    "longitude": 15.69,
+    "altitude": 300
+  },
+  "2026_03-C48": {
+    "latitude": 45.77187659,
+    "longitude": 14.36553465,
+    "altitude": 300
+  },
+  "2026_03-C49": {
+    "latitude": 45.58045999,
+    "longitude": 14.20104637,
+    "altitude": 300
+  },
+  "2026_03-C50": {
+    "latitude": 45.9141,
+    "longitude": 14.6824,
+    "altitude": 300
+  },
+  "2026_03-r26": {
+    "latitude": 45.812627,
+    "longitude": 13.691974,
+    "altitude": 300
+  },
+  "2026_03-r28": {
+    "latitude": 46.145768,
+    "longitude": 15.004414,
+    "altitude": 300
+  },
+  "2026_04-C07": {
+    "latitude": 45.811471,
+    "longitude": 14.39167,
+    "altitude": 300
+  },
+  "2026_04-C28": {
+    "latitude": null,
+    "longitude": null,
+    "altitude": null
+  },
+  "2026_04-C31": {
+    "latitude": null,
+    "longitude": null,
+    "altitude": null
+  },
+  "2026_04-C47": {
+    "latitude": 45.9278067,
+    "longitude": 15.6831782,
+    "altitude": 300
+  },
+  "2026_04-C48": {
+    "latitude": 45.77187659,
+    "longitude": 14.36553465,
+    "altitude": 300
+  },
+  "2026_05-r28": {
+    "latitude": 46.145768,
+    "longitude": 15.004414,
+    "altitude": 300
+  },
+  "2026-04-C06": {
+    "latitude": 45.92388648,
+    "longitude": 14.97111,
+    "altitude": 300
+  },
+  "2026-04-C18": {
+    "latitude": null,
+    "longitude": null,
+    "altitude": null
+  },
+  "2026-04-C41": {
+    "latitude": 45.892367,
+    "longitude": 14.639433,
+    "altitude": 300
+  },
+  "2026-04-r26": {
+    "latitude": 45.812627,
+    "longitude": 13.691974,
+    "altitude": 300
+  },
+  "2026-06-C35": {
+    "latitude": null,
+    "longitude": null,
+    "altitude": null
+  },
+  "2026_03-C19-1": {
+    "latitude": 46.7625,
+    "longitude": 16.04056,
+    "altitude": 300
+  },
+  "2026_03-R26": {
+    "latitude": 45.812627,
+    "longitude": 13.691974,
+    "altitude": 300
+  },
+  "2026_03-R28": {
+    "latitude": 46.145768,
+    "longitude": 15.004414,
+    "altitude": 300
+  },
+  "2026_03-R35": {
+    "latitude": 45.971172,
+    "longitude": 14.308008,
+    "altitude": 300
+  },
+  "2026_03-r35": {
+    "latitude": 45.971172,
+    "longitude": 14.308008,
+    "altitude": 300
+  },
+  "2026_04-C06": {
+    "latitude": 45.92388648,
+    "longitude": 14.97111,
+    "altitude": 300
+  },
+  "2026_04-C18": {
+    "latitude": null,
+    "longitude": null,
+    "altitude": null
+  },
+  "2026_04-C41": {
+    "latitude": 45.892367,
+    "longitude": 14.639433,
+    "altitude": 300
+  },
+  "2026_04-r26": {
+    "latitude": 45.812627,
+    "longitude": 13.691974,
+    "altitude": 300
+  },
+  "2026_04-R26": {
+    "latitude": 45.812627,
+    "longitude": 13.691974,
+    "altitude": 300
+  },
+  "2026-04-R26": {
+    "latitude": 45.812627,
+    "longitude": 13.691974,
+    "altitude": 300
+  },
+  "2026_05-R28": {
+    "latitude": 46.145768,
+    "longitude": 15.004414,
+    "altitude": 300
+  }
+}

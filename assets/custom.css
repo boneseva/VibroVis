@@ -535,4 +535,14 @@ body {
         transform: scale(1);
     }
 }
+
+/* === Citimon Location Map Thumbnail === */
+#location-map-preview {
+    transition: opacity 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+#location-map-preview:hover {
+    border-color: #94a3b8 !important;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1) !important;
+}
 

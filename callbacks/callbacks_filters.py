@@ -9,6 +9,7 @@ import numpy as np
 
 from . import callbacks_constants
 from .callbacks_constants import MODEL_DATA_CACHE
+import citimon_map
 
 
 def register_filter_callbacks(app):
@@ -313,3 +314,24 @@ def register_filter_callbacks(app):
             return max(1, val // 8)
         except:
             return dash.no_update
+
+    @app.callback(
+        [Output('location-map-container', 'children'),
+         Output('location-map-container', 'style')],
+        [Input('location-dropdown', 'value'),
+         Input('project-dropdown', 'value')],
+        prevent_initial_call=False
+    )
+    def update_location_map_preview(selected_location, selected_project):
+        if not citimon_map.is_citimon_project(selected_project):
+            return None, {'display': 'none'}
+
+        comp = citimon_map.render_citimon_map_component(selected_location)
+        container_style = {
+            'display': 'flex',
+            'marginLeft': '8px',
+            'flexShrink': '0',
+            'alignSelf': 'flex-end',
+            'marginBottom': '2px',
+        }
+        return comp, container_style
