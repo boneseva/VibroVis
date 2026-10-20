@@ -27,6 +27,7 @@ CLUSTER_COLORS = ['#4E79A7', '#F28E2B', '#E15759', '#76B7B2', '#EDC948', '#B07AA
 
 import hierarchy
 import read_data
+import citimon_map
 from callbacks.callbacks_date_selector import generate_date_selector
 
 def get_available_presets():
@@ -333,18 +334,35 @@ def create_layout(df):
                         html.Summary("Recordings", className='section-title'),
                         html.Div(id='recordings-filter-content', children=[
                             html.Div([
-                                html.Label("Location"),
-                                html.Div(className="tooltip-container", children=[
-                                    html.Span(" ⓘ", className="info-icon"),
-                                    html.Span("Filter data by the primary recording location.",
-                                              className="tooltip-text")
-                                ])
-                            ], className="label-with-info", style={'marginTop': '1em'}),
-                            dcc.Dropdown(
-                                id='location-dropdown',
-                                options=[{'label': str(loc), 'value': loc} for loc in all_locations],
-                                value=default_location
-                            ),
+                                html.Div([
+                                    html.Div([
+                                        html.Label("Location"),
+                                        html.Div(className="tooltip-container", children=[
+                                            html.Span(" ⓘ", className="info-icon"),
+                                            html.Span("Filter data by the primary recording location.",
+                                                      className="tooltip-text")
+                                        ])
+                                    ], className="label-with-info", style={'marginTop': '1em'}),
+                                    dcc.Dropdown(
+                                        id='location-dropdown',
+                                        options=[{'label': str(loc), 'value': loc} for loc in all_locations],
+                                        value=default_location
+                                    ),
+                                ], style={'flex': '1', 'minWidth': '0'}),
+                                html.Div(
+                                    id='location-map-container',
+                                    children=citimon_map.render_citimon_map_component(
+                                        default_location if citimon_map.is_citimon_project(default_project) else None
+                                    ) if citimon_map.is_citimon_project(default_project) else None,
+                                    style={
+                                        'display': 'flex' if citimon_map.is_citimon_project(default_project) else 'none',
+                                        'marginLeft': '8px',
+                                        'flexShrink': '0',
+                                        'alignSelf': 'flex-end',
+                                        'marginBottom': '2px',
+                                    }
+                                ),
+                            ], style={'display': 'flex', 'alignItems': 'flex-end', 'width': '100%'}),
 
                             html.Div([
                                 html.Label("Microlocation"),
