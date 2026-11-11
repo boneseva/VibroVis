@@ -1,0 +1,4 @@
+Selection	View	Channel	Begin Time (s)	End Time (s)	Low Freq (Hz)	High Freq (Hz)	Begin File	Begin Path	File Offset (s)	Vrsta	Tip klica	Opomba	Synthetic
+1	Spectrogram 1	1	0.5	2.0	300	3000	20260320_184000.WAV	D:\Citimon\2026_03-C02\20260320_184000.WAV	0.5	Rana dalmatina	oglašanje	Žabji klic, slišno èez cesto	SYNTHETIC-TEST-DATA
+2	Spectrogram 1	1	11.0	14.0	300	3000	20260320_184000.WAV	D:\Citimon\2026_03-C02\20260320_184000.WAV	11.0	Pelophylax ridibundus	zbor	šum vetra	SYNTHETIC-TEST-DATA
+3	Spectrogram 1	1	25.0	30.0	300	3000	20260320_184000.WAV	D:\Citimon\2026_03-C02\20260320_184000.WAV	25.0	Bufo bufo		èuk v ozadju	SYNTHETIC-TEST-DATA

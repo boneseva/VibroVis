@@ -1,6 +1,7 @@
 """
 Date selector generation and related callbacks.
 """
+import time
 import dash
 from dash import Input, Output, State, html, dcc, ALL, MATCH
 import pandas as pd
@@ -283,9 +284,10 @@ def register_date_selector_callbacks(app):
     @app.callback(
         Output('date-tree-container', 'children'),
         [Input('model-data-ready-signal', 'data')],
-        [State('date-dropdown', 'data')]
+        [State('date-dropdown', 'data'),
+         State('last-preset-load-time', 'data')]
     )
-    def update_date_tree_dynamically(model_ready_signal, stored_dates):
+    def update_date_tree_dynamically(model_ready_signal, stored_dates, last_preset_time=None):
         if not model_ready_signal:
             return html.Div("Select a location...")
 
@@ -295,7 +297,12 @@ def register_date_selector_callbacks(app):
 
         dates_to_pass = None
 
-        if stored_dates:
+        # Same rule as reset_date_filter_on_load (callbacks_presets.py): a fresh data load selects every
+        # date, so the tree must show all dates ticked. Only a just-loaded preset keeps its stored dates;
+        # otherwise the tree would show the previous location's dates while the filter uses all of them.
+        is_preset_active = bool(last_preset_time) and (time.time() - last_preset_time < 6.0)
+
+        if stored_dates and is_preset_active:
             if 'day_dt_str' in dff.columns:
                 available_dates = set(dff['day_dt_str'].unique())
             else:

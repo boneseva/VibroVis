@@ -158,6 +158,73 @@ def parse_filename_timestamp(filename: str) -> Tuple[Optional[str], Optional[str
     return None, None
 
 
+# ---------------------------------------------------------------------------
+# Citimon hierarchy (config/citimon_registry.json)
+# ---------------------------------------------------------------------------
+CITIMON_LOCATION = "Citimon"
+_UNKNOWN_SUN = {"", "unknown", "nan", "none"}
+
+
+def is_citimon_location(loc: Optional[str]) -> bool:
+    return str(loc or "").strip().casefold() == CITIMON_LOCATION.casefold()
+
+
+def load_citimon_registry():
+    """The Citimon registry, or None when config/citimon_registry.json is absent."""
+    import citimon_registry
+    return citimon_registry.load_registry()
+
+
+def citimon_source_folder(tsv_rel: str) -> Optional[str]:
+    """'Citimon/<folder>/positions/<file>.tsv' -> '<folder>' (None for any other shape)."""
+    parts = normalize_posix(tsv_rel).split("/")
+    return parts[1] if len(parts) >= 4 and is_citimon_location(parts[0]) else None
+
+
+def apply_citimon_hierarchy(df: pd.DataFrame, tsv_rel: str, registry) -> Optional[str]:
+    """Rewrite one Citimon TSV frame in place to the registry hierarchy.
+
+    location = recorder, microlocation = registry ID (or 'Unassigned'), source_folder = the on-disk folder
+    name (recording IDs and audio paths are unchanged). Fills sunrise/sunset from the microlocation's
+    coordinates where the master TSV left them unknown. Returns an error string, or None on success.
+    """
+    import citimon_registry
+    folder = citimon_source_folder(tsv_rel)
+    if not folder:
+        return f"Cannot derive the Citimon source folder from '{tsv_rel}'"
+    if registry.is_excluded(folder):
+        return f"Source folder '{folder}' is excluded in the Citimon registry and must not be ingested"
+    info = registry.folder_info(folder)
+    if info is None:
+        return f"Source folder '{folder}' is not in the Citimon registry (config/citimon_registry.json)"
+
+    df["source_folder"] = folder
+    df["location"] = info.recorder
+    df["microlocation"] = info.microlocation
+
+    if info.latitude is not None and "day" in df.columns:
+        for col in ("sunrise", "sunset"):
+            if col not in df.columns:
+                df[col] = "unknown"
+        missing = df["sunrise"].astype(str).str.strip().str.lower().isin(_UNKNOWN_SUN) | \
+            df["sunset"].astype(str).str.strip().str.lower().isin(_UNKNOWN_SUN)
+        if missing.any():
+            for col in ("sunrise", "sunset"):
+                if df[col].dtype != object:  # all-NaN columns arrive as float64; keep "HH:MM" strings valid
+                    df[col] = df[col].astype(object)
+            for day_val in df.loc[missing, "day"].dropna().unique():
+                try:
+                    day = datetime.datetime.strptime(str(day_val), "%Y-%m-%d").date()
+                except ValueError:
+                    continue
+                rise, set_ = citimon_registry.sun_times(day, info.latitude, info.longitude)
+                if rise and set_:
+                    m = missing & (df["day"] == day_val)
+                    df.loc[m, "sunrise"] = rise
+                    df.loc[m, "sunset"] = set_
+    return None
+
+
 def extract_channel_from_name(name: str) -> Optional[int]:
     """Extract channel number from filename if present (e.g. _ch1, _ch2)."""
     m = re.search(r"_ch(\d+)", name, re.IGNORECASE)
@@ -1795,14 +1862,18 @@ class CacheBuilder:
         model_filter: Optional[str] = None,
         force: bool = False,
         overview_tsv: Optional[str] = None,
+        project_dir: Optional[str] = None,
     ):
+        """``project`` names the cache (manifest "project" and the recording-ID prefix "<project>::").
+        ``project_dir`` is the folder holding recordings/, cache/ and the master TSV; default <base_dir>/<project>.
+        (The Citimon/Multimon data uses project "zabe" with project_dir "data".)"""
         self.project = project
         self.base_dir = base_dir
         self.location_filter = location_filter
         self.model_filter = model_filter
         self.force = force
 
-        self.project_dir = os.path.join(base_dir, project)
+        self.project_dir = project_dir or os.path.join(base_dir, project)
         if not os.path.isdir(self.project_dir):
             raise FileNotFoundError(f"Project directory does not exist: {self.project_dir}")
 
@@ -1864,8 +1935,16 @@ class CacheBuilder:
             pos_dirs: List[str] = []
             audio_files: Dict[str, str] = {}  # base_name -> audio_rel_path
             tsvs_by_base: Dict[str, List[Dict[str, Any]]] = {}
+            excluded_folders: List[str] = []
+            unregistered_folders: List[str] = []
+            registry = self.citimon_registry() if is_citimon_location(loc) else None
 
             for root, dirs, files in os.walk(loc_path):
+                if registry is not None and os.path.normpath(root) == os.path.normpath(loc_path):
+                    dirs.sort()
+                    excluded_folders = [d for d in dirs if registry.is_excluded(d)]
+                    dirs[:] = [d for d in dirs if not registry.is_excluded(d)]
+                    unregistered_folders = [d for d in dirs if registry.folder_info(d) is None]
                 if os.path.basename(root) == "positions":
                     pos_dirs.append(root)
                     # Inspect TSVs
@@ -1904,9 +1983,44 @@ class CacheBuilder:
                 "pos_dirs": pos_dirs,
                 "audio_files": audio_files,
                 "tsvs_by_parent": tsvs_by_base,
+                "excluded_folders": excluded_folders,
+                "unregistered_folders": unregistered_folders,
             }
+            if excluded_folders:
+                self.log("INFO", f"Location '{loc}': skipping {len(excluded_folders)} folder(s) excluded in the "
+                                 f"Citimon registry: {excluded_folders}")
 
         return discovery_tree
+
+    def citimon_registry(self):
+        """Citimon registry (loaded once). Logs an ERROR when it is missing or inconsistent."""
+        if not hasattr(self, "_citimon_registry"):
+            reg = None
+            try:
+                reg = load_citimon_registry()
+            except Exception as e:
+                self.log("ERROR", f"Cannot read the Citimon registry: {e}")
+            if reg is None:
+                self.log("ERROR", "Citimon registry (config/citimon_registry.json) not found; Citimon cannot be built.")
+            else:
+                errs = reg.validate()
+                if errs:
+                    self.log("ERROR", f"Citimon registry is inconsistent ({len(errs)} problem(s)): {errs[:5]}")
+                    reg = None
+            self._citimon_registry = reg
+        return self._citimon_registry
+
+    def check_citimon_tree(self, loc: str, data: Dict[str, Any]) -> bool:
+        """Citimon only: every ingested folder must resolve in the registry. Logs and returns False otherwise."""
+        if not is_citimon_location(loc):
+            return True
+        if self.citimon_registry() is None:
+            return False
+        if data.get("unregistered_folders"):
+            self.log("ERROR", f"Location '{loc}': {len(data['unregistered_folders'])} folder(s) are not in the Citimon "
+                              f"registry; add them (or exclude them) first: {data['unregistered_folders']}")
+            return False
+        return True
 
     def validate(self) -> bool:
         """Execute validation-only audit without writing files."""
@@ -1942,6 +2056,18 @@ class CacheBuilder:
             total_pos_dirs += len(pos_dirs)
 
             self.log("INFO", f"Location '{loc}': {len(pos_dirs)} positions dirs, {loc_audio} audio groups, {loc_tsvs} TSVs.")
+
+            if is_citimon_location(loc) and self.check_citimon_tree(loc, data):
+                reg = self.citimon_registry()
+                folders = sorted({citimon_source_folder(t["rel_path"]) for ts in tsvs_by_parent.values() for t in ts} - {None})
+                by_rec: Dict[str, Set[str]] = defaultdict(set)
+                for f in folders:
+                    info = reg.folder_info(f)
+                    by_rec[info.recorder].add(info.microlocation)
+                unassigned = sorted(f for f in folders if reg.folder_info(f).microlocation == reg.unassigned)
+                self.log("INFO", f"Location '{loc}': registry hierarchy -> {len(folders)} source folders, "
+                                 f"{len(by_rec)} recorders, {sum(len(v) for v in by_rec.values())} recorder/microlocation "
+                                 f"pairs; folders without coordinates (microlocation '{reg.unassigned}'): {unassigned or 'none'}")
 
             if loc_tsvs == 0:
                 self.log("WARNING", f"Location '{loc}' has 0 position TSVs.")
@@ -2039,6 +2165,12 @@ class CacheBuilder:
         ambiguous_metadata_count = 0
         defaulted_samples: List[str] = []
         ambiguous_samples: List[str] = []
+        citimon_reg = None
+        if is_citimon_location(loc):
+            citimon_reg = self.citimon_registry()
+            if citimon_reg is None:
+                self.log("ERROR", f"Partition {loc}/{model_name} not built: Citimon registry unavailable.")
+                return None
 
         for item in tsv_records:
             tsv_path = item["full_path"]
@@ -2128,6 +2260,13 @@ class CacheBuilder:
                         df.loc[mask, "sunset"] = "unknown"
                         df.loc[mask, "day"] = day_parsed if day_parsed else "unknown"
                         df.loc[mask, "start_time"] = time_parsed if time_parsed else "00:00:00"
+
+                if citimon_reg is not None:
+                    problem = apply_citimon_hierarchy(df, tsv_rel, citimon_reg)
+                    if problem:
+                        failed_tsvs.append((tsv_rel, problem))
+                        self.log("ERROR", f"Citimon hierarchy for '{tsv_rel}': {problem}")
+                        continue
 
                 df["wav_file"] = wav_rel
                 df["source_tsv_path"] = tsv_rel
@@ -2219,7 +2358,7 @@ class CacheBuilder:
             big_df.drop(columns=[col for col in columns_to_drop if col in big_df.columns], inplace=True, errors="ignore")
 
             # Ensure text metadata columns have uniform string dtype to avoid pyarrow object inference errors
-            for col in ["location", "microlocation", "channel_name", "recorder_type", "sunrise", "sunset"]:
+            for col in ["location", "microlocation", "source_folder", "channel_name", "recorder_type", "sunrise", "sunset"]:
                 if col in big_df.columns:
                     big_df[col] = big_df[col].fillna("unknown").astype(str)
 
@@ -2236,6 +2375,21 @@ class CacheBuilder:
         except Exception as e:
             self.log("ERROR", f"Error transforming data for {loc} / {model_name}: {e}")
             return None
+
+        # Identity guard: never replace a partition whose recording IDs use another project prefix
+        # (e.g. "zabe::" -> "data::"); that would orphan every stored annotation link.
+        if os.path.isfile(output_partition_path):
+            try:
+                old_ids = pq.read_table(output_partition_path, columns=["recording_id"]).column("recording_id")
+                old_prefix = str(old_ids[0]).split("::", 1)[0] if len(old_ids) else None
+            except Exception:
+                old_prefix = None
+            new_prefix = str(big_df["recording_id"].iloc[0]).split("::", 1)[0]
+            if old_prefix and old_prefix != new_prefix:
+                self.log("ERROR", f"Partition {loc}/{model_name} not replaced: existing recording IDs use prefix "
+                                  f"'{old_prefix}::' but this build would write '{new_prefix}::'. "
+                                  f"Pass --project {old_prefix} (with --data-dir for the data folder).")
+                return None
 
         # Safe commit: write to temporary partition file first, validate, then atomic replace
         os.makedirs(os.path.dirname(output_partition_path), exist_ok=True)
@@ -2301,9 +2455,10 @@ class CacheBuilder:
             self.log("ERROR", "No data discovered to build.")
             return {}
 
-        # Load existing manifest for incremental signature checks
+        # Load existing manifest: incremental reuse (only without --force, checked below) and keeping
+        # partitions this run skips, fails or filters out (always).
         old_manifest = {}
-        if os.path.isfile(self.manifest_path) and not self.force:
+        if os.path.isfile(self.manifest_path):
             try:
                 with open(self.manifest_path, "r", encoding="utf-8") as f:
                     old_manifest = json.load(f)
@@ -2313,7 +2468,15 @@ class CacheBuilder:
         manifest_partitions: List[Dict[str, Any]] = []
         loc_models_map: Dict[str, List[str]] = {}
 
+        # (location, model) pairs, or (location, None) for a whole location, whose previous partition must be
+        # kept because this run skipped or failed them (otherwise stale cleanup would delete the old file).
+        keep_previous: Set[Tuple[str, Optional[str]]] = set()
+
         for loc, data in tree.items():
+            if not self.check_citimon_tree(loc, data):
+                self.log("ERROR", f"Location '{loc}' skipped: Citimon registry check failed (existing partition kept).")
+                keep_previous.add((loc, None))
+                continue
             tsvs_by_parent = data["tsvs_by_parent"]
 
             # Group TSVs by model_name
@@ -2373,6 +2536,9 @@ class CacheBuilder:
                 source_sig = f"{len(tsv_records)}_{sum(t['size'] for t in tsv_records)}_{sum(t['mtime_ns'] % 1000000 for t in tsv_records)}"
                 if overview_sig:
                     source_sig += f"_{overview_sig}"
+                if is_citimon_location(loc):
+                    import citimon_registry
+                    source_sig += f"_{citimon_registry.registry_signature()}"
 
                 old_part_info = None
                 if old_manifest and "partitions" in old_manifest:
@@ -2421,6 +2587,23 @@ class CacheBuilder:
                         m_bak_path,
                         part_info["row_count"],
                     )
+                else:
+                    self.log("ERROR", f"Partition {loc}/{model_name} failed; the previous partition (if any) is kept.")
+                    keep_previous.add((loc, model_name))
+
+        # Keep the previous partition for anything this run skipped or failed.
+        if keep_previous and old_manifest and "partitions" in old_manifest:
+            have = {(p["location"], p["model"]) for p in manifest_partitions}
+            for old_p in old_manifest.get("partitions", []):
+                key = (old_p.get("location"), old_p.get("model"))
+                if key in have or not ((key[0], None) in keep_previous or key in keep_previous):
+                    continue
+                p_rel = old_p.get("partition_rel_path")
+                p_disk = os.path.join(self.project_dir, *p_rel.split("/")) if p_rel else None
+                if p_disk and os.path.isfile(p_disk):
+                    manifest_partitions.append(old_p)
+                    loc_models_map.setdefault(key[0], []).append(key[1])
+                    self.log("WARNING", f"Kept previous partition {p_rel} (this run did not rebuild it).")
 
         # Targeted build preservation: if location_filter or model_filter was active,
         # carry forward valid partitions from old_manifest that were outside the filter scope
@@ -2522,6 +2705,9 @@ def main():
     parser.add_argument("--model", default=None, help="Optional model restriction (for --partitioned)")
     parser.add_argument("--rollback", action="store_true", help="Execute safe rollback for specified location/model")
     parser.add_argument("--overview-tsv", default=None, help="Explicit path or filename for master overview TSV (e.g. data/zabe/zabe+hyla+citimon.tsv)")
+    parser.add_argument("--data-dir", default=None,
+                        help="(--partitioned) Folder holding recordings/, cache/ and the master TSV, when it is not "
+                             "data/<project>. Citimon/Multimon: --project zabe --data-dir data")
     parser.add_argument(
         "--target-existed-before-pilot",
         choices=["true", "false", "unknown"],
@@ -2562,6 +2748,7 @@ def main():
                 model_filter=args.model,
                 force=args.force,
                 overview_tsv=args.overview_tsv,
+                project_dir=args.data_dir,
             )
             if args.validate or args.dry_run:
                 ok = builder.validate()

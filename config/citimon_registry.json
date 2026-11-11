@@ -1,0 +1,2077 @@
+{
+ "schema": "vibrovis.citimon.registry",
+ "schema_version": "1.0",
+ "project": "Citimon",
+ "hierarchy": [
+  "project",
+  "location (recorder)",
+  "microlocation (physical position)"
+ ],
+ "unassigned_microlocation": "Unassigned",
+ "description": "Citimon hierarchy: Citimon -> recorder (location) -> microlocation (exact coordinates). Source folders are internal metadata; dates come from recording timestamps.",
+ "decisions": {
+  "2026-11-05": [
+   "R35 -> C35 folder move intentional",
+   "C19-1 -> 2026_03-C19, C19-2 -> 2026_04-C19; one recorder, one microlocation",
+   "no coordinates -> accepted_unassigned, no microlocation, no map marker",
+   "C47 keeps two microlocations",
+   "numbering by earliest folder prefix over full catalogue, then frozen",
+   "canonical path config/citimon_registry.json"
+  ],
+  "2026-11-10": [
+   "2026_03-R35, 2026-06-C35 and 2026_02-C49 excluded from ingestion as duplicates; names stay resolvable",
+   "C19 rename approved: 2026_03-C19 and 2026_04-C19 -> C19-P1"
+  ]
+ },
+ "id_policy": {
+  "recorder": "Uppercase recorder prefix + number from the folder name (original spelling kept in recorder_original/aliases).",
+  "microlocation": "<recorder>-P<n>. Identity = recorder + exact numeric latitude/longitude from the coordinate source (no rounding). Initial n assigned within each recorder by earliest folder label, then latitude, longitude, over the full catalogue. After approval IDs are frozen: never renumbered or reused; a new position takes the next free n; a returning position reuses its ID.",
+  "missing_coordinates": "No microlocation is assigned; entry is flagged for review.",
+  "frozen": "On every regeneration, IDs already present in the previously approved registry are carried over unchanged; only positions not yet in the ledger receive next_free."
+ },
+ "coordinate_source": {
+  "path": "VibroScape/location_coordinates.json",
+  "sha256": "e63dabb51946bbc2e77c578ccf9d5026eb93c9b8c2f12f6fb62064ca39c94f35"
+ },
+ "recorders": {
+  "C01": {
+   "microlocations": [
+    "C01-P1"
+   ],
+   "source_folders": [
+    "2026_03-C01",
+    "2026_04-C01"
+   ]
+  },
+  "C02": {
+   "microlocations": [
+    "C02-P1"
+   ],
+   "source_folders": [
+    "2026_03-C02"
+   ]
+  },
+  "C03": {
+   "microlocations": [
+    "C03-P1"
+   ],
+   "source_folders": [
+    "2026_03-C03"
+   ]
+  },
+  "C04": {
+   "microlocations": [
+    "C04-P1"
+   ],
+   "source_folders": [
+    "2026_03-C04",
+    "2026_04-C04"
+   ]
+  },
+  "C06": {
+   "microlocations": [
+    "C06-P1"
+   ],
+   "source_folders": [
+    "2026_03-C06",
+    "2026_04-C06"
+   ]
+  },
+  "C07": {
+   "microlocations": [
+    "C07-P1"
+   ],
+   "source_folders": [
+    "2026_03-C07",
+    "2026_04-C07"
+   ]
+  },
+  "C08": {
+   "microlocations": [
+    "C08-P1"
+   ],
+   "source_folders": [
+    "2026_03-C08",
+    "2026_04-C08"
+   ]
+  },
+  "C09": {
+   "microlocations": [
+    "C09-P1"
+   ],
+   "source_folders": [
+    "2026_03-C09"
+   ]
+  },
+  "C11": {
+   "microlocations": [
+    "C11-P1"
+   ],
+   "source_folders": [
+    "2026_03-C11"
+   ]
+  },
+  "C12": {
+   "microlocations": [
+    "C12-P1"
+   ],
+   "source_folders": [
+    "2026_03-C12",
+    "2026_04-C12"
+   ]
+  },
+  "C13": {
+   "microlocations": [
+    "C13-P1"
+   ],
+   "source_folders": [
+    "2026_02-C13",
+    "2026_03-C13"
+   ]
+  },
+  "C14": {
+   "microlocations": [
+    "C14-P1"
+   ],
+   "source_folders": [
+    "2026_03-C14"
+   ]
+  },
+  "C16": {
+   "microlocations": [
+    "C16-P1"
+   ],
+   "source_folders": [
+    "2026_03-C16"
+   ]
+  },
+  "C17": {
+   "microlocations": [
+    "C17-P1"
+   ],
+   "source_folders": [
+    "2026_03-C17"
+   ]
+  },
+  "C18": {
+   "microlocations": [
+    "C18-P1"
+   ],
+   "source_folders": [
+    "2026_03-C18",
+    "2026_04-C18"
+   ]
+  },
+  "C19": {
+   "microlocations": [
+    "C19-P1"
+   ],
+   "source_folders": [
+    "2026_03-C19",
+    "2026_04-C19"
+   ]
+  },
+  "C20": {
+   "microlocations": [
+    "C20-P1"
+   ],
+   "source_folders": [
+    "2026_03-C20"
+   ]
+  },
+  "C22": {
+   "microlocations": [
+    "C22-P1"
+   ],
+   "source_folders": [
+    "2026_03-C22"
+   ]
+  },
+  "C23": {
+   "microlocations": [
+    "C23-P1"
+   ],
+   "source_folders": [
+    "2026_03-C23"
+   ]
+  },
+  "C24": {
+   "microlocations": [
+    "C24-P1"
+   ],
+   "source_folders": [
+    "2026_03-C24"
+   ]
+  },
+  "C25": {
+   "microlocations": [
+    "C25-P1"
+   ],
+   "source_folders": [
+    "2026_03-C25",
+    "2026_04-C25"
+   ]
+  },
+  "C26": {
+   "microlocations": [
+    "C26-P1"
+   ],
+   "source_folders": [
+    "2026_03-C26",
+    "2026_05-C26"
+   ]
+  },
+  "C27": {
+   "microlocations": [
+    "C27-P1"
+   ],
+   "source_folders": [
+    "2026_03-C27"
+   ]
+  },
+  "C28": {
+   "microlocations": [
+    "C28-P1"
+   ],
+   "source_folders": [
+    "2026_03-C28",
+    "2026_04-C28"
+   ]
+  },
+  "C29": {
+   "microlocations": [
+    "C29-P1"
+   ],
+   "source_folders": [
+    "2026_03-C29"
+   ]
+  },
+  "C30": {
+   "microlocations": [
+    "C30-P1"
+   ],
+   "source_folders": [
+    "2026_03-C30"
+   ]
+  },
+  "C31": {
+   "microlocations": [
+    "C31-P1"
+   ],
+   "source_folders": [
+    "2026_03-C31",
+    "2026_04-C31"
+   ]
+  },
+  "C32": {
+   "microlocations": [
+    "C32-P1"
+   ],
+   "source_folders": [
+    "2026_03-C32"
+   ]
+  },
+  "C33": {
+   "microlocations": [
+    "C33-P1"
+   ],
+   "source_folders": [
+    "2026_03-C33"
+   ]
+  },
+  "C34": {
+   "microlocations": [
+    "C34-P1"
+   ],
+   "source_folders": [
+    "2026_03-C34"
+   ]
+  },
+  "C35": {
+   "microlocations": [
+    "C35-P1",
+    "C35-P2"
+   ],
+   "source_folders": [
+    "2026-06-C35",
+    "2026_03-C35",
+    "2026_05-C35"
+   ]
+  },
+  "C36": {
+   "microlocations": [
+    "C36-P1",
+    "C36-P2"
+   ],
+   "source_folders": [
+    "2026_03-C36",
+    "2026_05-C36"
+   ]
+  },
+  "C37": {
+   "microlocations": [
+    "C37-P1"
+   ],
+   "source_folders": [
+    "2026_03-C37"
+   ]
+  },
+  "C38": {
+   "microlocations": [
+    "C38-P1"
+   ],
+   "source_folders": [
+    "2026_03-C38"
+   ]
+  },
+  "C39": {
+   "microlocations": [
+    "C39-P1"
+   ],
+   "source_folders": [
+    "2026_03-C39"
+   ]
+  },
+  "C40": {
+   "microlocations": [
+    "C40-P1"
+   ],
+   "source_folders": [
+    "2026_03-C40",
+    "2026_04-C40"
+   ]
+  },
+  "C41": {
+   "microlocations": [
+    "C41-P1",
+    "C41-P2"
+   ],
+   "source_folders": [
+    "2026_03-C41",
+    "2026_04-C41"
+   ]
+  },
+  "C42": {
+   "microlocations": [
+    "C42-P1"
+   ],
+   "source_folders": [
+    "2026_02-C42"
+   ]
+  },
+  "C43": {
+   "microlocations": [
+    "C43-P1"
+   ],
+   "source_folders": [
+    "2026_03-C43"
+   ]
+  },
+  "C44": {
+   "microlocations": [
+    "C44-P1"
+   ],
+   "source_folders": [
+    "2026_03-C44",
+    "2026_05-C44"
+   ]
+  },
+  "C45": {
+   "microlocations": [
+    "C45-P1"
+   ],
+   "source_folders": [
+    "2026_03-C45"
+   ]
+  },
+  "C46": {
+   "microlocations": [
+    "C46-P1"
+   ],
+   "source_folders": [
+    "2026_03-C46"
+   ]
+  },
+  "C47": {
+   "microlocations": [
+    "C47-P1",
+    "C47-P2"
+   ],
+   "source_folders": [
+    "2026_03-C47",
+    "2026_04-C47"
+   ]
+  },
+  "C48": {
+   "microlocations": [
+    "C48-P1"
+   ],
+   "source_folders": [
+    "2026_03-C48",
+    "2026_04-C48"
+   ]
+  },
+  "C49": {
+   "microlocations": [
+    "C49-P1"
+   ],
+   "source_folders": [
+    "2026_02-C49",
+    "2026_03-C49"
+   ]
+  },
+  "C50": {
+   "microlocations": [
+    "C50-P1"
+   ],
+   "source_folders": [
+    "2026_03-C50"
+   ]
+  },
+  "R14": {
+   "microlocations": [
+    "R14-P1"
+   ],
+   "source_folders": [
+    "2026_03-R14"
+   ]
+  },
+  "R26": {
+   "microlocations": [
+    "R26-P1"
+   ],
+   "source_folders": [
+    "2026_03-R26",
+    "2026_04-r26"
+   ]
+  },
+  "R28": {
+   "microlocations": [
+    "R28-P1"
+   ],
+   "source_folders": [
+    "2026_03-R28",
+    "2026_05-r28"
+   ]
+  }
+ },
+ "microlocations": {
+  "C01-P1": {
+   "recorder": "C01",
+   "latitude": 45.904129,
+   "longitude": 14.705532,
+   "coordinate_literal": [
+    "45.904129",
+    "14.705532"
+   ],
+   "source_folders": [
+    "2026_04-C01"
+   ],
+   "review_status": "proposed"
+  },
+  "C02-P1": {
+   "recorder": "C02",
+   "latitude": 45.98588773,
+   "longitude": 14.53717731,
+   "coordinate_literal": [
+    "45.98588773",
+    "14.53717731"
+   ],
+   "source_folders": [
+    "2026_03-C02"
+   ],
+   "review_status": "proposed"
+  },
+  "C03-P1": {
+   "recorder": "C03",
+   "latitude": 45.7131,
+   "longitude": 13.9574,
+   "coordinate_literal": [
+    "45.7131",
+    "13.9574"
+   ],
+   "source_folders": [
+    "2026_03-C03"
+   ],
+   "review_status": "proposed"
+  },
+  "C04-P1": {
+   "recorder": "C04",
+   "latitude": 46.038861,
+   "longitude": 14.525611,
+   "coordinate_literal": [
+    "46.038861",
+    "14.525611"
+   ],
+   "source_folders": [
+    "2026_03-C04",
+    "2026_04-C04"
+   ],
+   "review_status": "proposed"
+  },
+  "C06-P1": {
+   "recorder": "C06",
+   "latitude": 45.92388648,
+   "longitude": 14.97111,
+   "coordinate_literal": [
+    "45.92388648",
+    "14.97111"
+   ],
+   "source_folders": [
+    "2026_03-C06",
+    "2026_04-C06"
+   ],
+   "review_status": "proposed"
+  },
+  "C07-P1": {
+   "recorder": "C07",
+   "latitude": 45.811471,
+   "longitude": 14.39167,
+   "coordinate_literal": [
+    "45.811471",
+    "14.39167"
+   ],
+   "source_folders": [
+    "2026_03-C07",
+    "2026_04-C07"
+   ],
+   "review_status": "proposed"
+  },
+  "C08-P1": {
+   "recorder": "C08",
+   "latitude": 45.98575038,
+   "longitude": 14.38891955,
+   "coordinate_literal": [
+    "45.98575038",
+    "14.38891955"
+   ],
+   "source_folders": [
+    "2026_03-C08"
+   ],
+   "review_status": "proposed"
+  },
+  "C09-P1": {
+   "recorder": "C09",
+   "latitude": 46.56086,
+   "longitude": 16.22511,
+   "coordinate_literal": [
+    "46.56086",
+    "16.22511"
+   ],
+   "source_folders": [
+    "2026_03-C09"
+   ],
+   "review_status": "proposed"
+  },
+  "C11-P1": {
+   "recorder": "C11",
+   "latitude": 46.039019,
+   "longitude": 15.614503,
+   "coordinate_literal": [
+    "46.039019",
+    "15.614503"
+   ],
+   "source_folders": [
+    "2026_03-C11"
+   ],
+   "review_status": "proposed"
+  },
+  "C12-P1": {
+   "recorder": "C12",
+   "latitude": 46.0113451,
+   "longitude": 15.6875505,
+   "coordinate_literal": [
+    "46.0113451",
+    "15.6875505"
+   ],
+   "source_folders": [
+    "2026_03-C12",
+    "2026_04-C12"
+   ],
+   "review_status": "proposed"
+  },
+  "C13-P1": {
+   "recorder": "C13",
+   "latitude": 45.773555,
+   "longitude": 14.833371,
+   "coordinate_literal": [
+    "45.773555",
+    "14.833371"
+   ],
+   "source_folders": [
+    "2026_02-C13",
+    "2026_03-C13"
+   ],
+   "review_status": "proposed"
+  },
+  "C14-P1": {
+   "recorder": "C14",
+   "latitude": 45.820755,
+   "longitude": 14.488103,
+   "coordinate_literal": [
+    "45.820755",
+    "14.488103"
+   ],
+   "source_folders": [
+    "2026_03-C14"
+   ],
+   "review_status": "proposed"
+  },
+  "C16-P1": {
+   "recorder": "C16",
+   "latitude": 45.653945,
+   "longitude": 14.220648,
+   "coordinate_literal": [
+    "45.653945",
+    "14.220648"
+   ],
+   "source_folders": [
+    "2026_03-C16"
+   ],
+   "review_status": "proposed"
+  },
+  "C17-P1": {
+   "recorder": "C17",
+   "latitude": 46.00255014,
+   "longitude": 14.42033673,
+   "coordinate_literal": [
+    "46.00255014",
+    "14.42033673"
+   ],
+   "source_folders": [
+    "2026_03-C17"
+   ],
+   "review_status": "proposed"
+  },
+  "C18-P1": {
+   "recorder": "C18",
+   "latitude": 45.5608302,
+   "longitude": 13.776366,
+   "coordinate_literal": [
+    "45.5608302",
+    "13.776366"
+   ],
+   "source_folders": [
+    "2026_03-C18",
+    "2026_04-C18"
+   ],
+   "review_status": "proposed"
+  },
+  "C19-P1": {
+   "recorder": "C19",
+   "latitude": 46.7625,
+   "longitude": 16.04056,
+   "coordinate_literal": [
+    "46.7625",
+    "16.04056"
+   ],
+   "source_folders": [
+    "2026_03-C19",
+    "2026_04-C19"
+   ],
+   "review_status": "proposed"
+  },
+  "C20-P1": {
+   "recorder": "C20",
+   "latitude": 46.208515,
+   "longitude": 14.566542,
+   "coordinate_literal": [
+    "46.208515",
+    "14.566542"
+   ],
+   "source_folders": [
+    "2026_03-C20"
+   ],
+   "review_status": "proposed"
+  },
+  "C22-P1": {
+   "recorder": "C22",
+   "latitude": 46.505,
+   "longitude": 15.729,
+   "coordinate_literal": [
+    "46.505",
+    "15.729"
+   ],
+   "source_folders": [
+    "2026_03-C22"
+   ],
+   "review_status": "proposed"
+  },
+  "C23-P1": {
+   "recorder": "C23",
+   "latitude": 46.176306,
+   "longitude": 14.445722,
+   "coordinate_literal": [
+    "46.176306",
+    "14.445722"
+   ],
+   "source_folders": [
+    "2026_03-C23"
+   ],
+   "review_status": "proposed"
+  },
+  "C24-P1": {
+   "recorder": "C24",
+   "latitude": 46.0218895,
+   "longitude": 14.486286,
+   "coordinate_literal": [
+    "46.0218895",
+    "14.486286"
+   ],
+   "source_folders": [
+    "2026_03-C24"
+   ],
+   "review_status": "proposed"
+  },
+  "C25-P1": {
+   "recorder": "C25",
+   "latitude": 45.84922,
+   "longitude": 15.27405,
+   "coordinate_literal": [
+    "45.84922",
+    "15.27405"
+   ],
+   "source_folders": [
+    "2026_03-C25",
+    "2026_04-C25"
+   ],
+   "review_status": "proposed"
+  },
+  "C26-P1": {
+   "recorder": "C26",
+   "latitude": 45.70238321,
+   "longitude": 14.03977149,
+   "coordinate_literal": [
+    "45.70238321",
+    "14.03977149"
+   ],
+   "source_folders": [
+    "2026_03-C26",
+    "2026_05-C26"
+   ],
+   "review_status": "proposed"
+  },
+  "C27-P1": {
+   "recorder": "C27",
+   "latitude": 46.361306,
+   "longitude": 15.67275,
+   "coordinate_literal": [
+    "46.361306",
+    "15.67275"
+   ],
+   "source_folders": [
+    "2026_03-C27"
+   ],
+   "review_status": "proposed"
+  },
+  "C28-P1": {
+   "recorder": "C28",
+   "latitude": 45.742881,
+   "longitude": 14.356668,
+   "coordinate_literal": [
+    "45.742881",
+    "14.356668"
+   ],
+   "source_folders": [
+    "2026_03-C28",
+    "2026_04-C28"
+   ],
+   "review_status": "proposed"
+  },
+  "C29-P1": {
+   "recorder": "C29",
+   "latitude": 45.922793,
+   "longitude": 14.172334,
+   "coordinate_literal": [
+    "45.922793",
+    "14.172334"
+   ],
+   "source_folders": [
+    "2026_03-C29"
+   ],
+   "review_status": "proposed"
+  },
+  "C30-P1": {
+   "recorder": "C30",
+   "latitude": 45.6889309,
+   "longitude": 14.5973834,
+   "coordinate_literal": [
+    "45.6889309",
+    "14.5973834"
+   ],
+   "source_folders": [
+    "2026_03-C30"
+   ],
+   "review_status": "proposed"
+  },
+  "C31-P1": {
+   "recorder": "C31",
+   "latitude": 45.537348,
+   "longitude": 13.761006,
+   "coordinate_literal": [
+    "45.537348",
+    "13.761006"
+   ],
+   "source_folders": [
+    "2026_03-C31",
+    "2026_04-C31"
+   ],
+   "review_status": "proposed"
+  },
+  "C32-P1": {
+   "recorder": "C32",
+   "latitude": 45.981694,
+   "longitude": 15.531917,
+   "coordinate_literal": [
+    "45.981694",
+    "15.531917"
+   ],
+   "source_folders": [
+    "2026_03-C32"
+   ],
+   "review_status": "proposed"
+  },
+  "C33-P1": {
+   "recorder": "C33",
+   "latitude": 45.97637,
+   "longitude": 14.59422,
+   "coordinate_literal": [
+    "45.97637",
+    "14.59422"
+   ],
+   "source_folders": [
+    "2026_03-C33"
+   ],
+   "review_status": "proposed"
+  },
+  "C34-P1": {
+   "recorder": "C34",
+   "latitude": 45.642785,
+   "longitude": 14.05611,
+   "coordinate_literal": [
+    "45.642785",
+    "14.05611"
+   ],
+   "source_folders": [
+    "2026_03-C34"
+   ],
+   "review_status": "proposed"
+  },
+  "C35-P1": {
+   "recorder": "C35",
+   "latitude": 45.971172,
+   "longitude": 14.308008,
+   "coordinate_literal": [
+    "45.971172",
+    "14.308008"
+   ],
+   "source_folders": [
+    "2026_03-C35"
+   ],
+   "review_status": "proposed"
+  },
+  "C35-P2": {
+   "recorder": "C35",
+   "latitude": 46.4928,
+   "longitude": 13.7216,
+   "coordinate_literal": [
+    "46.4928",
+    "13.7216"
+   ],
+   "source_folders": [
+    "2026_05-C35"
+   ],
+   "review_status": "proposed"
+  },
+  "C36-P1": {
+   "recorder": "C36",
+   "latitude": 46.066,
+   "longitude": 15.248,
+   "coordinate_literal": [
+    "46.066",
+    "15.248"
+   ],
+   "source_folders": [
+    "2026_03-C36"
+   ],
+   "review_status": "proposed"
+  },
+  "C36-P2": {
+   "recorder": "C36",
+   "latitude": 46.1207516,
+   "longitude": 14.4974038,
+   "coordinate_literal": [
+    "46.1207516",
+    "14.4974038"
+   ],
+   "source_folders": [
+    "2026_05-C36"
+   ],
+   "review_status": "proposed"
+  },
+  "C37-P1": {
+   "recorder": "C37",
+   "latitude": 45.995187,
+   "longitude": 14.358747,
+   "coordinate_literal": [
+    "45.995187",
+    "14.358747"
+   ],
+   "source_folders": [
+    "2026_03-C37"
+   ],
+   "review_status": "proposed"
+  },
+  "C38-P1": {
+   "recorder": "C38",
+   "latitude": 46.572389,
+   "longitude": 15.646806,
+   "coordinate_literal": [
+    "46.572389",
+    "15.646806"
+   ],
+   "source_folders": [
+    "2026_03-C38"
+   ],
+   "review_status": "proposed"
+  },
+  "C39-P1": {
+   "recorder": "C39",
+   "latitude": 46.375512,
+   "longitude": 15.099916,
+   "coordinate_literal": [
+    "46.375512",
+    "15.099916"
+   ],
+   "source_folders": [
+    "2026_03-C39"
+   ],
+   "review_status": "proposed"
+  },
+  "C40-P1": {
+   "recorder": "C40",
+   "latitude": 46.533589,
+   "longitude": 15.617899,
+   "coordinate_literal": [
+    "46.533589",
+    "15.617899"
+   ],
+   "source_folders": [
+    "2026_03-C40",
+    "2026_04-C40"
+   ],
+   "review_status": "proposed"
+  },
+  "C41-P1": {
+   "recorder": "C41",
+   "latitude": 46.1618,
+   "longitude": 14.35048,
+   "coordinate_literal": [
+    "46.1618",
+    "14.35048"
+   ],
+   "source_folders": [
+    "2026_03-C41"
+   ],
+   "review_status": "proposed"
+  },
+  "C41-P2": {
+   "recorder": "C41",
+   "latitude": 45.892367,
+   "longitude": 14.639433,
+   "coordinate_literal": [
+    "45.892367",
+    "14.639433"
+   ],
+   "source_folders": [
+    "2026_04-C41"
+   ],
+   "review_status": "proposed"
+  },
+  "C42-P1": {
+   "recorder": "C42",
+   "latitude": 46.3158524,
+   "longitude": 15.5917055,
+   "coordinate_literal": [
+    "46.3158524",
+    "15.5917055"
+   ],
+   "source_folders": [
+    "2026_02-C42"
+   ],
+   "review_status": "proposed"
+  },
+  "C43-P1": {
+   "recorder": "C43",
+   "latitude": 46.375375,
+   "longitude": 15.10008,
+   "coordinate_literal": [
+    "46.375375",
+    "15.10008"
+   ],
+   "source_folders": [
+    "2026_03-C43"
+   ],
+   "review_status": "proposed"
+  },
+  "C44-P1": {
+   "recorder": "C44",
+   "latitude": 45.9007769,
+   "longitude": 15.2593643,
+   "coordinate_literal": [
+    "45.9007769",
+    "15.2593643"
+   ],
+   "source_folders": [
+    "2026_03-C44",
+    "2026_05-C44"
+   ],
+   "review_status": "proposed"
+  },
+  "C45-P1": {
+   "recorder": "C45",
+   "latitude": 46.607298,
+   "longitude": 15.203033,
+   "coordinate_literal": [
+    "46.607298",
+    "15.203033"
+   ],
+   "source_folders": [
+    "2026_03-C45"
+   ],
+   "review_status": "proposed"
+  },
+  "C46-P1": {
+   "recorder": "C46",
+   "latitude": 46.203056,
+   "longitude": 14.632864,
+   "coordinate_literal": [
+    "46.203056",
+    "14.632864"
+   ],
+   "source_folders": [
+    "2026_03-C46"
+   ],
+   "review_status": "proposed"
+  },
+  "C47-P1": {
+   "recorder": "C47",
+   "latitude": 45.92,
+   "longitude": 15.69,
+   "coordinate_literal": [
+    "45.92",
+    "15.69"
+   ],
+   "source_folders": [
+    "2026_03-C47"
+   ],
+   "review_status": "approved"
+  },
+  "C47-P2": {
+   "recorder": "C47",
+   "latitude": 45.9278067,
+   "longitude": 15.6831782,
+   "coordinate_literal": [
+    "45.9278067",
+    "15.6831782"
+   ],
+   "source_folders": [
+    "2026_04-C47"
+   ],
+   "review_status": "approved"
+  },
+  "C48-P1": {
+   "recorder": "C48",
+   "latitude": 45.77187659,
+   "longitude": 14.36553465,
+   "coordinate_literal": [
+    "45.77187659",
+    "14.36553465"
+   ],
+   "source_folders": [
+    "2026_03-C48",
+    "2026_04-C48"
+   ],
+   "review_status": "proposed"
+  },
+  "C49-P1": {
+   "recorder": "C49",
+   "latitude": 45.58045999,
+   "longitude": 14.20104637,
+   "coordinate_literal": [
+    "45.58045999",
+    "14.20104637"
+   ],
+   "source_folders": [
+    "2026_02-C49",
+    "2026_03-C49"
+   ],
+   "review_status": "proposed"
+  },
+  "C50-P1": {
+   "recorder": "C50",
+   "latitude": 45.9141,
+   "longitude": 14.6824,
+   "coordinate_literal": [
+    "45.9141",
+    "14.6824"
+   ],
+   "source_folders": [
+    "2026_03-C50"
+   ],
+   "review_status": "proposed"
+  },
+  "R14-P1": {
+   "recorder": "R14",
+   "latitude": 45.8484852,
+   "longitude": 15.417148,
+   "coordinate_literal": [
+    "45.8484852",
+    "15.417148"
+   ],
+   "source_folders": [
+    "2026_03-R14"
+   ],
+   "review_status": "proposed"
+  },
+  "R26-P1": {
+   "recorder": "R26",
+   "latitude": 45.812627,
+   "longitude": 13.691974,
+   "coordinate_literal": [
+    "45.812627",
+    "13.691974"
+   ],
+   "source_folders": [
+    "2026_03-R26",
+    "2026_04-r26"
+   ],
+   "review_status": "proposed"
+  },
+  "R28-P1": {
+   "recorder": "R28",
+   "latitude": 46.145768,
+   "longitude": 15.004414,
+   "coordinate_literal": [
+    "46.145768",
+    "15.004414"
+   ],
+   "source_folders": [
+    "2026_03-R28",
+    "2026_05-r28"
+   ],
+   "review_status": "proposed"
+  }
+ },
+ "source_folders": {
+  "2026-06-C35": {
+   "recorder": "C35",
+   "microlocation": null,
+   "status": "excluded_duplicate",
+   "aliases": [],
+   "excluded": true
+  },
+  "2026_02-C13": {
+   "recorder": "C13",
+   "microlocation": "C13-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_02-C42": {
+   "recorder": "C42",
+   "microlocation": "C42-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_02-C49": {
+   "recorder": "C49",
+   "microlocation": "C49-P1",
+   "status": "excluded_duplicate",
+   "aliases": [],
+   "excluded": true
+  },
+  "2026_03-C01": {
+   "recorder": "C01",
+   "microlocation": null,
+   "status": "accepted_unassigned",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C02": {
+   "recorder": "C02",
+   "microlocation": "C02-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C03": {
+   "recorder": "C03",
+   "microlocation": "C03-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C04": {
+   "recorder": "C04",
+   "microlocation": "C04-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C06": {
+   "recorder": "C06",
+   "microlocation": "C06-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C07": {
+   "recorder": "C07",
+   "microlocation": "C07-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C08": {
+   "recorder": "C08",
+   "microlocation": "C08-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C09": {
+   "recorder": "C09",
+   "microlocation": "C09-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C11": {
+   "recorder": "C11",
+   "microlocation": "C11-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C12": {
+   "recorder": "C12",
+   "microlocation": "C12-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C13": {
+   "recorder": "C13",
+   "microlocation": "C13-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C14": {
+   "recorder": "C14",
+   "microlocation": "C14-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C16": {
+   "recorder": "C16",
+   "microlocation": "C16-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C17": {
+   "recorder": "C17",
+   "microlocation": "C17-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C18": {
+   "recorder": "C18",
+   "microlocation": "C18-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C19": {
+   "recorder": "C19",
+   "microlocation": "C19-P1",
+   "status": "approved",
+   "aliases": [
+    "2026_03-C19-1"
+   ],
+   "excluded": false
+  },
+  "2026_03-C20": {
+   "recorder": "C20",
+   "microlocation": "C20-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C22": {
+   "recorder": "C22",
+   "microlocation": "C22-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C23": {
+   "recorder": "C23",
+   "microlocation": "C23-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C24": {
+   "recorder": "C24",
+   "microlocation": "C24-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C25": {
+   "recorder": "C25",
+   "microlocation": "C25-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C26": {
+   "recorder": "C26",
+   "microlocation": "C26-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C27": {
+   "recorder": "C27",
+   "microlocation": "C27-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C28": {
+   "recorder": "C28",
+   "microlocation": "C28-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C29": {
+   "recorder": "C29",
+   "microlocation": "C29-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C30": {
+   "recorder": "C30",
+   "microlocation": "C30-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C31": {
+   "recorder": "C31",
+   "microlocation": "C31-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C32": {
+   "recorder": "C32",
+   "microlocation": "C32-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C33": {
+   "recorder": "C33",
+   "microlocation": "C33-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C34": {
+   "recorder": "C34",
+   "microlocation": "C34-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C35": {
+   "recorder": "C35",
+   "microlocation": "C35-P1",
+   "status": "approved",
+   "aliases": [
+    "2026_03-R35"
+   ],
+   "excluded": false
+  },
+  "2026_03-C36": {
+   "recorder": "C36",
+   "microlocation": "C36-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C37": {
+   "recorder": "C37",
+   "microlocation": "C37-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C38": {
+   "recorder": "C38",
+   "microlocation": "C38-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C39": {
+   "recorder": "C39",
+   "microlocation": "C39-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C40": {
+   "recorder": "C40",
+   "microlocation": "C40-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C41": {
+   "recorder": "C41",
+   "microlocation": "C41-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C43": {
+   "recorder": "C43",
+   "microlocation": "C43-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C44": {
+   "recorder": "C44",
+   "microlocation": "C44-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C45": {
+   "recorder": "C45",
+   "microlocation": "C45-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C46": {
+   "recorder": "C46",
+   "microlocation": "C46-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C47": {
+   "recorder": "C47",
+   "microlocation": "C47-P1",
+   "status": "approved",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C48": {
+   "recorder": "C48",
+   "microlocation": "C48-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C49": {
+   "recorder": "C49",
+   "microlocation": "C49-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-C50": {
+   "recorder": "C50",
+   "microlocation": "C50-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_03-R14": {
+   "recorder": "R14",
+   "microlocation": "R14-P1",
+   "status": "proposed",
+   "aliases": [
+    "2026_03-r14"
+   ],
+   "excluded": false
+  },
+  "2026_03-R26": {
+   "recorder": "R26",
+   "microlocation": "R26-P1",
+   "status": "proposed",
+   "aliases": [
+    "2026_03-r26"
+   ],
+   "excluded": false
+  },
+  "2026_03-R28": {
+   "recorder": "R28",
+   "microlocation": "R28-P1",
+   "status": "proposed",
+   "aliases": [
+    "2026_03-r28"
+   ],
+   "excluded": false
+  },
+  "2026_04-C01": {
+   "recorder": "C01",
+   "microlocation": "C01-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_04-C04": {
+   "recorder": "C04",
+   "microlocation": "C04-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_04-C06": {
+   "recorder": "C06",
+   "microlocation": "C06-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_04-C07": {
+   "recorder": "C07",
+   "microlocation": "C07-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_04-C08": {
+   "recorder": "C08",
+   "microlocation": null,
+   "status": "accepted_unassigned",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_04-C12": {
+   "recorder": "C12",
+   "microlocation": "C12-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_04-C18": {
+   "recorder": "C18",
+   "microlocation": "C18-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_04-C19": {
+   "recorder": "C19",
+   "microlocation": "C19-P1",
+   "status": "approved",
+   "aliases": [
+    "2026_03-C19-2"
+   ],
+   "excluded": false
+  },
+  "2026_04-C25": {
+   "recorder": "C25",
+   "microlocation": "C25-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_04-C28": {
+   "recorder": "C28",
+   "microlocation": "C28-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_04-C31": {
+   "recorder": "C31",
+   "microlocation": "C31-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_04-C40": {
+   "recorder": "C40",
+   "microlocation": "C40-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_04-C41": {
+   "recorder": "C41",
+   "microlocation": "C41-P2",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_04-C47": {
+   "recorder": "C47",
+   "microlocation": "C47-P2",
+   "status": "approved",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_04-C48": {
+   "recorder": "C48",
+   "microlocation": "C48-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_04-r26": {
+   "recorder": "R26",
+   "microlocation": "R26-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_05-C26": {
+   "recorder": "C26",
+   "microlocation": "C26-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_05-C35": {
+   "recorder": "C35",
+   "microlocation": "C35-P2",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_05-C36": {
+   "recorder": "C36",
+   "microlocation": "C36-P2",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_05-C44": {
+   "recorder": "C44",
+   "microlocation": "C44-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  },
+  "2026_05-r28": {
+   "recorder": "R28",
+   "microlocation": "R28-P1",
+   "status": "proposed",
+   "aliases": [],
+   "excluded": false
+  }
+ },
+ "excluded_source_folders": {
+  "2026-06-C35": "Same recordings as 2026_05-C35 (separate encode), no coordinates. Not ingested (user 2026-11-10).",
+  "2026_02-C49": "All recordings also in 2026_03-C49 (separate encode). Not ingested (user 2026-11-10).",
+  "2026_03-R35": "Former name of 2026_03-C35 (folder moved, user 2026-11-05); its audio is a separate encode of the same recordings. Not ingested (user 2026-11-10)."
+ },
+ "name_index": {
+  "2026-06-C35": "2026-06-C35",
+  "2026_02-C13": "2026_02-C13",
+  "2026_02-C42": "2026_02-C42",
+  "2026_02-C49": "2026_02-C49",
+  "2026_03-C01": "2026_03-C01",
+  "2026_03-C02": "2026_03-C02",
+  "2026_03-C03": "2026_03-C03",
+  "2026_03-C04": "2026_03-C04",
+  "2026_03-C06": "2026_03-C06",
+  "2026_03-C07": "2026_03-C07",
+  "2026_03-C08": "2026_03-C08",
+  "2026_03-C09": "2026_03-C09",
+  "2026_03-C11": "2026_03-C11",
+  "2026_03-C12": "2026_03-C12",
+  "2026_03-C13": "2026_03-C13",
+  "2026_03-C14": "2026_03-C14",
+  "2026_03-C16": "2026_03-C16",
+  "2026_03-C17": "2026_03-C17",
+  "2026_03-C18": "2026_03-C18",
+  "2026_03-C19": "2026_03-C19",
+  "2026_03-C19-1": "2026_03-C19",
+  "2026_03-C19-2": "2026_04-C19",
+  "2026_03-C20": "2026_03-C20",
+  "2026_03-C22": "2026_03-C22",
+  "2026_03-C23": "2026_03-C23",
+  "2026_03-C24": "2026_03-C24",
+  "2026_03-C25": "2026_03-C25",
+  "2026_03-C26": "2026_03-C26",
+  "2026_03-C27": "2026_03-C27",
+  "2026_03-C28": "2026_03-C28",
+  "2026_03-C29": "2026_03-C29",
+  "2026_03-C30": "2026_03-C30",
+  "2026_03-C31": "2026_03-C31",
+  "2026_03-C32": "2026_03-C32",
+  "2026_03-C33": "2026_03-C33",
+  "2026_03-C34": "2026_03-C34",
+  "2026_03-C35": "2026_03-C35",
+  "2026_03-C36": "2026_03-C36",
+  "2026_03-C37": "2026_03-C37",
+  "2026_03-C38": "2026_03-C38",
+  "2026_03-C39": "2026_03-C39",
+  "2026_03-C40": "2026_03-C40",
+  "2026_03-C41": "2026_03-C41",
+  "2026_03-C43": "2026_03-C43",
+  "2026_03-C44": "2026_03-C44",
+  "2026_03-C45": "2026_03-C45",
+  "2026_03-C46": "2026_03-C46",
+  "2026_03-C47": "2026_03-C47",
+  "2026_03-C48": "2026_03-C48",
+  "2026_03-C49": "2026_03-C49",
+  "2026_03-C50": "2026_03-C50",
+  "2026_03-R14": "2026_03-R14",
+  "2026_03-R26": "2026_03-R26",
+  "2026_03-R28": "2026_03-R28",
+  "2026_03-R35": "2026_03-C35",
+  "2026_03-r14": "2026_03-R14",
+  "2026_03-r26": "2026_03-R26",
+  "2026_03-r28": "2026_03-R28",
+  "2026_04-C01": "2026_04-C01",
+  "2026_04-C04": "2026_04-C04",
+  "2026_04-C06": "2026_04-C06",
+  "2026_04-C07": "2026_04-C07",
+  "2026_04-C08": "2026_04-C08",
+  "2026_04-C12": "2026_04-C12",
+  "2026_04-C18": "2026_04-C18",
+  "2026_04-C19": "2026_04-C19",
+  "2026_04-C25": "2026_04-C25",
+  "2026_04-C28": "2026_04-C28",
+  "2026_04-C31": "2026_04-C31",
+  "2026_04-C40": "2026_04-C40",
+  "2026_04-C41": "2026_04-C41",
+  "2026_04-C47": "2026_04-C47",
+  "2026_04-C48": "2026_04-C48",
+  "2026_04-r26": "2026_04-r26",
+  "2026_05-C26": "2026_05-C26",
+  "2026_05-C35": "2026_05-C35",
+  "2026_05-C36": "2026_05-C36",
+  "2026_05-C44": "2026_05-C44",
+  "2026_05-r28": "2026_05-r28"
+ },
+ "microlocation_id_ledger": {
+  "C01": {
+   "assigned": [
+    "C01-P1"
+   ],
+   "next_free": "C01-P2"
+  },
+  "C02": {
+   "assigned": [
+    "C02-P1"
+   ],
+   "next_free": "C02-P2"
+  },
+  "C03": {
+   "assigned": [
+    "C03-P1"
+   ],
+   "next_free": "C03-P2"
+  },
+  "C04": {
+   "assigned": [
+    "C04-P1"
+   ],
+   "next_free": "C04-P2"
+  },
+  "C06": {
+   "assigned": [
+    "C06-P1"
+   ],
+   "next_free": "C06-P2"
+  },
+  "C07": {
+   "assigned": [
+    "C07-P1"
+   ],
+   "next_free": "C07-P2"
+  },
+  "C08": {
+   "assigned": [
+    "C08-P1"
+   ],
+   "next_free": "C08-P2"
+  },
+  "C09": {
+   "assigned": [
+    "C09-P1"
+   ],
+   "next_free": "C09-P2"
+  },
+  "C11": {
+   "assigned": [
+    "C11-P1"
+   ],
+   "next_free": "C11-P2"
+  },
+  "C12": {
+   "assigned": [
+    "C12-P1"
+   ],
+   "next_free": "C12-P2"
+  },
+  "C13": {
+   "assigned": [
+    "C13-P1"
+   ],
+   "next_free": "C13-P2"
+  },
+  "C14": {
+   "assigned": [
+    "C14-P1"
+   ],
+   "next_free": "C14-P2"
+  },
+  "C16": {
+   "assigned": [
+    "C16-P1"
+   ],
+   "next_free": "C16-P2"
+  },
+  "C17": {
+   "assigned": [
+    "C17-P1"
+   ],
+   "next_free": "C17-P2"
+  },
+  "C18": {
+   "assigned": [
+    "C18-P1"
+   ],
+   "next_free": "C18-P2"
+  },
+  "C19": {
+   "assigned": [
+    "C19-P1"
+   ],
+   "next_free": "C19-P2"
+  },
+  "C20": {
+   "assigned": [
+    "C20-P1"
+   ],
+   "next_free": "C20-P2"
+  },
+  "C22": {
+   "assigned": [
+    "C22-P1"
+   ],
+   "next_free": "C22-P2"
+  },
+  "C23": {
+   "assigned": [
+    "C23-P1"
+   ],
+   "next_free": "C23-P2"
+  },
+  "C24": {
+   "assigned": [
+    "C24-P1"
+   ],
+   "next_free": "C24-P2"
+  },
+  "C25": {
+   "assigned": [
+    "C25-P1"
+   ],
+   "next_free": "C25-P2"
+  },
+  "C26": {
+   "assigned": [
+    "C26-P1"
+   ],
+   "next_free": "C26-P2"
+  },
+  "C27": {
+   "assigned": [
+    "C27-P1"
+   ],
+   "next_free": "C27-P2"
+  },
+  "C28": {
+   "assigned": [
+    "C28-P1"
+   ],
+   "next_free": "C28-P2"
+  },
+  "C29": {
+   "assigned": [
+    "C29-P1"
+   ],
+   "next_free": "C29-P2"
+  },
+  "C30": {
+   "assigned": [
+    "C30-P1"
+   ],
+   "next_free": "C30-P2"
+  },
+  "C31": {
+   "assigned": [
+    "C31-P1"
+   ],
+   "next_free": "C31-P2"
+  },
+  "C32": {
+   "assigned": [
+    "C32-P1"
+   ],
+   "next_free": "C32-P2"
+  },
+  "C33": {
+   "assigned": [
+    "C33-P1"
+   ],
+   "next_free": "C33-P2"
+  },
+  "C34": {
+   "assigned": [
+    "C34-P1"
+   ],
+   "next_free": "C34-P2"
+  },
+  "C35": {
+   "assigned": [
+    "C35-P1",
+    "C35-P2"
+   ],
+   "next_free": "C35-P3"
+  },
+  "C36": {
+   "assigned": [
+    "C36-P1",
+    "C36-P2"
+   ],
+   "next_free": "C36-P3"
+  },
+  "C37": {
+   "assigned": [
+    "C37-P1"
+   ],
+   "next_free": "C37-P2"
+  },
+  "C38": {
+   "assigned": [
+    "C38-P1"
+   ],
+   "next_free": "C38-P2"
+  },
+  "C39": {
+   "assigned": [
+    "C39-P1"
+   ],
+   "next_free": "C39-P2"
+  },
+  "C40": {
+   "assigned": [
+    "C40-P1"
+   ],
+   "next_free": "C40-P2"
+  },
+  "C41": {
+   "assigned": [
+    "C41-P1",
+    "C41-P2"
+   ],
+   "next_free": "C41-P3"
+  },
+  "C42": {
+   "assigned": [
+    "C42-P1"
+   ],
+   "next_free": "C42-P2"
+  },
+  "C43": {
+   "assigned": [
+    "C43-P1"
+   ],
+   "next_free": "C43-P2"
+  },
+  "C44": {
+   "assigned": [
+    "C44-P1"
+   ],
+   "next_free": "C44-P2"
+  },
+  "C45": {
+   "assigned": [
+    "C45-P1"
+   ],
+   "next_free": "C45-P2"
+  },
+  "C46": {
+   "assigned": [
+    "C46-P1"
+   ],
+   "next_free": "C46-P2"
+  },
+  "C47": {
+   "assigned": [
+    "C47-P1",
+    "C47-P2"
+   ],
+   "next_free": "C47-P3"
+  },
+  "C48": {
+   "assigned": [
+    "C48-P1"
+   ],
+   "next_free": "C48-P2"
+  },
+  "C49": {
+   "assigned": [
+    "C49-P1"
+   ],
+   "next_free": "C49-P2"
+  },
+  "C50": {
+   "assigned": [
+    "C50-P1"
+   ],
+   "next_free": "C50-P2"
+  },
+  "R14": {
+   "assigned": [
+    "R14-P1"
+   ],
+   "next_free": "R14-P2"
+  },
+  "R26": {
+   "assigned": [
+    "R26-P1"
+   ],
+   "next_free": "R26-P2"
+  },
+  "R28": {
+   "assigned": [
+    "R28-P1"
+   ],
+   "next_free": "R28-P2"
+  }
+ }
+}

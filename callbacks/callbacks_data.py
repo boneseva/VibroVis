@@ -659,11 +659,15 @@ def register_data_callbacks(app):
          Output('derived-model-metadata', 'data')],
         [Input('model-dropdown', 'value'),
          Input('location-dropdown', 'value'),
-         Input('project-dropdown', 'value')]
+         Input('project-dropdown', 'value')],
+        # On-screen "Loading data…" badge over the scatter while the data is read (can take a while)
+        running=[(Output('data-loading-overlay', 'style'), {'display': 'flex'}, {'display': 'none'}),
+                 (Output('data-loading-overlay-table', 'style'), {'display': 'flex'}, {'display': 'none'})],
     )
     def load_data_into_server_cache(selected_model, selected_location, selected_project=None, selected_dataset=None):
         metadata = extract_model_metadata(None)
-        if not selected_model or not selected_location:
+        selected_locations = read_data.location_list(selected_location)
+        if not selected_model or not selected_locations:
             MODEL_DATA_CACHE['df'] = None
             MODEL_DATA_CACHE['metadata'] = metadata
             MODEL_DATA_CACHE['key'] = None
@@ -671,18 +675,18 @@ def register_data_callbacks(app):
 
         if selected_project:
             # Validate that selected_location belongs to selected_project
-            if not read_data.is_valid_project_location(selected_project, selected_location):
+            if not read_data.is_valid_project_location(selected_project, selected_locations):
                 # Reject stale/mismatched location during transition (e.g. Citimon + Banjšice)
                 # Avoid clearing cache or loading empty data while location-dropdown updates
                 return dash.no_update, dash.no_update
 
-            expected_key = (selected_project, selected_location, selected_model)
-            with time_block("data_load_project", extra_info=f"proj='{selected_project}', loc='{selected_location}', model='{selected_model}'"):
+            expected_key = (selected_project, tuple(selected_locations), selected_model)
+            with time_block("data_load_project", extra_info=f"proj='{selected_project}', loc={selected_locations}, model='{selected_model}'"):
                 try:
                     model_df = read_data.load_project_model_data(
                         project_id=selected_project,
                         selected_model=selected_model,
-                        selected_location=selected_location
+                        selected_location=selected_locations
                     )
                     if model_df is None or model_df.empty:
                         MODEL_DATA_CACHE['df'] = None
@@ -706,7 +710,7 @@ def register_data_callbacks(app):
                 vibro_path = os.path.join("data", "vibro", "cache", "final_data.parquet")
                 if os.path.exists(vibro_path):
                     data_path = vibro_path
-            expected_key = (None, selected_location, selected_model)
+            expected_key = (None, tuple(selected_locations), selected_model)
             if not os.path.exists(data_path):
                 MODEL_DATA_CACHE['df'] = None
                 MODEL_DATA_CACHE['metadata'] = metadata
@@ -716,13 +720,13 @@ def register_data_callbacks(app):
                                 'cluster_num', 'cluster_id', 'day_dt', 'start_hour_float',
                                 'file_name', 'clip_time', 'clip_duration', 'mp3_file', 'row_idx',
                                 'start_dt', 'time_of_day', 'recorder_type', 'wav_file']
-                with time_block("data_load_legacy", extra_info=f"model='{selected_model}', location='{selected_location}'"):
+                with time_block("data_load_legacy", extra_info=f"model='{selected_model}', location={selected_locations}"):
                     try:
                         model_df = pd.read_parquet(
                             data_path,
                             filters=[
                                 [('model_name', '==', selected_model),
-                                 ('location', '==', selected_location)]
+                                 ('location', 'in', selected_locations)]
                             ],
                             columns=cols_to_load
                         )

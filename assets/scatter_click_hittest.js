@@ -41,6 +41,7 @@
     const MAX_MARKER_RADIUS = 40;          // Max marker radius (diameter 80px / 2)
     const BOUNDARY_TOLERANCE = 5;          // Edge proximity tolerance in px for near-miss clicks
     const CLICK_DEBOUNCE_MS = 200;         // Debounce guard to prevent duplicate dispatches
+    const PRIORITY_TOLERANCE = 6;          // Labelled (priority) markers win clicks within this many px of their edge
 
     // State
     let scatterEl = null;
@@ -158,6 +159,8 @@
             const cdArr = trace.customdata;
             const sizeArr = (trace.marker && trace.marker.size) ? getCoordinateArray(trace.marker.size) : null;
             const isScalarSize = (trace.marker && typeof trace.marker.size === 'number') ? trace.marker.size : null;
+            // Traces flagged meta.click_priority (Raven-annotated / manually labelled points) win clicks
+            const clickPriority = (trace.meta && trace.meta.click_priority) ? Number(trace.meta.click_priority) || 0 : 0;
 
             const len = Math.min(xArr.length, yArr.length);
             for (let ptIdx = 0; ptIdx < len; ptIdx++) {
@@ -202,6 +205,7 @@
                     diameter: diameter,
                     radius: radius,
                     customdata: cd,
+                    priority: clickPriority,
                     traceName: trace.name || `Trace ${curveIdx}`
                 });
             }
@@ -226,9 +230,30 @@
     function resolveMarkerHit(mx, my) {
         if (!spatialGrid || spatialGrid.totalPoints === 0) return null;
 
-        const maxQueryRadius = MAX_MARKER_RADIUS + BOUNDARY_TOLERANCE;
+        const maxQueryRadius = MAX_MARKER_RADIUS + Math.max(BOUNDARY_TOLERANCE, PRIORITY_TOLERANCE);
         const candidates = spatialGrid.queryRadius(mx, my, maxQueryRadius);
         if (candidates.length === 0) return null;
+
+        // Step 0: labelled (priority) markers are "highest up": they win whenever the click is inside them
+        // or within PRIORITY_TOLERANCE px of their edge, even if unlabelled markers also contain the cursor.
+        const priorityCandidates = [];
+        for (let i = 0; i < candidates.length; i++) {
+            const { pt, dist } = candidates[i];
+            if (pt.priority > 0 && dist - pt.radius <= PRIORITY_TOLERANCE) {
+                priorityCandidates.push({ pt, edgeDist: dist - pt.radius });
+            }
+        }
+        if (priorityCandidates.length > 0) {
+            priorityCandidates.sort((a, b) => {
+                if (b.pt.priority !== a.pt.priority) return b.pt.priority - a.pt.priority;
+                const aIn = a.edgeDist <= 0, bIn = b.edgeDist <= 0;
+                if (aIn !== bIn) return aIn ? -1 : 1;
+                if (!aIn && Math.abs(a.edgeDist - b.edgeDist) > 0.5) return a.edgeDist - b.edgeDist;
+                if (b.pt.curveNumber !== a.pt.curveNumber) return b.pt.curveNumber - a.pt.curveNumber;
+                return b.pt.pointNumber - a.pt.pointNumber;
+            });
+            return priorityCandidates[0].pt;
+        }
 
         // Step 1: Collect candidates whose marker body physically contains the cursor
         const insideCandidates = [];

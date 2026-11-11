@@ -396,16 +396,26 @@ def get_project_metadata_summary(
     return summary
 
 
+def location_list(value: Any) -> List[str]:
+    """Normalise a location-dropdown value (None, one location, or a list of locations) to a list."""
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return [str(v) for v in value if v is not None and str(v) != ""]
+    return [str(value)] if str(value) != "" else []
+
+
 def is_valid_project_location(
     project_id: str,
-    location_id: str,
+    location_id: Any,
     base_dir: str = hierarchy.DEFAULT_DATA_DIR
 ) -> bool:
-    """Checks whether location_id belongs to project_id."""
-    if not project_id or not location_id:
+    """Checks whether location_id (one location or a list of them) belongs to project_id."""
+    locs = location_list(location_id)
+    if not project_id or not locs:
         return False
     summary = get_project_metadata_summary(project_id, base_dir=base_dir)
-    return location_id in set(summary.get('locations', []))
+    return set(locs) <= set(summary.get('locations', []))
 
 
 # Alias for backward compatibility
@@ -415,14 +425,14 @@ get_initial_data_for_dataset = get_initial_data_for_location
 def load_project_model_data(
     project_id: str,
     selected_model: Optional[str] = None,
-    selected_location: Optional[str] = None,
+    selected_location: Any = None,
     base_dir: str = hierarchy.DEFAULT_DATA_DIR,
     strict: Optional[bool] = None,
     **kwargs
 ) -> pd.DataFrame:
     """
     Loads model/location filtered data for a project across all source partitions
-    or fallback to legacy cache.
+    or fallback to legacy cache. ``selected_location`` may be one location or a list of them.
     """
     eff_model = selected_model if selected_model is not None else kwargs.get("model_name")
     from cache import reader
@@ -499,4 +509,4 @@ def get_initial_data_for_layout(base_dir: str = hierarchy.DEFAULT_DATA_DIR):
 
 
 if __name__ == '__main__':
-    load_positions_tsv_optimized()
+    load_positions_tsv_optimized()

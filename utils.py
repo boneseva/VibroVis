@@ -12,6 +12,17 @@ import librosa  # Make sure librosa is imported
 
 
 # --- *** OPTIMIZED SELECTIVE AUDIO LOADING *** ---
+SPECTROGRAM_TIME_AXIS_TITLE = "Time in file (s)"
+
+
+def segment_start_time(clip_time, padding_s):
+    """File time (s) of the first sample returned by load_audio_segment (padding is clamped at the file start).
+
+    Spectrograms add this to their time axis so they show time in the recording file, which makes clip and
+    Raven-interval spectrograms of the same file directly comparable."""
+    return max(0.0, float(clip_time) - float(padding_s))
+
+
 def load_audio_segment(mp3_file_relative_path, clip_time, clip_duration, channel=0, padding_s=1.0):
     """
     Loads a specific audio segment using optimized selective loading.

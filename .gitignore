@@ -5,7 +5,16 @@
 /__pycache__/
 *.pyc
 .idea/
-/tests/
+# Tests are local by default; the Raven importer tests, their SYNTHETIC fixtures and the Citimon hierarchy tests are tracked.
+/tests/*
+!/tests/test_raven_import.py
+!/tests/test_raven_import_ui.py
+!/tests/test_raven_citimon_delivery.py
+!/tests/test_raven_labels.py
+!/tests/test_citimon_hierarchy.py
+!/tests/fixtures/
+/tests/fixtures/*
+!/tests/fixtures/raven_synthetic/
 /logo/
 /prepare_data/
 /.cursor/
@@ -14,11 +23,17 @@
 /scratch/
 /cache/backups/
 /cache/clip_durations/
+# Raven annotation database (persistent volume on the VM, never in Git)
+/cache/annotations/
 /cache/partitions/
 /cache/*.parquet
 cache/manual_labels/*.db-wal
 cache/manual_labels/*.db-shm
 /temp/
+
+# Biologists' Raven deliveries: private, imported into the annotation DB, never committed
+/CITI-MON-anotacije/
+/CITI-MON-anotacije*.zip
 
 AGENTS.md
 

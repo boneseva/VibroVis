@@ -22,4 +22,6 @@ audio/
 
 # Ignore local generated state
 labels/
+# Raven annotation DB is mounted at runtime, never baked into the image
+cache/annotations/
 presets/

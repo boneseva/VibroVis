@@ -146,8 +146,9 @@ def register_preset_callbacks(app):
 
             spec = data.get('spectrogram', {})
 
+            loc = g('location')
             return (
-                g('location'),
+                [loc] if isinstance(loc, str) and loc else (loc or []),  # older presets stored one location
                 g('microlocation', []),
                 g('recorder', []),
                 g('channels', []),

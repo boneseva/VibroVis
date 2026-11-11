@@ -1,0 +1,7 @@
+{
+  "_comment": "Exact table-name location -> Citimon catalogue location. Approved 2026-10-28. Each alias is validated against the recording catalogue before use; names are never matched ignoring case.",
+  "aliases": {
+    "2026_03-r26": "2026_03-R26",
+    "2026_03-r28": "2026_03-R28"
+  }
+}

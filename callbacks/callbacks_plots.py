@@ -24,6 +24,7 @@ from callbacks.callbacks_constants import (
     CUSTOMDATA_DATE_TIME_IDX
 )
 from utils import apply_manual_labels_efficiently
+from callbacks import callbacks_raven_labels as raven_labels
 
 # Performance profiling and diagnostics
 from diagnostics import PipelineTimer, is_diagnostics_enabled, get_cache_diagnostics
@@ -32,6 +33,24 @@ from .callbacks_data import merge_clips_vectorized
 
 import numpy as np
 import plotly.graph_objects as go
+import weakref
+import read_data
+
+_LOADED_LOCATIONS = {}  # id(df) -> (weakref to df, set of its locations); avoids rescanning millions of rows
+
+
+def _loaded_locations(df):
+    """Distinct 'location' values of the cached model frame (memoised per frame object)."""
+    hit = _LOADED_LOCATIONS.get(id(df))
+    if hit is not None and hit[0]() is df:
+        return hit[1]
+    locs = {str(v) for v in pd.unique(df['location'])}
+    _LOADED_LOCATIONS.clear()
+    try:
+        _LOADED_LOCATIONS[id(df)] = (weakref.ref(df), locs)
+    except TypeError:
+        pass
+    return locs
 
 
 def get_label_for_clip(loc, micro, file_basename, channel, clip_time):
@@ -89,31 +108,41 @@ def register_plot_callbacks(app):
          State('filtered-data', 'data'),
          State('project-dropdown', 'value'),
          State('model-dropdown', 'value')],
+        # Raven colour mode (appended so existing positional arguments keep their order)
+        [Input('raven-annotator-filter', 'value'),
+         Input('raven-compare-mode', 'value'),
+         Input({'type': 'raven-checkbox', 'index': ALL}, 'value'),
+         Input('raven-color-store', 'data'),
+         State({'type': 'raven-checkbox', 'index': ALL}, 'id')],
         prevent_initial_call='initial_duplicate'
     )
     def update_figure(model_ready_signal, selected_channels, selected_num_clusters,
                       cluster_checkbox_values, cluster_colors_data, cluster_names_data,
                       selected_dates, hour_range, max_points, resample_clicks, priority_sampling_on,
                       merge_on, merge_threshold, clip_count_threshold,
-                      selected_microlocations, selected_recorders, 
+                      selected_microlocations, selected_recorders,
                       color_mode, manual_labels_trigger, label_colors_data, label_names_data,
                       label_checkbox_values,
                       current_figure_state, stored_indices,
                       selected_location, last_preset_time, cluster_checkbox_ids,
                       label_checkbox_ids, current_filtered_key=None,
-                      selected_project=None, selected_model=None, *args, **kwargs):
+                      selected_project=None, selected_model=None,
+                      raven_annotators=None, raven_compare=None, raven_checkbox_values=None,
+                      raven_colors_data=None, raven_checkbox_ids=None, *args, **kwargs):
         try:
             return _update_figure_impl(model_ready_signal, selected_channels, selected_num_clusters,
                       cluster_checkbox_values, cluster_colors_data, cluster_names_data,
                       selected_dates, hour_range, max_points, resample_clicks, priority_sampling_on,
                       merge_on, merge_threshold, clip_count_threshold,
-                      selected_microlocations, selected_recorders, 
+                      selected_microlocations, selected_recorders,
                       color_mode, manual_labels_trigger, label_colors_data, label_names_data,
                       label_checkbox_values,
                       current_figure_state, stored_indices,
                       selected_location, last_preset_time, cluster_checkbox_ids,
                       label_checkbox_ids, current_filtered_key,
-                      selected_project, selected_model, *args, **kwargs)
+                      selected_project, selected_model,
+                      raven_annotators, raven_compare, raven_checkbox_values,
+                      raven_colors_data, raven_checkbox_ids, *args, **kwargs)
         except Exception:
             import traceback
             traceback.print_exc()
@@ -129,7 +158,9 @@ def register_plot_callbacks(app):
                       current_figure_state, stored_indices,
                       selected_location, last_preset_time, cluster_checkbox_ids,
                       label_checkbox_ids, current_filtered_key=None,
-                      selected_project=None, selected_model=None, *args, **kwargs):
+                      selected_project=None, selected_model=None,
+                      raven_annotators=None, raven_compare=None, raven_checkbox_values=None,
+                      raven_colors_data=None, raven_checkbox_ids=None, *args, **kwargs):
 
         timer = PipelineTimer("update_figure").start()
         t_start = time.time() if ENABLE_PROFILING else None
@@ -153,7 +184,8 @@ def register_plot_callbacks(app):
         # marker.color on each existing trace via Patch() — zero data
         # re-processing, zero scatter payload re-transmission.
         # ---------------------------------------------------------------
-        _COLOR_ONLY_TRIGGERS = frozenset({'cluster-color-store.data', 'label-color-store.data'})
+        _COLOR_ONLY_TRIGGERS = frozenset({'cluster-color-store.data', 'label-color-store.data',
+                                          'raven-color-store.data'})
         is_color_only = (
             bool(all_triggered_ids)
             and set(all_triggered_ids) <= _COLOR_ONLY_TRIGGERS
@@ -164,9 +196,15 @@ def register_plot_callbacks(app):
             try:
                 is_manual_now = (color_mode == 'manual')
                 patched = Patch()
+                raven_now = None
+                if color_mode == raven_labels.RAVEN_MODE:
+                    raven_now = raven_labels.category_colors(
+                        [t.get('name', '') for t in current_figure_state['data']], raven_colors_data)
                 for i, trace in enumerate(current_figure_state['data']):
                     group_name = trace.get('name', '')
-                    if is_manual_now:
+                    if raven_now is not None:
+                        new_color = raven_now.get(group_name, '#888888')
+                    elif is_manual_now:
                         if group_name == 'Unlabeled':
                             new_color = '#D9D9D9'
                         elif label_colors_data and group_name in label_colors_data:
@@ -362,9 +400,10 @@ def register_plot_callbacks(app):
         if dff_raw is not None and 'clip_duration' not in dff_raw.columns:
             dff_raw['clip_duration'] = 5.0
 
-        if dff_raw is not None and not dff_raw.empty and selected_location:
-            cached_location = dff_raw['location'].iloc[0]
-            if cached_location != selected_location:
+        selected_locations = read_data.location_list(selected_location)
+        if dff_raw is not None and not dff_raw.empty and selected_locations and 'location' in dff_raw.columns:
+            # Multi-select: the cached frame is stale if it holds a location that is no longer selected
+            if not _loaded_locations(dff_raw) <= set(selected_locations):
                 msg = "Loading data..."
                 timer.stop(extra_info="location_loading")
                 if current_figure_state and current_figure_state.get('data'):
@@ -381,9 +420,9 @@ def register_plot_callbacks(app):
                 return fig, None, 1, 100, [], None, msg, {'total': 0}, None, False if should_force_defaults else no_update
 
         if dff_raw is None or dff_raw.empty:
-            if selected_location and selected_model:
+            if selected_locations and selected_model:
                 proj_part = f"project '{selected_project}', " if selected_project else ""
-                msg = f"No data found for {proj_part}location '{selected_location}', model '{selected_model}'."
+                msg = f"No data found for {proj_part}location '{', '.join(selected_locations)}', model '{selected_model}'."
             else:
                 msg = "Select a model and location to begin."
             timer.stop(extra_info="select_model_location")
@@ -684,7 +723,17 @@ def register_plot_callbacks(app):
             total_clips_available = dff_macro['clip_count'].sum() if 'clip_count' in dff_macro.columns else len(dff_macro)
         else:
             total_clips_available = 0
-            
+
+        # Raven colour mode: map imported annotations onto the filtered points (read-only; manual labels untouched).
+        # Category/compare filters are applied after sampling so the grey context does not reshuffle.
+        is_raven_mode = (color_mode == raven_labels.RAVEN_MODE)
+        raven_prep = None
+        if is_raven_mode and not dff_macro.empty:
+            raven_prep = raven_labels.prepare(dff_macro, selected_project, selected_model,
+                                              raven_annotators, raven_compare)
+            cluster_stats.update(raven_labels.stats_entries(raven_prep))
+            total_clips_available = dff_macro['clip_count'].sum() if 'clip_count' in dff_macro.columns else len(dff_macro)
+
         # -------------------------------------------------------------------
 
         should_resample = is_fresh_load or is_resample_click or is_k_change or not stored_indices
@@ -716,7 +765,10 @@ def register_plot_callbacks(app):
                 if is_priority_on and 'manual_label' in dff_macro.columns:
                      # Prioritize labeled points (everything that is not 'Unlabeled')
                      labeled_mask = dff_macro['manual_label'] != 'Unlabeled'
-                     unlabeled_mask = dff_macro['manual_label'] == 'Unlabeled'
+                     if raven_prep is not None:
+                         # Raven mode: points with any Raven annotation are prioritized as well
+                         labeled_mask = labeled_mask | dff_macro['row_idx'].isin(raven_prep['annotated_ids'])
+                     unlabeled_mask = ~labeled_mask
                      
                      labeled_indices = dff_macro[labeled_mask].index
                      unlabeled_indices = dff_macro[unlabeled_mask].index
@@ -796,6 +848,11 @@ def register_plot_callbacks(app):
             
             dff_sampled = dff_macro
 
+        if raven_prep is not None:
+            dff_sampled = raven_labels.apply_to_sample(
+                dff_sampled, raven_prep, raven_compare,
+                raven_labels.selected_categories(raven_checkbox_values, raven_checkbox_ids))
+
         # Calculate Visibility Stats AFTER final filters
         clips_visible = dff_sampled['clip_count'].sum() if not dff_sampled.empty else 0
         if total_clips_available > 0:
@@ -872,8 +929,12 @@ def register_plot_callbacks(app):
             if 'manual_label' not in dff.columns:
                 dff = apply_manual_labels_efficiently(dff, _label_snapshot)
             color_col = 'manual_label'
-            
-        if is_manual_mode:
+        elif is_raven_mode:
+            color_col = 'raven_category'
+
+        if is_raven_mode:
+            final_color_map = raven_labels.category_colors(dff['raven_category'].unique(), raven_colors_data)
+        elif is_manual_mode:
             # SINGLE SOURCE OF TRUTH: Only use label_colors_data (label-color-store)
             # No more MD5 hash fallbacks - all colors must come from the store
             
@@ -945,16 +1006,19 @@ def register_plot_callbacks(app):
 
         fig = go.Figure()
         
-        label_name = 'Label' if is_manual_mode else 'Cluster'
-        
+        label_name = 'Label' if is_manual_mode else ('Raven' if is_raven_mode else 'Cluster')
+
         # Legend support: one trace per color category
         if not dff.empty:
             unique_groups = sorted(dff[color_col].unique())
-            
+
             # Ensure 'Unlabeled' is the FIRST trace so it is rendered at the bottom (Z-order)
             if 'Unlabeled' in unique_groups:
                 unique_groups.remove('Unlabeled')
                 unique_groups = ['Unlabeled'] + unique_groups
+            if is_raven_mode:
+                # Unannotated points at the bottom, disagreements on top
+                unique_groups = list(reversed(raven_labels.aggregate.category_order(unique_groups)))
             
             _cd_cols_present = [c for c in CUSTOMDATA_COLS if c in dff.columns]
             # Payload-local copy for customdata with 3-decimal precision on start_hour_float.
@@ -964,15 +1028,17 @@ def register_plot_callbacks(app):
                 _cd_source['start_hour_float'] = _cd_source['start_hour_float'].round(3)
 
             for group in unique_groups:
-                mask = (dff[color_col] == group)
-                gp_df = dff[mask]
-                if gp_df.empty: continue
-                
-                fig.add_trace(go.Scattergl(
-                    x=gp_df['x'].astype(np.float32), 
-                    y=gp_df['y'].astype(np.float32),
-                    mode='markers',
-                    marker=dict(
+                group_mask = (dff[color_col] == group)
+                # Raven mode: points with an uncertain ('?') label get a hollow marker of the same colour
+                if is_raven_mode:
+                    parts = [(group_mask & ~dff['raven_uncertain'], None),
+                             (group_mask & dff['raven_uncertain'], 'circle-open')]
+                else:
+                    parts = [(group_mask, None)]
+                for mask, symbol in parts:
+                    gp_df = dff[mask]
+                    if gp_df.empty: continue
+                    marker = dict(
                         size=gp_df['marker_size'],
                         # Scalar color per trace — all points in a group share one color.
                         # Using a scalar (not a per-point array) avoids WebGL buffer re-upload
@@ -981,17 +1047,37 @@ def register_plot_callbacks(app):
                         sizemode='diameter',
                         sizeref=1,
                         opacity=1.0
-                    ),
-                    customdata=_cd_source[mask].to_numpy(),
-                    hovertemplate=f'<b>{label_name}:</b> %{{customdata[{CUSTOMDATA_COLOR_IDX}]}}<br>' +
-                                 f'<b>File:</b> %{{customdata[{CUSTOMDATA_FILE_NAME_IDX}]}}<br>' +
-                                 f'<b>Clip Count:</b> %{{customdata[{CUSTOMDATA_CLIP_COUNT_IDX}]}}<br>' +
-                                 f'<b>Time:</b> %{{customdata[{CUSTOMDATA_CLIP_TIME_IDX}]:.2f}}s<br>' +
-                                 f'<b>Date & Time:</b> %{{customdata[{CUSTOMDATA_DATE_TIME_IDX}]}}<br>' +
-                                 f'<b>Channel:</b> %{{customdata[{CUSTOMDATA_CHANNEL_IDX}]}}<extra></extra>',
-                    name=str(group),
-                    showlegend=True
-                ))
+                    )
+                    extra = {}
+                    if symbol:
+                        marker['symbol'] = symbol
+                        marker['line'] = dict(width=2)
+                    if is_raven_mode:
+                        extra = dict(text=raven_labels.hover_text(gp_df))
+
+                    # Labelled points (Raven annotations / manual labels) win clicks over unlabelled points
+                    # that overlap or sit right next to them (see assets/scatter_click_hittest.js).
+                    unlabelled_group = (raven_labels.aggregate.NO_ANNOTATION if is_raven_mode else 'Unlabeled')
+                    if (is_raven_mode or is_manual_mode) and str(group) != unlabelled_group:
+                        extra['meta'] = {'click_priority': 1}
+
+                    fig.add_trace(go.Scattergl(
+                        x=gp_df['x'].astype(np.float32),
+                        y=gp_df['y'].astype(np.float32),
+                        mode='markers',
+                        marker=marker,
+                        customdata=_cd_source[mask].to_numpy(),
+                        hovertemplate=f'<b>{label_name}:</b> %{{customdata[{CUSTOMDATA_COLOR_IDX}]}}<br>' +
+                                     ('<b>Annotations:</b> %{text}<br>' if is_raven_mode else '') +
+                                     f'<b>File:</b> %{{customdata[{CUSTOMDATA_FILE_NAME_IDX}]}}<br>' +
+                                     f'<b>Clip Count:</b> %{{customdata[{CUSTOMDATA_CLIP_COUNT_IDX}]}}<br>' +
+                                     f'<b>Time:</b> %{{customdata[{CUSTOMDATA_CLIP_TIME_IDX}]:.2f}}s<br>' +
+                                     f'<b>Date & Time:</b> %{{customdata[{CUSTOMDATA_DATE_TIME_IDX}]}}<br>' +
+                                     f'<b>Channel:</b> %{{customdata[{CUSTOMDATA_CHANNEL_IDX}]}}<extra></extra>',
+                        name=str(group),
+                        showlegend=True,
+                        **extra
+                    ))
 
         fig.update_layout(showlegend=False, margin=dict(l=5, r=5, t=5, b=5),
                           paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
@@ -1167,7 +1253,7 @@ def register_plot_callbacks(app):
         # 4. ROUNDING (Keeps it fast)
         Sxx_db = np.round(Sxx_db, 2)
         f = np.round(f, 1)
-        t = np.round(t, 3)
+        t = np.round(t + utils.segment_start_time(row['clip_time'], 0.5), 3)   # time in the recording file
 
         # 5. Build Figure (With correct Colormap)
         fig = go.Figure(data=go.Heatmap(
@@ -1182,7 +1268,7 @@ def register_plot_callbacks(app):
             margin=dict(l=40, r=10, t=10, b=0),
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
-            xaxis=dict(title="Time (s)", showgrid=False),
+            xaxis=dict(title=utils.SPECTROGRAM_TIME_AXIS_TITLE, showgrid=False),
             yaxis=dict(title="Freq (Hz)", showgrid=False, type='log' if frequency_scale == 'log' else 'linear'),
             dragmode='zoom', # Better interaction than pan
             autosize=True
@@ -1281,8 +1367,13 @@ def register_plot_callbacks(app):
 
             # Determine the key to filter by
             is_manual = (color_mode == 'manual')
-            
-            if is_manual:
+            is_raven = (color_mode == raven_labels.RAVEN_MODE and 'raven_category' in dff.columns)
+
+            if is_raven:
+                clicked_label = str(effective_click["points"][0]["customdata"][0])
+                cluster_df = dff[dff['raven_category'] == clicked_label].copy()
+                target_id_for_color = clicked_label
+            elif is_manual:
                  clicked_label = str(effective_click["points"][0]["customdata"][0])
                  
                  if 'manual_label' not in dff.columns:
@@ -1301,7 +1392,10 @@ def register_plot_callbacks(app):
                 target_id_for_color = cluster_id
 
             bar_color = '#CCCCCC'
-            if is_manual:
+            if is_raven:
+                if not cluster_df.empty and 'mapped_color' in cluster_df.columns:
+                    bar_color = cluster_df['mapped_color'].iloc[0]
+            elif is_manual:
                 if label_colors and target_id_for_color in label_colors:
                     bar_color = label_colors[target_id_for_color]
                 elif cluster_colors and target_id_for_color in cluster_colors:

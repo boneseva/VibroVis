@@ -22,6 +22,24 @@ import hierarchy
 import read_data
 
 
+def _loc_values(selected_location: Any) -> List[str]:
+    """selected_location may be None, one location, or a list of locations (multi-select)."""
+    return read_data.location_list(selected_location)
+
+
+def _matches_any_location(partition_location: str, locs: List[str]) -> bool:
+    return any(partition_location == loc or partition_location.startswith(loc) for loc in locs)
+
+
+def _filter_by_locations(df: pd.DataFrame, selected_location: Any) -> pd.DataFrame:
+    """Keep rows whose 'location' is one of the selected locations (no-op when nothing matches)."""
+    locs = _loc_values(selected_location)
+    if not locs or "location" not in df.columns:
+        return df
+    mask = df["location"].astype(str).isin(locs)
+    return df[mask] if mask.any() else df
+
+
 logger = logging.getLogger(__name__)
 class CacheIntegrityError(Exception):
     """Raised when a partition listed in manifest.json is corrupted or missing on disk."""
@@ -198,9 +216,10 @@ class PartitionedCacheReader(BaseCacheReader):
                 return p
 
         # 3. Match using selected_location (e.g. location_id='Bistra_spring', selected_location='Bistra')
-        if selected_location:
+        sel_locs = _loc_values(selected_location)
+        if sel_locs:
             for p in partitions:
-                if (p.get("location") == selected_location or p.get("location", "").startswith(selected_location)) and p.get("model") == model_name:
+                if _matches_any_location(p.get("location", ""), sel_locs) and p.get("model") == model_name:
                     return p
 
         # 4. Prefix match (e.g. location_id was 'Bistra', and manifest partition location is 'Bistra_spring')
@@ -242,12 +261,12 @@ class PartitionedCacheReader(BaseCacheReader):
 
         if model_name:
             matched = [p for p in partitions if p.get("model") == model_name or p.get("model", "").lower() == model_name.lower()]
-            if selected_location:
+            sel_locs = _loc_values(selected_location)
+            if sel_locs:
                 loc_matched = [
                     p for p in matched
-                    if p.get("location") == selected_location
-                    or p.get("location", "").startswith(selected_location)
-                    or selected_location.startswith(p.get("location", ""))
+                    if _matches_any_location(p.get("location", ""), sel_locs)
+                    or any(loc.startswith(p.get("location", "")) for loc in sel_locs)
                 ]
                 if loc_matched:
                     return loc_matched
@@ -349,10 +368,8 @@ class PartitionedCacheReader(BaseCacheReader):
                 else:
                     logger.warning("[cache][metadata_mismatch] %s", msg)
 
-        # If selected_location was provided and is present in 'location' column, filter if necessary
-        if selected_location and "location" in model_df.columns:
-            if (model_df["location"] == selected_location).any():
-                model_df = model_df[model_df["location"] == selected_location]
+        # If selected_location(s) were provided and are present in the 'location' column, filter
+        model_df = _filter_by_locations(model_df, selected_location)
 
         # Standard post-processing (day_dt_str, date_time_str, cluster_id_str, clip_count, categories)
         return read_data.process_loaded_model_dataframe(model_df)
@@ -407,9 +424,7 @@ class PartitionedCacheReader(BaseCacheReader):
             return pd.DataFrame()
 
         combined = pd.concat(dfs, ignore_index=True) if len(dfs) > 1 else dfs[0]
-        if selected_location and "location" in combined.columns:
-            if (combined["location"] == selected_location).any():
-                combined = combined[combined["location"] == selected_location]
+        combined = _filter_by_locations(combined, selected_location)
 
         return read_data.process_loaded_model_dataframe(combined)
 
@@ -526,18 +541,20 @@ class LegacyCacheReader(BaseCacheReader):
         if not parquet_path or not os.path.exists(parquet_path):
             return pd.DataFrame()
 
-        # Determine location filter:
-        eff_location = selected_location
+        # Determine location filter (one location or a list of them):
+        eff_locs = _loc_values(selected_location)
+        eff_location = eff_locs[0] if len(eff_locs) == 1 else (eff_locs or None)
+        loc_op = 'in' if isinstance(eff_location, list) else '=='
 
         filters = []
         if model_name is not None and eff_location is not None:
-            filters = [[('model_name', '==', model_name), ('location', '==', eff_location)]]
+            filters = [[('model_name', '==', model_name), ('location', loc_op, eff_location)]]
         elif model_name is not None and location_id:
             filters = [[('model_name', '==', model_name), ('location', '==', location_id)]]
         elif model_name is not None:
             filters = [[('model_name', '==', model_name)]]
         elif eff_location is not None:
-            filters = [[('location', '==', eff_location)]]
+            filters = [[('location', loc_op, eff_location)]]
         elif location_id:
             filters = [[('location', '==', location_id)]]
         else:
