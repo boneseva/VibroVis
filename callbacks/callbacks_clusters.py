@@ -9,6 +9,7 @@ import pandas as pd
 
 from callbacks.callbacks_constants import MODEL_DATA_CACHE, initial_df, CLUSTER_COLORS, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK
 from utils import apply_manual_labels_efficiently
+from callbacks import callbacks_raven_labels as raven_labels
 
 
 def register_cluster_callbacks(app):
@@ -31,13 +32,18 @@ def register_cluster_callbacks(app):
          State({'type': 'cluster-checkbox', 'index': ALL}, 'value'),
          State({'type': 'cluster-checkbox', 'index': ALL}, 'id'),
          State({'type': 'label-checkbox', 'index': ALL}, 'value'),
-         State({'type': 'label-checkbox', 'index': ALL}, 'id')]
+         State({'type': 'label-checkbox', 'index': ALL}, 'id')],
+        # Raven colour mode (appended so existing positional arguments keep their order)
+        [State('raven-color-store', 'data'),
+         State({'type': 'raven-checkbox', 'index': ALL}, 'value'),
+         State({'type': 'raven-checkbox', 'index': ALL}, 'id')]
     )
     def render_cluster_controls(num_clusters, model_ready, preset_selected_ids, cluster_stats,
                                 color_mode, manual_labels_trigger, label_names_data, label_colors_data,
-                                current_colors, current_names, last_preset_time, 
+                                current_colors, current_names, last_preset_time,
                                 current_checkbox_values, current_checkbox_ids,
-                                current_label_checkbox_values=None, current_label_checkbox_ids=None):
+                                current_label_checkbox_values=None, current_label_checkbox_ids=None,
+                                raven_colors=None, raven_checkbox_values=None, raven_checkbox_ids=None):
         try:
             dff = MODEL_DATA_CACHE.get('df')
             if dff is None or dff.empty: dff = initial_df
@@ -50,11 +56,16 @@ def register_cluster_callbacks(app):
                     triggered_ids = [t['prop_id'] for t in dash.callback_context.triggered]
             except Exception:
                 pass
-            
+
             is_mode_change = any('color-mode-radio' in t_id for t_id in triggered_ids)
             is_reset_trigger = any('num-cluster-dropdown' in t_id for t_id in triggered_ids) or \
                                any('model-data-ready-signal' in t_id for t_id in triggered_ids) or \
                                is_mode_change
+
+            if color_mode == raven_labels.RAVEN_MODE:
+                # RAVEN MODE: imported annotation categories (read-only data, same row style)
+                return raven_labels.legend_rows(cluster_stats, raven_colors, raven_checkbox_values,
+                                                raven_checkbox_ids, is_reset_trigger)
 
             if is_manual:
                 # -----------------------------------------------------------------
@@ -381,6 +392,11 @@ def register_cluster_callbacks(app):
     def update_legend_header(color_mode):
         if color_mode == 'manual':
             return "Manual Labels", "Select specific manual labels to display. Click the color block to change the label color."
+        if color_mode == raven_labels.RAVEN_MODE:
+            return "Raven labels", ("Imported Raven annotations of the selected annotators (read-only). A point is "
+                                    "coloured by its species or label; 'Multiple labels' when several apply, "
+                                    "'Annotators disagree' when annotators labelled the same clip differently. "
+                                    "Untick a category to hide it.")
         return "Clusters", "Select specific clusters to display from the chosen model. Click the color block to change the cluster color."
 
     @app.callback(

@@ -1,0 +1,465 @@
+{
+  "schema": "vibrovis.multimon.locations",
+  "version": "1.0",
+  "description": "Map positions for Multimon locations. Keys of 'locations' are the app's location values; each location has zero or more positions (no positions = 'No coordinates').",
+  "sources": [
+    "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10",
+    "VibroScape/location_coordinates.json"
+  ],
+  "not_used": {
+    "Prekmurje": "VibroScape lists 46, 15, a placeholder; real coordinates missing",
+    "Snaga": "VibroScape lists 46, 15, a placeholder; real coordinates missing",
+    "Bioblitz": "no coordinates in the field sheet (r10/r12/r13/r21/r29)"
+  },
+  "locations": {
+    "Banjšice": [
+      {
+        "latitude": 46.06414,
+        "longitude": 13.6983,
+        "source_folders": [
+          "Banjšice",
+          "r29 - Banjšice"
+        ],
+        "description": "na stebru od elektrike",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Barka": [
+      {
+        "latitude": 45.64282,
+        "longitude": 14.0557,
+        "source_folders": [
+          "Barka",
+          "r06 - Barka (1)",
+          "r06 - Barka (2)"
+        ],
+        "description": "Na grmu nad kalom, enaka lokacija kot lani",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Bioblitz": [],
+    "Cerknica": [
+      {
+        "latitude": 45.771553,
+        "longitude": 14.369874,
+        "source_folders": [
+          "Cerknica",
+          "r13 - Cerknica_2 (lokacija 2)"
+        ],
+        "description": "Ob kalu",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10",
+        "note": "The sheet lists only 'r13 - Cerknica_2 (lokacija 2)'; confirm this is the position of folder 'Cerknica'."
+      }
+    ],
+    "CHE Avče": [
+      {
+        "latitude": 46.08638,
+        "longitude": 13.66731,
+        "source_folders": [
+          "CHE Avče",
+          "r18 - CHE Avče"
+        ],
+        "description": "Manjša mlaka zraven zajetja CHE Avče, na drevesu ob manjši mlaki",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Dobrovo - Goriška brda": [
+      {
+        "latitude": 45.99356,
+        "longitude": 13.52998,
+        "source_folders": [
+          "Dobrovo - Goriška brda",
+          "r25 - Dobrovo Goriška brda kanal"
+        ],
+        "description": "Ob kanali s stoječo vodo naprej od potoka glede na cesto",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Draga": [
+      {
+        "latitude": 45.9375,
+        "longitude": 14.55,
+        "source_folders": [
+          "Draga"
+        ],
+        "description": "Site-level position (individual hm recorders have no coordinates)",
+        "source": "VibroScape/location_coordinates.json"
+      }
+    ],
+    "Drskovče": [
+      {
+        "latitude": 45.6541,
+        "longitude": 14.22061,
+        "source_folders": [
+          "Drskovče",
+          "r08 - Drskovče (1)",
+          "r08 - Drskovče (2)"
+        ],
+        "description": "Na grmu na levi strani večjega kala, enaka lokacija kot lani",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Glinokop Vogrsko": [
+      {
+        "latitude": 45.92649,
+        "longitude": 13.71063,
+        "source_folders": [
+          "Glinokop Vogrsko",
+          "r21 - Glinokop Vogrsko"
+        ],
+        "description": "na samostojnem drevesu med več vodami",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10",
+        "label": "Vogrsko"
+      },
+      {
+        "latitude": 45.88448,
+        "longitude": 13.65607,
+        "source_folders": [
+          "Renški glinokop",
+          "r22 - Renški glinokop (full time)",
+          "r30 - Renški glinokop"
+        ],
+        "description": "Od parkinga naprej po levi potki, snemalniki na poplavljeni vrbi",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10",
+        "label": "Renški glinokop",
+        "note": "The cache files folder 'Renški glinokop' under location 'Glinokop Vogrsko'; the sheet gives a separate site ~6 km away."
+      }
+    ],
+    "Globočaj": [
+      {
+        "latitude": 45.71256,
+        "longitude": 13.95674,
+        "source_folders": [
+          "Globočaj",
+          "r07 - Globočaj _1",
+          "r07 - Globočaj (2)"
+        ],
+        "description": "Na grmu ob levem bregu kala, enaka lokacija kot lani",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Goriška brda - leska ob lepem kalu v vinogradu": [
+      {
+        "latitude": 45.98279,
+        "longitude": 13.57349,
+        "source_folders": [
+          "r14 - Goriška brda - leska ob lepem kalu v vinogradu",
+          "r14 - Goriška brda, leska ob lepem kalu v vinogradu"
+        ],
+        "description": "Leska ob lepem kalu med vinogradi (Gornje Cerovo)",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Goriška brda - mlaka z urhi": [
+      {
+        "latitude": 45.99325,
+        "longitude": 13.58007,
+        "source_folders": [
+          "r27 - Goriška brda - mlaka z urhi",
+          "r27 - Goriška brda, mlaka z urhi"
+        ],
+        "description": "Na drevesu ob naravni luži dol od kala z ribami in lokvanji (Hum)",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Goriška brda - travnik z lužicami ob cesti": [
+      {
+        "latitude": 45.99852,
+        "longitude": 13.58533,
+        "source_folders": [
+          "r30 - Goriška brda - travnik z lužicami ob cesti"
+        ],
+        "description": "travnik z lužicami ob cesti (Hum)",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Gozd Panovec": [
+      {
+        "latitude": 45.95181414,
+        "longitude": 13.66807275,
+        "source_folders": [
+          "Gozd Panovec",
+          "r21 - Vipavska dolina - Panovec mlaka"
+        ],
+        "description": "Grm v mlaki",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Jarše - peskokop Obrije": [
+      {
+        "latitude": 46.07643,
+        "longitude": 14.54463,
+        "source_folders": [
+          "Jarše - peskokop Obrije",
+          "r20 - Jarše peskokop - full time 25.4.2025 - 2.5.2025",
+          "r20 - Jarše Peskokop - full time do 12.5.2025"
+        ],
+        "description": "na grmu za kupom peska",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Juršče": [
+      {
+        "latitude": 45.67835,
+        "longitude": 14.30853,
+        "source_folders": [
+          "Juršče",
+          "r03 - Juršče (1)",
+          "r03 - Juršče (2)"
+        ],
+        "description": "Na drevesu ob zgornjih dveh kalih v Jurščah",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "kal Vipavska dolina": [
+      {
+        "latitude": 45.90174,
+        "longitude": 13.63132,
+        "source_folders": [
+          "kal Vipavska dolina",
+          "r23 - Vipavska dolina kal"
+        ],
+        "description": "po potki levo na drevesu",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Kastelec": [
+      {
+        "latitude": 45.5849,
+        "longitude": 13.87187,
+        "source_folders": [
+          "Kastelec",
+          "r05 - Kastelec (1)",
+          "r05 - Kastelec (2)"
+        ],
+        "description": "Na grmu na levi strani kala, enaka lokacija kot lani",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Kobariško blato": [
+      {
+        "latitude": 46.24392,
+        "longitude": 13.56973,
+        "source_folders": [
+          "Kobariško blato",
+          "r11 - Kobariško blato (na drevesu ob jarku, full time)"
+        ],
+        "description": "na drevesu ob jarku",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Log": [
+      {
+        "latitude": 46.0261,
+        "longitude": 14.4619,
+        "source_folders": [
+          "Log"
+        ],
+        "description": "Site-level position (individual hm/am recorders have no coordinates)",
+        "source": "VibroScape/location_coordinates.json"
+      }
+    ],
+    "Mrtvica Soče": [
+      {
+        "latitude": 46.20994,
+        "longitude": 13.64367,
+        "source_folders": [
+          "Mrtvica Soče",
+          "r19 - Mrtvica Soče"
+        ],
+        "description": "na drevesu",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Mrtvica Vipave": [
+      {
+        "latitude": 45.87606,
+        "longitude": 13.80112,
+        "source_folders": [
+          "Mrtvica Vipave",
+          "r16 - mrtvica Vipave"
+        ],
+        "description": "ob jarku naravnost do gozda, na drevesu",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Neblo": [
+      {
+        "latitude": 46.0069,
+        "longitude": 13.48443,
+        "source_folders": [
+          "Neblo",
+          "r14 - Neblo"
+        ],
+        "description": "Neblo - druga lokacija",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Neblo - kal v vinogradu": [
+      {
+        "latitude": 46.01114,
+        "longitude": 13.48093,
+        "source_folders": [
+          "Neblo - kal v vinogradu",
+          "r15 - Neblo (kal v vinogradu, full time)",
+          "r27 - Neblo kal v vinogradu"
+        ],
+        "description": "kal v vinogradu",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Peskokop Rodež": [
+      {
+        "latitude": 46.06128,
+        "longitude": 13.63168,
+        "source_folders": [
+          "Peskokop Rodež",
+          "r24 - peskokop Rodež"
+        ],
+        "description": "Peskokop Rodež",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Peskokop Volče": [
+      {
+        "latitude": 46.18812,
+        "longitude": 13.70897,
+        "source_folders": [
+          "Peskokop Volče",
+          "r28 - Peskokop Volče"
+        ],
+        "description": "Zadaj na drevesu",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Prekmurje": [],
+    "Rakitovec": [
+      {
+        "latitude": 45.46356,
+        "longitude": 13.96659,
+        "source_folders": [
+          "Rakitovec",
+          "r01 - Rakitovec (1)",
+          "r01 - Rakitovec (2)"
+        ],
+        "description": "nov velik kal v Rakitovcu, na drevesu ob kalu",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Robidišče 1": [
+      {
+        "latitude": 46.21164,
+        "longitude": 13.41647,
+        "source_folders": [
+          "Robidišče 1",
+          "r09 - Robidišče (skoraj suh kal)"
+        ],
+        "description": "Na drevesu ob kali, kal skoraj suh",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Robidišče 2": [
+      {
+        "latitude": 46.2119,
+        "longitude": 13.41391,
+        "source_folders": [
+          "Robidišče 2",
+          "r26 - Robidišče 2 enaka lokacija kot lani"
+        ],
+        "description": "Enaka lokacija kot lani",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Spodnje Gameljne": [
+      {
+        "latitude": 46.1174,
+        "longitude": 14.51652,
+        "source_folders": [
+          "Spodnje Gameljne",
+          "r04 - Gameljne"
+        ],
+        "description": "V gozdu ob robu vode v zajetju (13.4.–24.4.)",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10",
+        "label": "13.4.–24.4."
+      },
+      {
+        "latitude": 46.117616,
+        "longitude": 14.516929,
+        "source_folders": [
+          "Spodnje Gameljne"
+        ],
+        "description": "Nova lokacija od 24.4. do 4.5.",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10",
+        "label": "from 24.4."
+      }
+    ],
+    "Vipavska dolina - mlaka ob hitri cesti blizu IT meje": [
+      {
+        "latitude": 45.90134,
+        "longitude": 13.61593,
+        "source_folders": [
+          "r23 - Vipavska dolina - mlaka ob hitri cesti blizu IT meje"
+        ],
+        "description": "Mlaka ob hitri cesti blizu IT meje, na debelejši vrbi (Miren)",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Vipolže - nova mlaka": [
+      {
+        "latitude": 45.96857,
+        "longitude": 13.53265,
+        "source_folders": [
+          "Vipolže - nova mlaka",
+          "r17 - Vipolže (nova mlaka)"
+        ],
+        "description": "Na drevesu ob mlaki",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ],
+    "Zazid": [
+      {
+        "latitude": 45.50094,
+        "longitude": 13.9309,
+        "source_folders": [
+          "Zazid",
+          "r02 - Zazid (1)",
+          "r02 - Zazid (2)"
+        ],
+        "description": "Kal v vasi Zazid, na drevesu ob kali",
+        "source": "Multimon field sheet (ime mape / lokacija / mikrolokacija / koordinate), provided 2026-11-10"
+      }
+    ]
+  },
+  "folder_prefix_sites": {
+    "Crnojelsevje_NIB": {
+      "latitude": 46.05244,
+      "longitude": 14.46874,
+      "source": "VibroScape/location_coordinates.json"
+    },
+    "Dobrava": {
+      "latitude": 45.93939,
+      "longitude": 15.63829,
+      "source": "VibroScape/location_coordinates.json"
+    },
+    "Krakovski_gozd": {
+      "latitude": 45.86676,
+      "longitude": 15.40318,
+      "source": "VibroScape/location_coordinates.json"
+    },
+    "Racki_ribniki": {
+      "latitude": 46.42646,
+      "longitude": 15.6733,
+      "source": "VibroScape/location_coordinates.json"
+    },
+    "Skofljica": {
+      "latitude": 45.97382233,
+      "longitude": 14.56600579,
+      "source": "VibroScape/location_coordinates.json"
+    },
+    "Strajanov_Breg": {
+      "latitude": 45.95095755,
+      "longitude": 14.59514086,
+      "source": "VibroScape/location_coordinates.json"
+    }
+  }
+}

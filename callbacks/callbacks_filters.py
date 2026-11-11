@@ -10,6 +10,7 @@ import numpy as np
 from . import callbacks_constants
 from .callbacks_constants import MODEL_DATA_CACHE
 import citimon_map
+import read_data
 
 
 def register_filter_callbacks(app):
@@ -118,9 +119,10 @@ def register_filter_callbacks(app):
         Input('derived-model-metadata', 'data'),
         State("all-or-none-channel", "value"),
         State('channel-checklist', 'value'),
+        State('channel-checklist', 'options'),
         prevent_initial_call=True
     )
-    def update_channel_options_and_values(metadata, select_all, current_channels):
+    def update_channel_options_and_values(metadata, select_all, current_channels, previous_options=None):
         if isinstance(metadata, dict) and 'channels' in metadata:
             channels = metadata['channels']
         else:
@@ -134,6 +136,14 @@ def register_filter_callbacks(app):
             channels = sorted(dff['channel'].dropna().unique())
 
         options = [{'label': str(c), 'value': c} for c in channels]
+
+        if not channels:
+            # Transient empty metadata (data still loading, or an empty filter result): keep the selection
+            # instead of wiping it to [], which would otherwise stick as an "explicit deselection".
+            return options, dash.no_update
+        if current_channels == [] and previous_options == []:
+            # There was nothing to select before, so [] is not a user deselection: apply the default.
+            current_channels = None
 
         if current_channels is not None:
             valid_channels = [c for c in current_channels if c in channels]
@@ -203,7 +213,10 @@ def register_filter_callbacks(app):
         [Output('project-metadata-store', 'data'),
          Output('dataset-metadata-store', 'data', allow_duplicate=True)],
         Input('project-dropdown', 'value'),
-        prevent_initial_call=True
+        prevent_initial_call=True,
+        # The first switch to a project reads its partition metadata; show the same "Loading data…" badge
+        running=[(Output('data-loading-overlay', 'style'), {'display': 'flex'}, {'display': 'none'}),
+                 (Output('data-loading-overlay-table', 'style'), {'display': 'flex'}, {'display': 'none'})],
     )
     def load_project_metadata_store(selected_project):
         import read_data
@@ -222,6 +235,7 @@ def register_filter_callbacks(app):
         prevent_initial_call=True
     )
     def update_location_options_from_metadata(meta_data, current_loc):
+        """Location is multi-select: keep the still-valid part of the selection, else pick the first location."""
         if meta_data and isinstance(meta_data, dict) and 'locations' in meta_data:
             locations = meta_data['locations']
         else:
@@ -229,9 +243,13 @@ def register_filter_callbacks(app):
             locations = sorted(initial_df['location'].dropna().unique()) if initial_df is not None and not initial_df.empty else []
 
         options = [{'label': str(loc), 'value': loc} for loc in locations]
-        if current_loc in locations:
+        current = read_data.location_list(current_loc)
+        valid = [loc for loc in current if loc in locations]
+        if valid and valid == current and isinstance(current_loc, list):
             return options, dash.no_update
-        return options, locations[0] if locations else None
+        if valid:
+            return options, valid
+        return options, [locations[0]] if locations else []
 
     @app.callback(
         [Output('model-dropdown', 'options', allow_duplicate=True),
@@ -242,16 +260,17 @@ def register_filter_callbacks(app):
         prevent_initial_call=True
     )
     def update_model_options(selected_location, meta_data, current_model):
-        if not selected_location:
+        locs = read_data.location_list(selected_location)
+        if not locs:
             return [], None
 
         if meta_data and isinstance(meta_data, dict) and 'records' in meta_data and meta_data['records']:
             dff_records = pd.DataFrame(meta_data['records'])
-            dff_loc = dff_records[dff_records['location'] == selected_location]
+            dff_loc = dff_records[dff_records['location'].isin(locs)]
             models = sorted(dff_loc['model_name'].dropna().unique())
         else:
             initial_df = callbacks_constants.initial_df
-            dff_loc = initial_df[initial_df['location'] == selected_location]
+            dff_loc = initial_df[initial_df['location'].isin(locs)]
             models = sorted(dff_loc['model_name'].dropna().unique())
 
         options = [{'label': m, 'value': m} for m in models]
@@ -271,20 +290,21 @@ def register_filter_callbacks(app):
         prevent_initial_call=True
     )
     def update_num_cluster_options(selected_location, selected_model, meta_data, current_k):
-        if not selected_location or not selected_model:
+        locs = read_data.location_list(selected_location)
+        if not locs or not selected_model:
             return [], None
 
         if meta_data and isinstance(meta_data, dict) and 'records' in meta_data and meta_data['records']:
             dff_records = pd.DataFrame(meta_data['records'])
             dff_model = dff_records[
-                (dff_records['location'] == selected_location) &
+                (dff_records['location'].isin(locs)) &
                 (dff_records['model_name'] == selected_model)
             ]
             num_clusters = sorted(dff_model['cluster_num'].dropna().unique())
         else:
             initial_df = callbacks_constants.initial_df
             dff_model = initial_df[
-                (initial_df['location'] == selected_location) &
+                (initial_df['location'].isin(locs)) &
                 (initial_df['model_name'] == selected_model)
             ]
             num_clusters = sorted(dff_model['cluster_num'].dropna().unique())
@@ -319,14 +339,20 @@ def register_filter_callbacks(app):
         [Output('location-map-container', 'children'),
          Output('location-map-container', 'style')],
         [Input('location-dropdown', 'value'),
-         Input('project-dropdown', 'value')],
+         Input('project-dropdown', 'value'),
+         Input('microlocation-dropdown', 'value')],
         prevent_initial_call=False
     )
-    def update_location_map_preview(selected_location, selected_project):
-        if not citimon_map.is_citimon_project(selected_project):
+    def update_location_map_preview(selected_location, selected_project, selected_microlocations=None):
+        if not citimon_map.has_map(selected_project):
             return None, {'display': 'none'}
 
-        comp = citimon_map.render_citimon_map_component(selected_location)
+        # Microlocation filter narrows the highlighted positions; None/all -> every position of the recorder.
+        micro_filter = list(selected_microlocations) if isinstance(selected_microlocations, (list, tuple)) else None
+        if citimon_map.is_multimon_project(selected_project):
+            micro_filter = None    # Multimon microlocations (hm/am recorders) have no coordinates of their own
+        comp = citimon_map.render_citimon_map_component(read_data.location_list(selected_location), micro_filter,
+                                                        selected_project)
         container_style = {
             'display': 'flex',
             'marginLeft': '8px',
@@ -335,3 +361,58 @@ def register_filter_callbacks(app):
             'marginBottom': '2px',
         }
         return comp, container_style
+
+    # ---- Choosing locations on the larger map (opened by clicking the map preview) -------------------------------
+
+    @app.callback(
+        Output('location-map-modal', 'style'),
+        [Input('location-map-container', 'n_clicks'),
+         Input('location-map-close-btn', 'n_clicks')],
+        State('project-dropdown', 'value'),
+        prevent_initial_call=True
+    )
+    def toggle_location_map_modal(_open_clicks, _close_clicks, selected_project):
+        from layout_raven import MODAL_VISIBLE, MODAL_HIDDEN
+        opening = dash.callback_context.triggered_id == 'location-map-container'
+        return MODAL_VISIBLE if opening and citimon_map.has_map(selected_project) else MODAL_HIDDEN
+
+    @app.callback(
+        [Output('location-map-picker', 'figure'),
+         Output('location-map-picker-summary', 'children')],
+        [Input('location-map-modal', 'style'),
+         Input('location-dropdown', 'value'),
+         Input('location-dropdown', 'options')],
+        State('project-dropdown', 'value'),
+        prevent_initial_call=True
+    )
+    def render_location_map_picker(modal_style, selected_location, location_options, selected_project=None):
+        if not modal_style or modal_style.get('display') == 'none':
+            return dash.no_update, dash.no_update
+        selected = read_data.location_list(selected_location)
+        available = [o['value'] for o in (location_options or []) if isinstance(o, dict)]
+        summary = (f"Selected ({len(selected)}): " + ", ".join(selected)) if selected else "No location selected."
+        return citimon_map.picker_figure(selected, available, selected_project), summary
+
+    @app.callback(
+        [Output('location-dropdown', 'value', allow_duplicate=True),
+         Output('location-map-picker', 'clickData'),
+         Output('location-map-picker', 'selectedData')],
+        [Input('location-map-picker', 'clickData'),
+         Input('location-map-picker', 'selectedData')],
+        [State('location-dropdown', 'value'),
+         State('location-dropdown', 'options')],
+        prevent_initial_call=True
+    )
+    def choose_locations_on_map(click_data, selected_data, current_location, location_options):
+        if not click_data and not (selected_data and selected_data.get('points')):
+            return dash.no_update, dash.no_update, dash.no_update
+        available = [o['value'] for o in (location_options or []) if isinstance(o, dict)]
+        current = read_data.location_list(current_location)
+        triggered = dash.callback_context.triggered or [{}]
+        is_box = str(triggered[0].get('prop_id', '')).endswith('selectedData')
+        new = citimon_map.picker_toggle(current, available,
+                                        click_data=None if is_box else click_data,
+                                        selected_data=selected_data if is_box else None)
+        # Clear the event so clicking the same point again toggles it back
+        value = new if new != current else dash.no_update
+        return value, None, None

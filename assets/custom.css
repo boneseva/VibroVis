@@ -545,4 +545,28 @@ body {
     border-color: #94a3b8 !important;
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1) !important;
 }
-
+
+
+
+/* Citimon map preview next to Location: clicking it opens the larger map for choosing locations.
+   Hint only on hover (pointer, outline and a small expand mark); no extra buttons. */
+.map-pick-trigger { cursor: pointer; position: relative; }
+.map-pick-trigger #location-map-preview { transition: box-shadow 0.15s ease, border-color 0.15s ease; }
+.map-pick-trigger:hover #location-map-preview { border-color: #6b8e23 !important; box-shadow: 0 0 0 2px rgba(107, 142, 35, 0.35) !important; }
+.map-pick-trigger::after {
+    content: "\2922"; position: absolute; top: 2px; right: 3px; font-size: 11px; line-height: 1;
+    color: #4d6619; background: rgba(255, 255, 255, 0.85); border-radius: 3px; padding: 1px 2px;
+    opacity: 0; transition: opacity 0.15s ease; pointer-events: none;
+}
+.map-pick-trigger:hover::after { opacity: 1; }
+
+
+/* "Loading data…" overlay over the scatter while project/location/model data is read */
+#scatter-pane, #table-pane { position: relative; }
+.data-loading-overlay {
+    position: absolute; inset: 0; z-index: 20;
+    align-items: center; justify-content: center;
+    background: rgba(255, 255, 255, 0.55);
+    pointer-events: none;
+    animation: fadeInBadge 0.15s ease-out;
+}

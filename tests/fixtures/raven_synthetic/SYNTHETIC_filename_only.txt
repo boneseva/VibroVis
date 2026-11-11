@@ -1,0 +1,4 @@
+Selection	View	Channel	Begin Time (s)	End Time (s)	Begin File	File Offset (s)	Species	Synthetic
+1	Spectrogram 1	1	1.0	2.0	20260320_184000.WAV	1.0	Hyla arborea	SYNTHETIC-TEST-DATA
+2	Spectrogram 1	1	1,5	2,5	20260320_184000.WAV	1,5	Hyla arborea	SYNTHETIC-TEST-DATA
+3	Spectrogram 1	1	4.0	5.0	20260320_184000.WAV	4.0	Hyla arborea	SYNTHETIC-TEST-DATA	unexpected extra cell

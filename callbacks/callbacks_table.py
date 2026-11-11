@@ -37,7 +37,11 @@ ALL_COLUMNS = [
     ("microlocation",  "Microlocation",    False),
     ("recorder_type",  "Recorder",         False),
     ("clip_count",     "Clip Count",       False),
+    ("raven_labels",     "Raven labels",     False),  # shown automatically in Raven colour mode
+    ("raven_annotators", "Raven annotators", False),
+    ("raven_status",     "Raven agreement",  False),
 ]
+RAVEN_COLUMNS = ["raven_labels", "raven_annotators", "raven_status"]
 
 DEFAULT_VISIBLE_COLS = [k for k, _label, vis in ALL_COLUMNS if vis]
 PAGE_SIZE = 200
@@ -56,6 +60,9 @@ SORT_COL_MAP = {
     "microlocation":  "microlocation",
     "recorder_type":  "recorder_type",
     "clip_count":     "clip_count",
+    "raven_labels":     "raven_labels",
+    "raven_annotators": "raven_annotators",
+    "raven_status":     "raven_status",
 }
 
 # Primary display col → ordered list of secondary DataFrame columns
@@ -72,6 +79,9 @@ SECONDARY_SORT: dict[str, list[str]] = {
     "cluster_end":    ["day_dt"],
     "duration":       [],
     "clip_count":     ["day_dt", "clip_time"],
+    "raven_labels":     ["day_dt", "clip_time"],
+    "raven_annotators": ["day_dt", "clip_time"],
+    "raven_status":     ["day_dt", "clip_time"],
 }
 
 # Default sort when no column header is clicked
@@ -83,7 +93,7 @@ def _apply_sort(df: pd.DataFrame, sort_col: str | None, sort_asc: bool) -> pd.Da
 
     def sort_key(col):
         # Case-insensitive sorting for string columns to avoid splitting uppercase/lowercase
-        if col.name in ["file_name", "manual_label", "microlocation", "recorder_type"]:
+        if col.name in ["file_name", "manual_label", "microlocation", "recorder_type"] + RAVEN_COLUMNS:
             return col.astype(str).str.lower()
         # Force clip_time to be numeric to prevent string sorting ("10.0" before "2.0")
         if col.name == "clip_time":
@@ -111,6 +121,8 @@ def _apply_sort(df: pd.DataFrame, sort_col: str | None, sort_asc: bool) -> pd.Da
     asc = [is_asc] + [True] * (len(secondary) + 1)
 
     return df.sort_values(cols, ascending=asc, key=sort_key)
+
+RAVEN_STATUS_TEXT = {"none": "", "single": "single annotator", "agree": "agree", "disagree": "disagree"}
 
 # Module-level caches
 _TABLE_CACHE: dict = {}
@@ -204,6 +216,12 @@ def _render_table(page_df: pd.DataFrame, visible_cols: list,
     if "clip_count" in visible_cols:
         src = page_df["clip_count"] if "clip_count" in page_df.columns else pd.Series(1, index=page_df.index)
         display["clip_count"] = src.astype(int).astype(str)
+    for col_key in RAVEN_COLUMNS:
+        if col_key in visible_cols:
+            src = page_df[col_key] if col_key in page_df.columns else pd.Series("", index=page_df.index)
+            if col_key == "raven_status":
+                src = src.map(RAVEN_STATUS_TEXT)
+            display[col_key] = src.fillna("").astype(str)
 
     # Row background colors — by manual_label in manual mode, by cluster_id otherwise
     if color_mode == "manual" and "manual_label" in page_df.columns:
@@ -220,6 +238,8 @@ def _render_table(page_df: pd.DataFrame, visible_cols: list,
                 return CLUSTER_COLORS[hash_val % len(CLUSTER_COLORS)]
         
         bg_colors = [_hex_to_rgba(get_label_color(lbl)) for lbl in page_df["manual_label"].fillna("Unlabeled")]
+    elif color_mode == "raven" and "mapped_color" in page_df.columns:
+        bg_colors = [_hex_to_rgba(c) for c in page_df["mapped_color"].fillna("#D9D9D9")]
     else:
         cluster_ids = page_df["cluster_id"].astype(int)
         bg_colors = [_hex_to_rgba(CLUSTER_COLORS[cid % len(CLUSTER_COLORS)]) for cid in cluster_ids]
@@ -486,7 +506,7 @@ def register_table_callbacks(app):
             Sxx_db[Sxx_db < floor_val] = floor_val
             Sxx_db = np.round(Sxx_db, 2)
             f = np.round(f, 1)
-            t = np.round(t, 3)
+            t = np.round(t + utils.segment_start_time(start_time, 0.5), 3)   # time in the recording file
 
             # Build Plotly figure (same as compute_spectrogram_data)
             fig = go.Figure(data=go.Heatmap(
@@ -500,7 +520,7 @@ def register_table_callbacks(app):
                 margin=dict(l=40, r=10, t=10, b=30),
                 paper_bgcolor='rgba(0,0,0,0)',
                 plot_bgcolor='rgba(0,0,0,0)',
-                xaxis=dict(title="Time (s)", showgrid=False),
+                xaxis=dict(title=utils.SPECTROGRAM_TIME_AXIS_TITLE, showgrid=False),
                 yaxis=dict(title="Freq (Hz)", showgrid=False,
                            type='log' if frequency_scale == 'log' else 'linear'),
                 dragmode='zoom',
@@ -521,9 +541,12 @@ def register_table_callbacks(app):
             # In manual mode the histogram filters by manual_label; in cluster mode by cluster_id.
             if color_mode == "manual" and "manual_label" in row.index and not pd.isna(row["manual_label"]):
                 hist_key = str(row["manual_label"])
+            elif color_mode == "raven" and "raven_category" in row.index:
+                hist_key = str(row["raven_category"])
             else:
                 hist_key = str(int(row["cluster_id"]))
-            table_click_data = {"points": [{"customdata": [hist_key, None, None]}]}
+            # customdata[1] carries the plot_id like scatter clicks (used by the Raven point details)
+            table_click_data = {"points": [{"customdata": [hist_key, int(row_global_idx), None]}]}
 
             store_data = {
                 "audio_path": audio_path, "info": info,
@@ -608,6 +631,10 @@ def register_table_callbacks(app):
 
             if not visible_cols:
                 visible_cols = DEFAULT_VISIBLE_COLS
+            # Raven columns appear exactly when the points are coloured by Raven annotations
+            visible_cols = [c for c in visible_cols if c not in RAVEN_COLUMNS]
+            if color_mode == "raven":
+                visible_cols = visible_cols + RAVEN_COLUMNS
 
             # Always remap labels from MANUAL_LABELS_CACHE so rename/merge/delete
             # is reflected immediately in the table.

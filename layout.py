@@ -6,6 +6,44 @@ import dash_daq as daq
 from dash import html, dcc
 import pandas as pd
 
+from layout_raven import raven_color_controls, raven_import_launcher, raven_import_modal, raven_point_info
+
+
+DATA_LOADING_VISIBLE = {'display': 'flex'}
+DATA_LOADING_HIDDEN = {'display': 'none'}
+
+
+def data_loading_overlay(overlay_id):
+    """"Loading data…" badge over a view pane, shown while load_data_into_server_cache runs."""
+    return html.Div(
+        html.Div([
+            html.Div(className='scatter-loading-spinner'),
+            html.Span("Loading data…", className='scatter-loading-text'),
+        ], className='scatter-loading-badge'),
+        id=overlay_id, className='data-loading-overlay', style=DATA_LOADING_HIDDEN,
+    )
+
+
+def location_map_modal():
+    """Larger Citimon map for choosing locations; opened by clicking the map preview next to Location."""
+    from layout_raven import MODAL_HIDDEN
+    body = html.Div([
+        html.Div([
+            html.H3("Choose locations on the map", style={'margin': 0, 'fontSize': '1.1em'}),
+            html.Button('×', id='location-map-close-btn', n_clicks=0, title='Close',
+                        style={'border': 'none', 'background': 'none', 'fontSize': '1.5em', 'cursor': 'pointer'}),
+        ], style={'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center'}),
+        html.Div("Click a point to add or remove its location. Drag a box (or use the lasso) to add several "
+                 "at once. Changes apply immediately.",
+                 style={'fontSize': '0.85em', 'color': '#5f6b66', 'margin': '4px 0 8px'}),
+        dcc.Graph(id='location-map-picker', config={'displaylogo': False, 'scrollZoom': True,
+                                                    'modeBarButtonsToRemove': ['toImage', 'autoScale2d']},
+                  style={'height': 'min(62vh, 560px)', 'width': '100%'}),
+        html.Div(id='location-map-picker-summary', style={'fontSize': '0.85em', 'marginTop': '6px'}),
+    ], style={'backgroundColor': '#f8f9fa', 'borderRadius': '8px', 'padding': '14px 16px',
+              'width': 'min(900px, 94vw)', 'boxShadow': '0 8px 30px rgba(0,0,0,0.25)'})
+    return html.Div(body, id='location-map-modal', style=MODAL_HIDDEN)
+
 
 def _extract_logo_accent_color(svg_path: str = "assets/logo.svg", fallback: str = "#4b8af2") -> str:
     """Extract the primary fill color from the logo SVG (cls-1 rule)."""
@@ -178,6 +216,9 @@ def create_layout(df):
                         ]
                     ),
                     html.Div(id='fft-warning', style={'color': 'red', 'margin': '0.1em'}),
+                    # Shown while data for the selected project/locations/model is read (the slow step before
+                    # the scatter redraws); toggled by the `running` option of load_data_into_server_cache.
+                    data_loading_overlay('data-loading-overlay'),
                 ], id='scatter-pane', className='view-pane view-pane--active'),
 
                 # --- Table pane ---
@@ -224,6 +265,7 @@ def create_layout(df):
                         id='table-view-output',
                         style={'overflowY': 'auto', 'flex': '1', 'minHeight': '0'}
                     ),
+                    data_loading_overlay('data-loading-overlay-table'),
                 ], id='table-pane', className='view-pane'),
 
                 # --- Shared: info row + audio/spectrogram — always visible ---
@@ -236,6 +278,7 @@ def create_layout(df):
                         className='app-button autoplay-off'
                     ),
                 ], className='info-autoplay-row'),
+                raven_point_info(),
 
                 html.Div([
                     html.Audio(id='audio-player', controls=True, autoPlay=False),
@@ -339,23 +382,27 @@ def create_layout(df):
                                         html.Label("Location"),
                                         html.Div(className="tooltip-container", children=[
                                             html.Span(" ⓘ", className="info-icon"),
-                                            html.Span("Filter data by the primary recording location.",
+                                            html.Span("Filter data by recording location. Select several to show them together.",
                                                       className="tooltip-text")
                                         ])
                                     ], className="label-with-info", style={'marginTop': '1em'}),
                                     dcc.Dropdown(
                                         id='location-dropdown',
                                         options=[{'label': str(loc), 'value': loc} for loc in all_locations],
-                                        value=default_location
+                                        value=[default_location] if default_location else [],
+                                        multi=True,
+                                        placeholder="Select one or more locations",
                                     ),
                                 ], style={'flex': '1', 'minWidth': '0'}),
                                 html.Div(
                                     id='location-map-container',
+                                    className='map-pick-trigger',
+                                    n_clicks=0,
                                     children=citimon_map.render_citimon_map_component(
-                                        default_location if citimon_map.is_citimon_project(default_project) else None
-                                    ) if citimon_map.is_citimon_project(default_project) else None,
+                                        default_location, None, default_project
+                                    ) if citimon_map.has_map(default_project) else None,
                                     style={
-                                        'display': 'flex' if citimon_map.is_citimon_project(default_project) else 'none',
+                                        'display': 'flex' if citimon_map.has_map(default_project) else 'none',
                                         'marginLeft': '8px',
                                         'flexShrink': '0',
                                         'alignSelf': 'flex-end',
@@ -461,7 +508,7 @@ def create_layout(df):
                                 html.Label("Color by"),
                                 html.Div(className="tooltip-container", children=[
                                     html.Span(" ⓘ", className="info-icon"),
-                                    html.Span("Choose to color points by their cluster assignment or by manual labels.",
+                                    html.Span("Choose to color points by their cluster assignment, by manual labels, or by imported Raven annotations (read-only; projects with imported annotations).",
                                               className="tooltip-text")
                                 ])
                             ], className="label-with-info", style={'marginTop': '1em'}),
@@ -477,6 +524,7 @@ def create_layout(df):
                                 searchable=False,
                                 style={'marginTop': '4px'},
                             ),
+                            raven_color_controls(),
 
                             html.Div([
                                 html.Label("Clusters", id='cluster-legend-header-label'),
@@ -720,6 +768,9 @@ def create_layout(df):
                                  html.Button('Cancel Import', id='label-conflict-cancel-btn', className='app-button', style={'width': '100%', 'backgroundColor': '#f0ad4e', 'color': 'white'}),
                             ], id='label-conflict-panel', style={'display': 'none', 'border': '2px solid #ffc107', 'borderRadius': '4px', 'padding': '8px', 'marginBottom': '15px', 'backgroundColor': '#fff8e1'}),
 
+                            # Raven annotation import (Citimon only; separate store)
+                            raven_import_launcher(),
+
                             # Reset - Destructive action
                             html.Div([
                                 html.Button('Reset All Labels', id='btn-reset-labels', className='app-button', style={'width': '100%', 'backgroundColor': '#dc3545', 'color': 'white'}),
@@ -941,6 +992,9 @@ def create_layout(df):
 
             ], id='filter-container', className='filters-expanded'),
         ], id='main-content'),
+
+        raven_import_modal(),
+        location_map_modal(),
 
         dcc.Store(id='project-metadata-store', data=initial_project_metadata),
         dcc.Store(id='dataset-metadata-store', data=initial_project_metadata),
