@@ -2,6 +2,7 @@
 UI-related callbacks: toggles, animations, and UI interactions.
 """
 import dash
+import json
 from dash import Input, Output, State
 from datetime import datetime, timedelta
 import numpy as np
@@ -10,6 +11,37 @@ from .callbacks_constants import MODEL_DATA_CACHE
 
 
 def register_ui_callbacks(app):
+
+    # Hide dropdowns that offer no choice and list their value as text instead.
+    _SINGLE_FIELDS = [
+        ('project-dropdown', 'Project'),
+        ('location-dropdown', 'Location'),
+        ('microlocation-dropdown', 'Microlocation'),
+        ('recorder-type-dropdown', 'Recorder type'),
+        ('model-dropdown', 'Model'),
+        ('num-cluster-dropdown', 'Number of clusters'),
+    ]
+    app.clientside_callback(
+        """
+        function() {
+            var names = %s;
+            var n = names.length, classes = [], rows = [];
+            for (var i = 0; i < n; i++) {
+                var opts = arguments[i] || [];
+                var single = opts.length === 1;
+                classes.push(single ? 'auto-hide-single single-option' : 'auto-hide-single');
+                if (single) {
+                    var o = opts[0];
+                    var label = (o && o.label !== undefined) ? o.label : (o && o.value !== undefined ? o.value : o);
+                    rows.push({namespace: 'dash_html_components', type: 'Div', props: {children: names[i] + ': ' + label}});
+                }
+            }
+            return classes.concat([rows]);
+        }
+        """ % json.dumps([f[1] for f in _SINGLE_FIELDS]),
+        [Output(f[0], 'className') for f in _SINGLE_FIELDS] + [Output('single-option-summary', 'children')],
+        [Input(f[0], 'options') for f in _SINGLE_FIELDS],
+    )
     
     @app.callback(
         Output('manual-label-input', 'disabled'),
@@ -17,8 +49,8 @@ def register_ui_callbacks(app):
         Input('merge-switch', 'on'),
     )
     def disable_labeling_when_merged(merge_on):
-        """Disable manual labeling inputs when merge is ON (labels must map to raw clip instances)."""
-        return bool(merge_on), bool(merge_on)
+        """Keep manual labeling inputs enabled in both unmerged and merged views (Phase 1.6)."""
+        return False, False
 
     @app.callback(
         [Output('audio-player', 'autoPlay'),
@@ -150,7 +182,8 @@ def register_ui_callbacks(app):
                 const trace = new_fig.data[i];
                 if (trace.customdata) {
                     const opacity_array = [];
-                    const time_idx = (mode === 'yearly') ? 4 : 3;
+                    // Phase 0.8: row_idx removed, start_hour_float is idx 2, day_int is idx 3
+                    const time_idx = (mode === 'yearly') ? 3 : 2;
                     for (let j = 0; j < trace.customdata.length; j++) {
                         const point_time = trace.customdata[j][time_idx];
                         let dist = Math.abs(point_time - time_value);

@@ -3,6 +3,7 @@ Plot-related callbacks: scatter plot, spectrogram, and histogram.
 """
 import time
 import os
+import sys
 import traceback # Added for debugutils
 import math
 import hashlib
@@ -14,15 +15,41 @@ import pandas as pd
 import uuid
 
 import utils
-from callbacks.callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, server_cache, initial_df, CLUSTER_COLORS, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK, CLIP_DURATION_CACHE
+from callbacks.callbacks_constants import (
+    MODEL_DATA_CACHE, MERGED_DATA_CACHE, server_cache, initial_df, CLUSTER_COLORS,
+    MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK, CLIP_DURATION_CACHE,
+    CUSTOMDATA_COLS, CUSTOMDATA_COLOR_IDX, CUSTOMDATA_PLOT_ID_IDX,
+    CUSTOMDATA_START_HOUR_IDX, CUSTOMDATA_DAY_INT_IDX, CUSTOMDATA_CLIP_COUNT_IDX,
+    CUSTOMDATA_FILE_NAME_IDX, CUSTOMDATA_CLIP_TIME_IDX, CUSTOMDATA_CHANNEL_IDX,
+    CUSTOMDATA_DATE_TIME_IDX
+)
 from utils import apply_manual_labels_efficiently
 
-# Performance profiling
-ENABLE_PROFILING = False
+# Performance profiling and diagnostics
+from diagnostics import PipelineTimer, is_diagnostics_enabled, get_cache_diagnostics
+ENABLE_PROFILING = is_diagnostics_enabled()
 from .callbacks_data import merge_clips_vectorized
 
 import numpy as np
 import plotly.graph_objects as go
+import weakref
+import read_data
+
+_LOADED_LOCATIONS = {}  # id(df) -> (weakref to df, set of its locations); avoids rescanning millions of rows
+
+
+def _loaded_locations(df):
+    """Distinct 'location' values of the cached model frame (memoised per frame object)."""
+    hit = _LOADED_LOCATIONS.get(id(df))
+    if hit is not None and hit[0]() is df:
+        return hit[1]
+    locs = {str(v) for v in pd.unique(df['location'])}
+    _LOADED_LOCATIONS.clear()
+    try:
+        _LOADED_LOCATIONS[id(df)] = (weakref.ref(df), locs)
+    except TypeError:
+        pass
+    return locs
 
 
 def get_label_for_clip(loc, micro, file_basename, channel, clip_time):
@@ -31,7 +58,7 @@ def get_label_for_clip(loc, micro, file_basename, channel, clip_time):
     Content-based: keyed on round(clip_time * 10) so the same physical clip is
     labelled consistently across model/K switches.
     """
-    key = (loc, micro, file_basename, int(channel), round(float(clip_time) * 10))
+    key = (sys.intern(str(loc)), sys.intern(str(micro)), sys.intern(str(file_basename)), int(channel), round(float(clip_time) * 10))
     label = MANUAL_LABELS_CACHE.get(key)
     return label if label and label != 'Unlabeled' else 'Unlabeled'
 
@@ -77,30 +104,34 @@ def register_plot_callbacks(app):
          State('last-preset-load-time', 'data'),
          State({'type': 'cluster-checkbox', 'index': ALL}, 'id'),
          State({'type': 'label-checkbox', 'index': ALL}, 'id'),
-         State('filtered-data', 'data')],
+         State('filtered-data', 'data'),
+         State('project-dropdown', 'value'),
+         State('model-dropdown', 'value')],
         prevent_initial_call='initial_duplicate'
     )
     def update_figure(model_ready_signal, selected_channels, selected_num_clusters,
                       cluster_checkbox_values, cluster_colors_data, cluster_names_data,
                       selected_dates, hour_range, max_points, resample_clicks, priority_sampling_on,
                       merge_on, merge_threshold, clip_count_threshold,
-                      selected_microlocations, selected_recorders, 
+                      selected_microlocations, selected_recorders,
                       color_mode, manual_labels_trigger, label_colors_data, label_names_data,
                       label_checkbox_values,
                       current_figure_state, stored_indices,
                       selected_location, last_preset_time, cluster_checkbox_ids,
-                      label_checkbox_ids, current_filtered_key):
+                      label_checkbox_ids, current_filtered_key=None,
+                      selected_project=None, selected_model=None, *args, **kwargs):
         try:
             return _update_figure_impl(model_ready_signal, selected_channels, selected_num_clusters,
                       cluster_checkbox_values, cluster_colors_data, cluster_names_data,
                       selected_dates, hour_range, max_points, resample_clicks, priority_sampling_on,
                       merge_on, merge_threshold, clip_count_threshold,
-                      selected_microlocations, selected_recorders, 
+                      selected_microlocations, selected_recorders,
                       color_mode, manual_labels_trigger, label_colors_data, label_names_data,
                       label_checkbox_values,
                       current_figure_state, stored_indices,
                       selected_location, last_preset_time, cluster_checkbox_ids,
-                      label_checkbox_ids, current_filtered_key)
+                      label_checkbox_ids, current_filtered_key,
+                      selected_project, selected_model, *args, **kwargs)
         except Exception:
             import traceback
             traceback.print_exc()
@@ -115,8 +146,10 @@ def register_plot_callbacks(app):
                       label_checkbox_values,
                       current_figure_state, stored_indices,
                       selected_location, last_preset_time, cluster_checkbox_ids,
-                      label_checkbox_ids, current_filtered_key=None):
+                      label_checkbox_ids, current_filtered_key=None,
+                      selected_project=None, selected_model=None, *args, **kwargs):
 
+        timer = PipelineTimer("update_figure").start()
         t_start = time.time() if ENABLE_PROFILING else None
         t_checkpoint = {}
         t_last = t_start if ENABLE_PROFILING else None
@@ -173,6 +206,7 @@ def register_plot_callbacks(app):
                                 new_color = CLUSTER_COLORS[0]
                     # Scalar color — no per-point buffer re-upload in WebGL → no flash
                     patched['data'][i]['marker']['color'] = new_color
+                timer.stop(extra_info="fast_path_color")
                 return (patched, no_update, no_update, no_update, no_update,
                         no_update, no_update, no_update, no_update, no_update)
             except Exception:
@@ -192,6 +226,7 @@ def register_plot_callbacks(app):
         is_label_only = (
             len(all_triggered_ids) == 1
             and all_triggered_ids[0] == 'manual-labels-store.data'
+            and not merge_on
         )
         if is_label_only and current_filtered_key and server_cache.get(current_filtered_key) is not None:
             try:
@@ -201,7 +236,18 @@ def register_plot_callbacks(app):
                 dff_fast = apply_manual_labels_efficiently(dff_fast)
 
                 is_manual_now = (color_mode == 'manual')
-                color_col_fast = 'manual_label' if is_manual_now else 'cluster_id_str'
+                if not is_manual_now:
+                    # In Cluster mode, the scatterplot is colored and grouped strictly by cluster_id.
+                    # Manual labels do not change point coordinates, trace assignments, colors, or hover text.
+                    # We update server_cache in-place so downstream views (table, audio, histogram)
+                    # see the label immediately, but return dash.no_update for the scatterplot figure
+                    # to eliminate the redundant 6.6-7.3 MB figure re-transmission and GPU re-render.
+                    server_cache[current_filtered_key] = dff_fast
+                    timer.stop(cache_df=dff_fast, extra_info="fast_path_label_cluster_noop")
+                    return (dash.no_update, current_filtered_key,
+                            no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update)
+
+                color_col_fast = 'manual_label'
                 if 'cluster_id_str' not in dff_fast.columns:
                     dff_fast['cluster_id_str'] = dff_fast['cluster_id'].astype(str)
 
@@ -253,26 +299,31 @@ def register_plot_callbacks(app):
                     if 'Unlabeled' in unique_groups_fast:
                         unique_groups_fast.remove('Unlabeled')
                         unique_groups_fast = ['Unlabeled'] + unique_groups_fast
-                    _cd_cols = ["color_col_content", "row_idx", "plot_id", "start_hour_float",
-                                "day_int", "clip_count", "file_name", "clip_time", "channel", "date_time_str"]
-                    _cd_cols_present = [c for c in _cd_cols if c in dff_fast.columns]
+                    _cd_cols_present = [c for c in CUSTOMDATA_COLS if c in dff_fast.columns]
+                    # Payload-local copy for customdata with 3-decimal precision on start_hour_float.
+                    # dff_fast itself retains full 64-bit precision for server_cache and downstream callbacks.
+                    _cd_source_fast = dff_fast[_cd_cols_present].copy()
+                    if 'start_hour_float' in _cd_source_fast.columns:
+                        _cd_source_fast['start_hour_float'] = _cd_source_fast['start_hour_float'].round(3)
+
                     for group in unique_groups_fast:
-                        gp = dff_fast[dff_fast[color_col_fast] == group]
+                        mask = (dff_fast[color_col_fast] == group)
+                        gp = dff_fast[mask]
                         if gp.empty:
                             continue
                         fig_fast.add_trace(go.Scattergl(
-                            x=gp['x'], y=gp['y'],
+                            x=gp['x'].astype(np.float32), y=gp['y'].astype(np.float32),
                             mode='markers',
                             marker=dict(size=gp['marker_size'],
                                         color=color_map_fast.get(str(group), '#888888'),
                                         sizemode='diameter', sizeref=1, opacity=1.0),
-                            customdata=gp[_cd_cols_present].to_numpy(),
-                            hovertemplate=f'<b>{label_name_fast}:</b> %{{customdata[0]}}<br>'
-                                          '<b>File:</b> %{customdata[6]}<br>'
-                                          '<b>Clip Count:</b> %{customdata[5]}<br>'
-                                          '<b>Time:</b> %{customdata[7]:.2f}s<br>'
-                                          '<b>Date & Time:</b> %{customdata[9]}<br>'
-                                          '<b>Channel:</b> %{customdata[8]}<extra></extra>',
+                            customdata=_cd_source_fast[mask].to_numpy(),
+                            hovertemplate=f'<b>{label_name_fast}:</b> %{{customdata[{CUSTOMDATA_COLOR_IDX}]}}<br>'
+                                          f'<b>File:</b> %{{customdata[{CUSTOMDATA_FILE_NAME_IDX}]}}<br>'
+                                          f'<b>Clip Count:</b> %{{customdata[{CUSTOMDATA_CLIP_COUNT_IDX}]}}<br>'
+                                          f'<b>Time:</b> %{{customdata[{CUSTOMDATA_CLIP_TIME_IDX}]:.2f}}s<br>'
+                                          f'<b>Date & Time:</b> %{{customdata[{CUSTOMDATA_DATE_TIME_IDX}]}}<br>'
+                                          f'<b>Channel:</b> %{{customdata[{CUSTOMDATA_CHANNEL_IDX}]}}<extra></extra>',
                             name=str(group), showlegend=True,
                         ))
                 fig_fast.update_layout(showlegend=False, margin=dict(l=5, r=5, t=5, b=5),
@@ -287,6 +338,7 @@ def register_plot_callbacks(app):
                 # Update cache in-place — same key keeps filtered-data unchanged
                 server_cache[current_filtered_key] = dff_fast
                 # Return same filtered-data key so update_table is NOT triggered a second time
+                timer.stop(cache_df=dff_fast, extra_info="fast_path_label")
                 return (fig_fast, current_filtered_key,
                         no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update)
             except Exception:
@@ -298,10 +350,13 @@ def register_plot_callbacks(app):
         is_fresh_load = any('model-data-ready-signal' in t_id for t_id in all_triggered_ids)
         is_resample_click = any('resample-btn' in t_id for t_id in all_triggered_ids)
         is_k_change = any('num-cluster-dropdown' in t_id for t_id in all_triggered_ids)
-        is_cluster_checkbox_click = any('cluster-checkbox' in t_id for t_id in all_triggered_ids)
+        is_cluster_checkbox_click = any('cluster-checkbox' in t_id or 'label-checkbox' in t_id for t_id in all_triggered_ids)
+        is_preset_active = last_preset_time and (time.time() - last_preset_time < 6.0)
+        should_force_defaults = is_fresh_load and not is_preset_active
 
         dff_raw = MODEL_DATA_CACHE.get('df')
         t_last = checkpoint('cache_get') or t_last
+        timer.step("data/filter")
 
         # ------------------------------------------------------------------
         # ONE-TIME DISKCACHE SNAPSHOT
@@ -325,9 +380,15 @@ def register_plot_callbacks(app):
         if dff_raw is not None and 'clip_duration' not in dff_raw.columns:
             dff_raw['clip_duration'] = 5.0
 
-        if dff_raw is not None and not dff_raw.empty and selected_location:
-            cached_location = dff_raw['location'].iloc[0]
-            if cached_location != selected_location:
+        selected_locations = read_data.location_list(selected_location)
+        if dff_raw is not None and not dff_raw.empty and selected_locations and 'location' in dff_raw.columns:
+            # Multi-select: the cached frame is stale if it holds a location that is no longer selected
+            if not _loaded_locations(dff_raw) <= set(selected_locations):
+                msg = "Loading data..."
+                timer.stop(extra_info="location_loading")
+                if current_figure_state and current_figure_state.get('data'):
+                    # Non-destructive: preserve existing figure while new location data loads
+                    return dash.no_update, no_update, no_update, no_update, no_update, no_update, msg, no_update, None, False if should_force_defaults else no_update
                 fig = go.Figure()
                 fig.update_layout(
                     annotations=[{"text": "Loading data...", "xref": "paper", "yref": "paper",
@@ -336,23 +397,27 @@ def register_plot_callbacks(app):
                 )
                 fig.update_xaxes(visible=False);
                 fig.update_yaxes(visible=False)
-                msg = "Loading data..."
-                return fig, None, 1, 100, [], None, msg, {'total': 0}, None, False
+                return fig, None, 1, 100, [], None, msg, {'total': 0}, None, False if should_force_defaults else no_update
 
-        if dff_raw is None:
+        if dff_raw is None or dff_raw.empty:
+            if selected_locations and selected_model:
+                proj_part = f"project '{selected_project}', " if selected_project else ""
+                msg = f"No data found for {proj_part}location '{', '.join(selected_locations)}', model '{selected_model}'."
+            else:
+                msg = "Select a model and location to begin."
+            timer.stop(extra_info="select_model_location")
+            if current_figure_state and current_figure_state.get('data'):
+                # Non-destructive: preserve existing figure if raw data is momentarily reloading
+                return dash.no_update, no_update, no_update, no_update, no_update, no_update, msg, no_update, None, False if should_force_defaults else no_update
             fig = go.Figure()
             fig.update_layout(
-                annotations=[{"text": "Select a model and location to begin.", "xref": "paper", "yref": "paper",
+                annotations=[{"text": msg, "xref": "paper", "yref": "paper",
                               "showarrow": False, "font": {"size": 16}}],
                 paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
             )
             fig.update_xaxes(visible=False);
             fig.update_yaxes(visible=False)
-            msg = "Select a model and location to begin."
-            return fig, None, 1, 100, [], None, msg, {'total': 0}, None, False
-
-        is_preset_active = last_preset_time and (time.time() - last_preset_time < 6.0)
-        should_force_defaults = is_fresh_load and not is_preset_active
+            return fig, None, 1, 100, [], None, msg, {'total': 0}, None, False if should_force_defaults else no_update
 
         if should_force_defaults:
             # When forcing defaults (fresh load), show ALL data initially.
@@ -365,6 +430,7 @@ def register_plot_callbacks(app):
             clip_count_threshold = 1
             cluster_checkbox_values = []
             stored_indices = None
+            merge_on = False
 
         if is_fresh_load:
             stored_indices = None
@@ -421,23 +487,31 @@ def register_plot_callbacks(app):
                  mask &= dff_base['recorder_type'].isin(selected_recorders)
 
         if selected_channels is not None:
-            mask &= dff_base['channel'].isin(selected_channels) if selected_channels else pd.Series(True, index=dff_base.index)
-
-        if selected_dates:
-            if 'day_dt_str' in dff_base.columns:
-                mask &= dff_base['day_dt_str'].isin(selected_dates)
+            if not selected_channels:
+                mask &= False
             else:
-                 try:
-                    valid_dates_in_data = set(pd.to_datetime(dff_base['day_dt']).dt.strftime('%Y-%m-%d'))
-                    relevant_dates = [d for d in selected_dates if d in valid_dates_in_data]
-                    if relevant_dates:
-                         # Ensure we match the data type in day_dt
-                         # If day_dt is datetime64, we need comparable timestamps
-                         # Usually day_dt provided by read_data is normalized to midnight
-                         selected_datetimes = pd.to_datetime(relevant_dates)
-                         mask &= dff_base['day_dt'].isin(selected_datetimes)
-                 except:
-                    pass
+                mask &= dff_base['channel'].isin(selected_channels)
+
+        if selected_dates is not None:
+            if not selected_dates:
+                mask &= False
+            else:
+                if 'day_dt_str' in dff_base.columns:
+                    mask &= dff_base['day_dt_str'].isin(selected_dates)
+                else:
+                    try:
+                        valid_dates_in_data = set(pd.to_datetime(dff_base['day_dt']).dt.strftime('%Y-%m-%d'))
+                        relevant_dates = [d for d in selected_dates if d in valid_dates_in_data]
+                        if relevant_dates:
+                            # Ensure we match the data type in day_dt
+                            # If day_dt is datetime64, we need comparable timestamps
+                            # Usually day_dt provided by read_data is normalized to midnight
+                            selected_datetimes = pd.to_datetime(relevant_dates)
+                            mask &= dff_base['day_dt'].isin(selected_datetimes)
+                        else:
+                            mask &= False
+                    except:
+                        pass
 
         if hour_range:
              if 'start_hour_float' in dff_base.columns:
@@ -445,8 +519,21 @@ def register_plot_callbacks(app):
             
         t_last = checkpoint('mask_creation') or t_last
         dff_filtered = dff_base[mask].copy()
+
+        # Apply raw manual labels to dff_filtered BEFORE merge so merge_clips_vectorized
+        # can compute duration-weighted majority display label for each group.
+        if 'clip_duration' not in dff_filtered.columns:
+            dff_filtered['clip_duration'] = 5.0
+        else:
+            dff_filtered['clip_duration'] = pd.to_numeric(dff_filtered['clip_duration'], errors='coerce').fillna(5.0)
+
+        if _label_snapshot and 'manual_label' not in dff_filtered.columns:
+            dff_filtered = apply_manual_labels_efficiently(dff_filtered, _label_snapshot)
+        elif 'manual_label' not in dff_filtered.columns:
+            dff_filtered['manual_label'] = 'Unlabeled'
         
         # 2. Merge Logic
+        timer.step("merge")
         if merge_on and not dff_filtered.empty:
             # Dynamic merging on filtered data
             # Cache key must include filters or we skip cache for dynamic accuracy
@@ -464,6 +551,8 @@ def register_plot_callbacks(app):
             
         else:
             dff_macro = dff_filtered
+            if 'clip_count' not in dff_macro.columns:
+                dff_macro['clip_count'] = 1
             if clip_count_threshold and clip_count_threshold > 1 and 'clip_count' in dff_macro.columns:
                  dff_macro = dff_macro[dff_macro['clip_count'] >= int(clip_count_threshold)]
             total_clips_available = len(dff_macro)
@@ -485,6 +574,7 @@ def register_plot_callbacks(app):
         new_indices_to_store = dash.no_update
 
         # Calculate comprehensive statistics for both Cluster and Label lists.
+        timer.step("labels")
         # Keep a separate labeled-only denominator for manual-label percentages.
         cluster_stats = {
             'total': int(total_clips_available) if not dff_macro.empty else 0,
@@ -598,8 +688,8 @@ def register_plot_callbacks(app):
         if do_filter:
             # Filter dff_macro BEFORE sampling so resamples pull 100% quota from visible groups
             if not dff_macro.empty:
-                # 1. Filter by Cluster
-                if 'cluster_id' in dff_macro.columns:
+                # 1. Filter by Cluster (only if cluster checkboxes are rendered in UI)
+                if cluster_checkbox_ids and 'cluster_id' in dff_macro.columns:
                     dff_macro = dff_macro[dff_macro['cluster_id'].astype(str).isin(selected_clusters)]
                 
                 # 2. Filter by Label
@@ -613,7 +703,7 @@ def register_plot_callbacks(app):
             total_clips_available = dff_macro['clip_count'].sum() if 'clip_count' in dff_macro.columns else len(dff_macro)
         else:
             total_clips_available = 0
-            
+
         # -------------------------------------------------------------------
 
         should_resample = is_fresh_load or is_resample_click or is_k_change or not stored_indices
@@ -625,6 +715,7 @@ def register_plot_callbacks(app):
             if any(f in t_id for t_id in all_triggered_ids for f in other_filters):
                 should_resample = True
 
+        timer.step("sampling")
         if max_points and dff_macro['clip_count'].sum() > max_points:
             if should_resample:
                 # Apply labels BEFORE sampling to enable Priority Sampling of labeled points.
@@ -637,14 +728,14 @@ def register_plot_callbacks(app):
                 final_indices_set = set()
                 rng_seed = None if is_resample_click else 42
                 
-                # Convert checklist value to boolean
-                is_priority_on = bool(priority_sampling_on and 'on' in priority_sampling_on)
+                # Convert checklist value to boolean - robust for various value formats
+                is_priority_on = bool(priority_sampling_on and len(priority_sampling_on) > 0)
                 
                 # Check for manual labels column existence AND toggle
                 if is_priority_on and 'manual_label' in dff_macro.columns:
                      # Prioritize labeled points (everything that is not 'Unlabeled')
                      labeled_mask = dff_macro['manual_label'] != 'Unlabeled'
-                     unlabeled_mask = dff_macro['manual_label'] == 'Unlabeled'
+                     unlabeled_mask = ~labeled_mask
                      
                      labeled_indices = dff_macro[labeled_mask].index
                      unlabeled_indices = dff_macro[unlabeled_mask].index
@@ -751,9 +842,11 @@ def register_plot_callbacks(app):
             else:
                 fig.update_xaxes(visible=False);
                 fig.update_yaxes(visible=False)
-            return fig, None, 1, max_distance, new_indices_to_store, None, sampling_text, cluster_stats, None, False
+            timer.stop(extra_info="empty_sampled")
+            return fig, None, 1, max_distance, new_indices_to_store, None, sampling_text, cluster_stats, None, False if should_force_defaults else no_update
 
         t_last = checkpoint('sampling') or t_last
+        timer.step("figure")
         dff = dff_sampled.reset_index(drop=True).copy()
         # plot_id assignment moved to after sorting
         # Clamp marker size to avoid browser layout errors with massive points
@@ -777,11 +870,12 @@ def register_plot_callbacks(app):
         else:
             dff['day_int'] = 1
         
-        if 'day_dt' in dff.columns and 'start_hour_float' in dff.columns:
-            dff['date_time_str'] = pd.to_datetime(dff['day_dt']).dt.strftime('%d-%m-%Y') + ' ' + \
-                                   dff['start_hour_float'].apply(lambda h: f"{int(h):02d}:{int((h % 1) * 60):02d}")
-        else:
-            dff['date_time_str'] = 'N/A'
+        if 'date_time_str' not in dff.columns:
+            if 'day_dt' in dff.columns and 'start_hour_float' in dff.columns:
+                dff['date_time_str'] = pd.to_datetime(dff['day_dt']).dt.strftime('%d-%m-%Y') + ' ' + \
+                                       dff['start_hour_float'].apply(lambda h: f"{int(h):02d}:{int((h % 1) * 60):02d}")
+            else:
+                dff['date_time_str'] = 'N/A'
 
         t_last = checkpoint('data_prep') or t_last
         final_color_map = {}
@@ -797,7 +891,7 @@ def register_plot_callbacks(app):
             if 'manual_label' not in dff.columns:
                 dff = apply_manual_labels_efficiently(dff, _label_snapshot)
             color_col = 'manual_label'
-            
+
         if is_manual_mode:
             # SINGLE SOURCE OF TRUTH: Only use label_colors_data (label-color-store)
             # No more MD5 hash fallbacks - all colors must come from the store
@@ -871,25 +965,30 @@ def register_plot_callbacks(app):
         fig = go.Figure()
         
         label_name = 'Label' if is_manual_mode else 'Cluster'
-        
+
         # Legend support: one trace per color category
         if not dff.empty:
             unique_groups = sorted(dff[color_col].unique())
-            
+
             # Ensure 'Unlabeled' is the FIRST trace so it is rendered at the bottom (Z-order)
             if 'Unlabeled' in unique_groups:
                 unique_groups.remove('Unlabeled')
                 unique_groups = ['Unlabeled'] + unique_groups
             
+            _cd_cols_present = [c for c in CUSTOMDATA_COLS if c in dff.columns]
+            # Payload-local copy for customdata with 3-decimal precision on start_hour_float.
+            # dff itself retains full 64-bit precision for server_cache, table, and audio operations.
+            _cd_source = dff[_cd_cols_present].copy()
+            if 'start_hour_float' in _cd_source.columns:
+                _cd_source['start_hour_float'] = _cd_source['start_hour_float'].round(3)
+
             for group in unique_groups:
-                gp_df = dff[dff[color_col] == group]
-                if gp_df.empty: continue
-                
-                fig.add_trace(go.Scattergl(
-                    x=gp_df['x'], 
-                    y=gp_df['y'],
-                    mode='markers',
-                    marker=dict(
+                group_mask = (dff[color_col] == group)
+                parts = [(group_mask, None)]
+                for mask, symbol in parts:
+                    gp_df = dff[mask]
+                    if gp_df.empty: continue
+                    marker = dict(
                         size=gp_df['marker_size'],
                         # Scalar color per trace — all points in a group share one color.
                         # Using a scalar (not a per-point array) avoids WebGL buffer re-upload
@@ -898,17 +997,33 @@ def register_plot_callbacks(app):
                         sizemode='diameter',
                         sizeref=1,
                         opacity=1.0
-                    ),
-                    customdata=gp_df[["color_col_content", "row_idx", "plot_id", "start_hour_float", "day_int", "clip_count", "file_name", "clip_time", "channel", "date_time_str"]].to_numpy(),
-                    hovertemplate=f'<b>{label_name}:</b> %{{customdata[0]}}<br>' +
-                                 '<b>File:</b> %{customdata[6]}<br>' +
-                                 '<b>Clip Count:</b> %{customdata[5]}<br>' +
-                                 '<b>Time:</b> %{customdata[7]:.2f}s<br>' +
-                                 '<b>Date & Time:</b> %{customdata[9]}<br>' +
-                                 '<b>Channel:</b> %{customdata[8]}<extra></extra>',
-                    name=str(group),
-                    showlegend=True
-                ))
+                    )
+                    extra = {}
+                    if symbol:
+                        marker['symbol'] = symbol
+                        marker['line'] = dict(width=2)
+
+                    # Manually labelled points win clicks over unlabelled points that overlap or sit
+                    # right next to them (see assets/scatter_click_hittest.js).
+                    if is_manual_mode and str(group) != 'Unlabeled':
+                        extra['meta'] = {'click_priority': 1}
+
+                    fig.add_trace(go.Scattergl(
+                        x=gp_df['x'].astype(np.float32),
+                        y=gp_df['y'].astype(np.float32),
+                        mode='markers',
+                        marker=marker,
+                        customdata=_cd_source[mask].to_numpy(),
+                        hovertemplate=f'<b>{label_name}:</b> %{{customdata[{CUSTOMDATA_COLOR_IDX}]}}<br>' +
+                                     f'<b>File:</b> %{{customdata[{CUSTOMDATA_FILE_NAME_IDX}]}}<br>' +
+                                     f'<b>Clip Count:</b> %{{customdata[{CUSTOMDATA_CLIP_COUNT_IDX}]}}<br>' +
+                                     f'<b>Time:</b> %{{customdata[{CUSTOMDATA_CLIP_TIME_IDX}]:.2f}}s<br>' +
+                                     f'<b>Date & Time:</b> %{{customdata[{CUSTOMDATA_DATE_TIME_IDX}]}}<br>' +
+                                     f'<b>Channel:</b> %{{customdata[{CUSTOMDATA_CHANNEL_IDX}]}}<extra></extra>',
+                        name=str(group),
+                        showlegend=True,
+                        **extra
+                    ))
 
         fig.update_layout(showlegend=False, margin=dict(l=5, r=5, t=5, b=5),
                           paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
@@ -922,20 +1037,61 @@ def register_plot_callbacks(app):
             fig.update_yaxes(visible=False)
 
         max_clip_count = int(dff['clip_count'].max()) if not dff.empty else 1
-        server_cache[dff['cache_key'].iloc[0]] = dff
+        
+        # Store full DataFrame in server cache for table/audio operations
+        cache_key = dff['cache_key'].iloc[0]
+        server_cache[cache_key] = dff
 
-        min_h = dff['start_hour_float'].min()
-        max_h = dff['start_hour_float'].max()
-        min_d = dff['day_int'].min()
-        max_d = dff['day_int'].max()
+        # Create lightweight payload for filtered-data store (OPTIMIZATION #1)
+        # Only send essential columns to browser instead of full DataFrame
+        if not dff.empty:
+            essential_cols = ['x', 'y', 'plot_id', 'cluster_id', 'manual_label', 
+                            'file_name', 'clip_time', 'clip_duration', 'channel', 
+                            'day_dt', 'start_hour_float', 'clip_count', 'marker_size',
+                            'color_col_content', 'mapped_color']
+            
+            # Ensure all essential columns exist
+            missing_cols = [col for col in essential_cols if col not in dff.columns]
+            for col in missing_cols:
+                if col == 'manual_label':
+                    dff[col] = 'Unlabeled'
+                elif col == 'marker_size':
+                    dff[col] = 10
+                elif col == 'color_col_content':
+                    dff[col] = dff.get('cluster_id_str', 'Unknown')
+                elif col == 'mapped_color':
+                    dff[col] = '#888888'
+                else:
+                    dff[col] = None
+                    
+            # Calculate data reduction for performance monitoring
+            total_cols = len(dff.columns)
+            essential_cols_count = len(essential_cols)
+            reduction_pct = ((total_cols - essential_cols_count) / total_cols) * 100
+            
+            lightweight_data = {
+                'cache_key': cache_key,
+                'plot_data': dff[essential_cols].to_dict('records'),
+                'total_rows': len(dff)
+            }
+            
+            if is_diagnostics_enabled():
+                print(f"[OPTIMIZATION #1] Data reduction: {total_cols} -> {essential_cols_count} columns ({reduction_pct:.1f}% reduction)")
+        else:
+            lightweight_data = {
+                'cache_key': cache_key,
+                'plot_data': [],
+                'total_rows': 0
+            }
+
+        min_h = dff['start_hour_float'].min() if not dff.empty else 0
+        max_h = dff['start_hour_float'].max() if not dff.empty else 24
+        min_d = dff['day_int'].min() if not dff.empty else 1
+        max_d = dff['day_int'].max() if not dff.empty else 365
         ranges_data = {'daily': [min_h, max_h], 'yearly': [min_d, max_d]}
         t_last = checkpoint('final') or t_last
 
-        if ENABLE_PROFILING and t_start:
-            total_time = (time.time() - t_start) * 1000
-            timing_str = f"⏱️  Plot Update Timing (total: {total_time:.1f}ms): "
-            for name, segment_time in t_checkpoint.items():
-                timing_str += f"{name}={segment_time:.1f}ms "
+        timer.stop(cache_df=dff)
 
         return fig, dff['cache_key'].iloc[
             0], max_clip_count, max_distance, new_indices_to_store, ranges_data, sampling_text, cluster_stats, None, False if should_force_defaults else no_update
@@ -958,7 +1114,7 @@ def register_plot_callbacks(app):
          Input('colormap', 'value'),
          Input('db-floor', 'value')], 
         prevent_initial_call=True)
-    def compute_spectrogram_data(clickData, filtered_data_cache_key,
+    def compute_spectrogram_data(clickData, filtered_data_store,
                                  frequency_scale, fft_window_size, window_overlap,
                                  window_type, min_freq, max_freq, num_bins,
                                  colormap, db_floor): # Added arguments
@@ -976,8 +1132,15 @@ def register_plot_callbacks(app):
             yaxis={'visible': False}
         )
 
-        if not filtered_data_cache_key:
+        if not filtered_data_store:
              return no_update, no_update, ""
+             
+        # Extract cache key from the filtered data store dictionary
+        if isinstance(filtered_data_store, dict) and 'cache_key' in filtered_data_store:
+            filtered_data_cache_key = filtered_data_store['cache_key']
+        else:
+            # Fallback for old format (direct string)
+            filtered_data_cache_key = filtered_data_store
 
         dff = server_cache.get(filtered_data_cache_key)
         if dff is None:
@@ -985,9 +1148,16 @@ def register_plot_callbacks(app):
 
         try:
             point = clickData["points"][0]
-            # Depending on your data, plot_id might be point['customdata'][2] or point['id']
-            # Preserving your logic:
-            plot_id = point["customdata"][2]
+            cd = point.get("customdata") if isinstance(point, dict) else None
+            if cd is not None and len(cd) > CUSTOMDATA_PLOT_ID_IDX:
+                # In Phase 0.8, plot_id is at index 1 (CUSTOMDATA_PLOT_ID_IDX).
+                # Support legacy 3-element customdata [None, None, plot_id] from mocks.
+                if len(cd) > 2 and cd[CUSTOMDATA_PLOT_ID_IDX] is None and cd[2] is not None:
+                    plot_id = cd[2]
+                else:
+                    plot_id = cd[CUSTOMDATA_PLOT_ID_IDX]
+            else:
+                plot_id = point.get("id")
         except Exception as e:
             return no_update, no_update, f"Error parsing clickData: {e}"
 
@@ -1029,7 +1199,7 @@ def register_plot_callbacks(app):
         # 4. ROUNDING (Keeps it fast)
         Sxx_db = np.round(Sxx_db, 2)
         f = np.round(f, 1)
-        t = np.round(t, 3)
+        t = np.round(t + utils.segment_start_time(row['clip_time'], 0.5), 3)   # time in the recording file
 
         # 5. Build Figure (With correct Colormap)
         fig = go.Figure(data=go.Heatmap(
@@ -1044,7 +1214,7 @@ def register_plot_callbacks(app):
             margin=dict(l=40, r=10, t=10, b=0),
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
-            xaxis=dict(title="Time (s)", showgrid=False),
+            xaxis=dict(title=utils.SPECTROGRAM_TIME_AXIS_TITLE, showgrid=False),
             yaxis=dict(title="Freq (Hz)", showgrid=False, type='log' if frequency_scale == 'log' else 'linear'),
             dragmode='zoom', # Better interaction than pan
             autosize=True
@@ -1102,7 +1272,7 @@ def register_plot_callbacks(app):
          Input('table-click-data-store', 'data'),
          State('filtered-data', 'data')])
     def show_histogram_for_clicked_cluster(clickData, hist_type, time_scale, cluster_colors, label_colors, label_names, color_mode,
-                                           table_click_data, filtered_data_cache_key):
+                                           table_click_data, filtered_data_store):
 
         # Determine the effective clickData source
         triggered = dash.callback_context.triggered
@@ -1117,7 +1287,7 @@ def register_plot_callbacks(app):
             effective_click = None
 
         try:
-            if not effective_click or not filtered_data_cache_key:
+            if not effective_click or not filtered_data_store:
                 fig = go.Figure()
                 title = "Time of Day" if time_scale == 'daily' else "Week of Year"
                 fig.update_layout(
@@ -1131,12 +1301,19 @@ def register_plot_callbacks(app):
                 )
                 return fig
 
+            # Extract cache key from the filtered data store dictionary
+            if isinstance(filtered_data_store, dict) and 'cache_key' in filtered_data_store:
+                filtered_data_cache_key = filtered_data_store['cache_key']
+            else:
+                # Fallback for old format (direct string)
+                filtered_data_cache_key = filtered_data_store
+
             dff = server_cache.get(filtered_data_cache_key)
             if dff is None: return go.Figure().update_layout(title_text="Error: Data not found in cache.")
 
             # Determine the key to filter by
             is_manual = (color_mode == 'manual')
-            
+
             if is_manual:
                  clicked_label = str(effective_click["points"][0]["customdata"][0])
                  
@@ -1271,21 +1448,24 @@ def register_plot_callbacks(app):
          State('merge-switch', 'on')],
         prevent_initial_call=True
     )
-    def save_manual_label(n_clicks, n_submit, table_label_values, label_text, clickData, filtered_data_cache_key, merge_on):
+    def save_manual_label(n_clicks, n_submit, table_label_values, label_text, clickData, filtered_data_store, merge_on):
         import json
 
         triggered = dash.callback_context.triggered
         if not triggered:
             return dash.no_update, "", dash.no_update
 
-        # Merging is ON → labeling is disabled for instance-based accuracy
-        if merge_on:
-            return dash.no_update, "Labeling is disabled while Merge is ON.", dash.no_update
-
         triggered_id_str = triggered[0]['prop_id'].split('.')[0]
         
-        if not filtered_data_cache_key:
+        if not filtered_data_store:
             return dash.no_update, "", dash.no_update
+            
+        # Extract cache key from the filtered data store dictionary
+        if isinstance(filtered_data_store, dict) and 'cache_key' in filtered_data_store:
+            filtered_data_cache_key = filtered_data_store['cache_key']
+        else:
+            # Fallback for old format (direct string)
+            filtered_data_cache_key = filtered_data_store
 
         dff = server_cache.get(filtered_data_cache_key)
         if dff is None:
@@ -1297,11 +1477,19 @@ def register_plot_callbacks(app):
                 trig_dict = json.loads(triggered_id_str)
                 if trig_dict.get('type') == 'table-inline-label':
                     plot_id = trig_dict.get('index')
+                    if plot_id not in dff.index:
+                        try:
+                            if int(plot_id) in dff.index:
+                                plot_id = int(plot_id)
+                        except Exception:
+                            pass
                     
                     if plot_id not in dff.index:
                         return dash.no_update, "Error: Table point not found.", dash.no_update
                         
                     row = dff.loc[plot_id]
+                    if isinstance(row, pd.DataFrame):
+                        row = row.iloc[0]
                     
                     # The value is the trigger value
                     val = triggered[0]['value']
@@ -1317,108 +1505,81 @@ def register_plot_callbacks(app):
                     if pd.isna(micro): micro = 'Unknown'
                     channel = int(row['channel'])
                     
-                    # CRITICAL: Use cross-platform file path extraction
-                    file_basename = str(row['mp3_file']).replace('\\', '/').split('/')[-1]
+                    if 'mp3_file' in row and pd.notna(row['mp3_file']):
+                        file_basename = str(row['mp3_file']).replace('\\', '/').split('/')[-1]
+                    elif 'file_name' in row and pd.notna(row['file_name']):
+                        file_basename = str(row['file_name']).replace('\\', '/').split('/')[-1]
+                    else:
+                        file_basename = 'Unknown'
 
-                    # Content-based key: round(clip_time * 10) gives 0.1 s precision,
-                    # stable across model/K switches and safe against float drift.
-                    clip_time_key = round(float(row['clip_time']) * 10)
-                    instance_key = (loc, micro, file_basename, int(channel), clip_time_key)
+                    model_name = str(row.get('model_name', ''))
 
-                    # Thread-safe cache update — single key per clip instance
-                    # Deduplicate: if an existing cache key in the same file/channel overlaps
-                    # the current clip by >=50% and already has the same label, skip inserting
-                    DEDUPE_THRESHOLD = 0.5
-                    should_write = True
+                    # Determine constituent clips to update (propagates to all underlying clips if merged)
+                    constituent_clips = row.get('constituent_clips') if hasattr(row, 'get') else None
+                    if isinstance(constituent_clips, list) and len(constituent_clips) > 0:
+                        clips_to_update = [(float(ct), float(dur)) for ct, dur in constituent_clips]
+                    else:
+                        clips_to_update = [(float(row['clip_time']), float(row.get('clip_duration', 5.0)))]
+
                     with MANUAL_LABELS_LOCK:
-                        # Scan same-file/channel keys
-                        for k in list(MANUAL_LABELS_CACHE):
-                            try:
-                                k_loc, k_micro, k_f, k_chan, k_sec = k
-                            except Exception:
-                                continue
-                            if (k_loc, k_micro, k_f, int(k_chan)) != (loc, micro, file_basename, int(channel)):
-                                continue
-                            # Get durations
-                            dur_entry = CLIP_DURATION_CACHE.get(k)
-                            if isinstance(dur_entry, tuple) and len(dur_entry) == 2:
-                                k_dur = int(round(dur_entry[0] * 10))
-                            else:
-                                k_dur = 0
-                            existing_start = int(k_sec)
-                            existing_end = existing_start + k_dur
-                            new_start = int(clip_time_key)
-                            new_end = new_start + int(round(float(row.get('clip_duration', 5.0)) * 10))
-                            overlap = max(0, min(existing_end, new_end) - max(existing_start, new_start))
-                            shorter = min((existing_end - existing_start) if existing_end > existing_start else 0,
-                                          (new_end - new_start) if new_end > new_start else 0)
-                            if shorter > 0:
-                                frac = overlap / shorter
-                                if frac >= DEDUPE_THRESHOLD and MANUAL_LABELS_CACHE.get(k) == label_val:
-                                    should_write = False
-                                    break
-                        if should_write:
+                        for ct, dur in clips_to_update:
+                            clip_time_key = round(ct * 10)
+                            instance_key = (sys.intern(str(loc)), sys.intern(str(micro)), sys.intern(str(file_basename)), int(channel), clip_time_key)
                             if label_val == 'Unlabeled':
-                                # Interpret Unlabeled as a delete request: remove any existing persistent key
                                 if instance_key in MANUAL_LABELS_CACHE:
                                     try:
                                         del MANUAL_LABELS_CACHE[instance_key]
                                     except Exception:
                                         pass
-                                    # Remove duration entry as well if present
+                                if instance_key in CLIP_DURATION_CACHE:
                                     try:
-                                        if instance_key in CLIP_DURATION_CACHE:
-                                            del CLIP_DURATION_CACHE[instance_key]
+                                        del CLIP_DURATION_CACHE[instance_key]
                                     except Exception:
                                         pass
-                                    # Log deletion
-                                    try:
-                                        with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
-                                            _log.write(f"{time.time()}\tplots_inline_delete\t{instance_key}\tDELETED\n")
-                                    except Exception:
-                                        pass
-                                    unique_trigger = f"{time.time()}_{hash(label_val)}_{len(MANUAL_LABELS_CACHE)}"
-                                    return unique_trigger, f"Deleted label", dash.no_update
-                                else:
-                                    # Nothing to delete — no-op
-                                    unique_trigger = f"{time.time()}_{hash(label_val)}_{len(MANUAL_LABELS_CACHE)}"
-                                    return unique_trigger, f"No-op: Unlabeled", dash.no_update
+                                try:
+                                    with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
+                                        _log.write(f"{time.time()}\tplots_inline_delete\t{instance_key}\tDELETED\n")
+                                except Exception:
+                                    pass
                             else:
                                 MANUAL_LABELS_CACHE[instance_key] = label_val
-                        else:
-                            # Already saved by overlapping key — treat as success without new write
-                            unique_trigger = f"{time.time()}_{hash(label_val)}_{len(MANUAL_LABELS_CACHE)}"
-                            return unique_trigger, f"Saved: {label_val}", dash.no_update
-                    # Instrumentation: log manual label writes for debugging intermittent duplication
-                    try:
-                        with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
-                            _log.write(f"{time.time()}\tplots_inline_save\t{instance_key}\t{label_val}\n")
-                    except Exception:
-                        pass
-                    # Store (duration, model_name) so apply_manual_labels_efficiently
-                    # can use exact match within the same model and overlap match across models.
-                    CLIP_DURATION_CACHE[instance_key] = (
-                        float(row.get('clip_duration', 5.0)),
-                        str(row.get('model_name', ''))
-                    )
+                                CLIP_DURATION_CACHE[instance_key] = (float(dur), model_name)
+                                try:
+                                    with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
+                                        _log.write(f"{time.time()}\tplots_inline_save\t{instance_key}\t{label_val}\n")
+                                except Exception:
+                                    pass
 
-                    # Verify the update was successful for production reliability
-                    with MANUAL_LABELS_LOCK:
-                        if MANUAL_LABELS_CACHE.get(instance_key) == label_val:
-                            unique_trigger = f"{time.time()}_{hash(label_val)}_{len(MANUAL_LABELS_CACHE)}"
-                            return unique_trigger, f"Saved: {label_val}", dash.no_update
-                        else:
-                            return dash.no_update, f"Error: Failed to save {label_val}", dash.no_update
+                    unique_trigger = f"{time.time()}_{hash(label_val)}_{len(MANUAL_LABELS_CACHE)}"
+                    msg = "Deleted label" if label_val == 'Unlabeled' else f"Saved: {label_val}"
+                    return unique_trigger, msg, dash.no_update
 
             # Sidebar button
             if not label_text or not clickData:
                 return dash.no_update, "", dash.no_update
                 
             point = clickData["points"][0]
-            plot_id = point.get("customdata", [])[2]
+            cd = point.get("customdata", [])
+            # In Phase 0.8, plot_id is at index 1 (CUSTOMDATA_PLOT_ID_IDX).
+            # Fallback to index 2 for legacy 3-element customdata mocks.
+            if len(cd) > 2 and cd[CUSTOMDATA_PLOT_ID_IDX] is None and cd[2] is not None:
+                plot_id = cd[2]
+            elif len(cd) > CUSTOMDATA_PLOT_ID_IDX:
+                plot_id = cd[CUSTOMDATA_PLOT_ID_IDX]
+            else:
+                plot_id = None
+
+            if plot_id not in dff.index:
+                try:
+                    if int(plot_id) in dff.index:
+                        plot_id = int(plot_id)
+                except Exception:
+                    pass
             
             if plot_id in dff.index:
                 row = dff.loc[plot_id]
+                if isinstance(row, pd.DataFrame):
+                    row = row.iloc[0]
                 
                 label_val = label_text.strip()
                 loc = row.get('location', 'Unknown')
@@ -1427,94 +1588,54 @@ def register_plot_callbacks(app):
                 if pd.isna(micro): micro = 'Unknown'
                 channel = int(row['channel'])
                 
-                # CRITICAL: Use cross-platform file path extraction
-                file_basename = str(row['mp3_file']).replace('\\', '/').split('/')[-1]
+                if 'mp3_file' in row and pd.notna(row['mp3_file']):
+                    file_basename = str(row['mp3_file']).replace('\\', '/').split('/')[-1]
+                elif 'file_name' in row and pd.notna(row['file_name']):
+                    file_basename = str(row['file_name']).replace('\\', '/').split('/')[-1]
+                else:
+                    file_basename = 'Unknown'
 
-                # Content-based key: round(clip_time * 10) gives 0.1 s precision,
-                # stable across model/K switches and safe against float drift.
-                clip_time_key = round(float(row['clip_time']) * 10)
-                instance_key = (loc, micro, file_basename, int(channel), clip_time_key)
+                model_name = str(row.get('model_name', ''))
 
+                # Determine constituent clips to update (propagates to all underlying clips if merged)
+                constituent_clips = row.get('constituent_clips') if hasattr(row, 'get') else None
+                if isinstance(constituent_clips, list) and len(constituent_clips) > 0:
+                    clips_to_update = [(float(ct), float(dur)) for ct, dur in constituent_clips]
+                else:
+                    clips_to_update = [(float(row['clip_time']), float(row.get('clip_duration', 5.0)))]
 
-                # Thread-safe write with verification
-                # Deduplicate before writing to persistent cache (same logic as inline path)
-                DEDUPE_THRESHOLD = 0.5
-                should_write = True
                 with MANUAL_LABELS_LOCK:
-                    for k in list(MANUAL_LABELS_CACHE):
-                        try:
-                            k_loc, k_micro, k_f, k_chan, k_sec = k
-                        except Exception:
-                            continue
-                        if (k_loc, k_micro, k_f, int(k_chan)) != (loc, micro, file_basename, int(channel)):
-                            continue
-                        dur_entry = CLIP_DURATION_CACHE.get(k)
-                        if isinstance(dur_entry, tuple) and len(dur_entry) == 2:
-                            k_dur = int(round(dur_entry[0] * 10))
-                        else:
-                            k_dur = 0
-                        existing_start = int(k_sec)
-                        existing_end = existing_start + k_dur
-                        new_start = int(clip_time_key)
-                        new_end = new_start + int(round(float(row.get('clip_duration', 5.0)) * 10))
-                        overlap = max(0, min(existing_end, new_end) - max(existing_start, new_start))
-                        shorter = min((existing_end - existing_start) if existing_end > existing_start else 0,
-                                      (new_end - new_start) if new_end > new_start else 0)
-                        if shorter > 0:
-                            frac = overlap / shorter
-                            if frac >= DEDUPE_THRESHOLD and MANUAL_LABELS_CACHE.get(k) == label_val:
-                                should_write = False
-                                break
-                    if should_write:
+                    for ct, dur in clips_to_update:
+                        clip_time_key = round(ct * 10)
+                        instance_key = (sys.intern(str(loc)), sys.intern(str(micro)), sys.intern(str(file_basename)), int(channel), clip_time_key)
                         if label_val == 'Unlabeled':
-                            # Delete existing persistent key instead of writing 'Unlabeled'
                             if instance_key in MANUAL_LABELS_CACHE:
                                 try:
                                     del MANUAL_LABELS_CACHE[instance_key]
                                 except Exception:
                                     pass
+                            if instance_key in CLIP_DURATION_CACHE:
                                 try:
-                                    if instance_key in CLIP_DURATION_CACHE:
-                                        del CLIP_DURATION_CACHE[instance_key]
+                                    del CLIP_DURATION_CACHE[instance_key]
                                 except Exception:
                                     pass
-                                # Log deletion
-                                try:
-                                    with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
-                                        _log.write(f"{time.time()}\tplots_sidebar_delete\t{instance_key}\tDELETED\n")
-                                except Exception:
-                                    pass
-                                verification_success = True
-                                unique_trigger = f"{time.time()}_{hash(label_val)}_1"
-                                return unique_trigger, f"Deleted label", label_val
-                            else:
-                                verification_success = True
-                                unique_trigger = f"{time.time()}_{hash(label_val)}_1"
-                                return unique_trigger, f"No-op: Unlabeled", label_val
+                            try:
+                                with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
+                                    _log.write(f"{time.time()}\tplots_sidebar_delete\t{instance_key}\tDELETED\n")
+                            except Exception:
+                                pass
                         else:
                             MANUAL_LABELS_CACHE[instance_key] = label_val
-                    else:
-                        verification_success = True
-                        unique_trigger = f"{time.time()}_{hash(label_val)}_1"
-                        return unique_trigger, f"Saved: {label_val}", label_val
-                # Log writes for debugging
-                try:
-                    with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
-                        _log.write(f"{time.time()}\tplots_sidebar_save\t{instance_key}\t{label_val}\n")
-                except Exception:
-                    pass
-                # Store (duration, model_name) so apply_manual_labels_efficiently
-                # can use exact match within the same model and overlap match across models.
-                CLIP_DURATION_CACHE[instance_key] = (
-                    float(row.get('clip_duration', 5.0)),
-                    str(row.get('model_name', ''))
-                )
+                            CLIP_DURATION_CACHE[instance_key] = (float(dur), model_name)
+                            try:
+                                with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
+                                    _log.write(f"{time.time()}\tplots_sidebar_save\t{instance_key}\t{label_val}\n")
+                            except Exception:
+                                pass
 
-                if verification_success:
-                    unique_trigger = f"{time.time()}_{hash(label_val)}_1"
-                    return unique_trigger, f"Saved: {label_val}", label_val
-                else:
-                    return dash.no_update, f"Error: Label verification failed for {label_val}", dash.no_update
+                unique_trigger = f"{time.time()}_{hash(label_val)}_1"
+                msg = "Deleted label" if label_val == 'Unlabeled' else f"Saved: {label_val}"
+                return unique_trigger, msg, label_val
             else:
                 return dash.no_update, "Error: Point not found.", dash.no_update
                 
@@ -1538,26 +1659,65 @@ def register_plot_callbacks(app):
         State('filtered-data', 'data'),
         prevent_initial_call=True
     )
-    def update_label_input_on_click(clickData, filtered_data_cache_key):
-        if not clickData or not filtered_data_cache_key:
+    def update_label_input_on_click(clickData, filtered_data_store):
+        if not clickData or not filtered_data_store:
             return ""
+            
+        # Extract cache key from the filtered data store dictionary
+        if isinstance(filtered_data_store, dict) and 'cache_key' in filtered_data_store:
+            filtered_data_cache_key = filtered_data_store['cache_key']
+        else:
+            # Fallback for old format (direct string)
+            filtered_data_cache_key = filtered_data_store
 
         dff = server_cache.get(filtered_data_cache_key)
         if dff is None: return ""
 
         try:
             point = clickData["points"][0]
-            plot_id = point.get("customdata", [])[2]
+            cd = point.get("customdata", [])
+            # In Phase 0.8, plot_id is at index 1 (CUSTOMDATA_PLOT_ID_IDX).
+            # Fallback to index 2 for legacy 3-element customdata mocks.
+            if len(cd) > 2 and cd[CUSTOMDATA_PLOT_ID_IDX] is None and cd[2] is not None:
+                plot_id = cd[2]
+            elif len(cd) > CUSTOMDATA_PLOT_ID_IDX:
+                plot_id = cd[CUSTOMDATA_PLOT_ID_IDX]
+            else:
+                plot_id = None
             
+            if plot_id not in dff.index:
+                try:
+                    if int(plot_id) in dff.index:
+                        plot_id = int(plot_id)
+                except Exception:
+                    pass
+
             if plot_id in dff.index:
                 row = dff.loc[plot_id]
+                if isinstance(row, pd.DataFrame):
+                    row = row.iloc[0]
+
+                # 1. Prefer the already-resolved manual_label on the selected row
+                # (e.g. from cross-model overlap propagation or direct assignment)
+                resolved_label = row.get('manual_label')
+                if pd.notna(resolved_label):
+                    resolved_label_str = str(resolved_label).strip()
+                    if resolved_label_str and resolved_label_str != 'Unlabeled':
+                        return resolved_label_str
+
+                # 2. Fall back to exact-key lookup if row label is absent or Unlabeled
                 loc = row.get('location', 'Unknown')
                 if pd.isna(loc): loc = 'Unknown'
                 micro = row.get('microlocation', 'Unknown') 
                 if pd.isna(micro): micro = 'Unknown'
-                file_basename = str(row['mp3_file']).replace('\\', '/').split('/')[-1]
+                if 'mp3_file' in row and pd.notna(row['mp3_file']):
+                    file_basename = str(row['mp3_file']).replace('\\', '/').split('/')[-1]
+                elif 'file_name' in row and pd.notna(row['file_name']):
+                    file_basename = str(row['file_name']).replace('\\', '/').split('/')[-1]
+                else:
+                    file_basename = 'Unknown'
                 channel = int(row['channel'])
-                # Content-based lookup: same clip_time = same label across models
+                # Content-based lookup fallback: same clip_time = same label across models
                 lbl = get_label_for_clip(loc, micro, file_basename, channel, row['clip_time'])
                 return "" if lbl == 'Unlabeled' else lbl
             return ""

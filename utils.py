@@ -3,6 +3,7 @@
 
 import soundfile as sf
 import numpy as np
+import pandas as pd  # Added pandas import
 import os
 from scipy.signal import spectrogram
 from collections import Counter
@@ -11,6 +12,17 @@ import librosa  # Make sure librosa is imported
 
 
 # --- *** OPTIMIZED SELECTIVE AUDIO LOADING *** ---
+SPECTROGRAM_TIME_AXIS_TITLE = "Time in file (s)"
+
+
+def segment_start_time(clip_time, padding_s):
+    """File time (s) of the first sample returned by load_audio_segment (padding is clamped at the file start).
+
+    Spectrograms add this to their time axis so they show time in the recording file, which makes clip and
+    spectrograms of the same file directly comparable."""
+    return max(0.0, float(clip_time) - float(padding_s))
+
+
 def load_audio_segment(mp3_file_relative_path, clip_time, clip_duration, channel=0, padding_s=1.0):
     """
     Loads a specific audio segment using optimized selective loading.
@@ -21,8 +33,26 @@ def load_audio_segment(mp3_file_relative_path, clip_time, clip_duration, channel
     full_path = os.path.join(read_data.DATA_DIR, mp3_file_relative_path)
     
     if not os.path.exists(full_path):
-        print(f"Warning: Audio file not found at {full_path}")
-        return None, None
+        # Check canonical recordings/ directory structure
+        candidate_paths = [
+            os.path.join(read_data.BASE_DATA_DIR, "recordings", mp3_file_relative_path),
+            os.path.join(read_data.BASE_DATA_DIR, "recordings", "Citimon", mp3_file_relative_path),
+            os.path.join(read_data.BASE_DATA_DIR, "recordings", "citimon", mp3_file_relative_path),
+            os.path.join(read_data.BASE_DATA_DIR, "recordings", "Multimon", mp3_file_relative_path),
+            os.path.join(read_data.BASE_DATA_DIR, "recordings", "multimon", mp3_file_relative_path),
+            os.path.join(read_data.BASE_DATA_DIR, "zabe", "recordings", mp3_file_relative_path),
+            os.path.join(read_data.BASE_DATA_DIR, "vibro", "recordings", mp3_file_relative_path),
+            os.path.join(read_data.BASE_DATA_DIR, "vibro", "mp3", mp3_file_relative_path),
+        ]
+        found = False
+        for cand in candidate_paths:
+            if os.path.exists(cand):
+                full_path = cand
+                found = True
+                break
+        if not found:
+            print(f"Warning: Audio file not found at {full_path}")
+            return None, None
 
     try:
         # Suppress stderr from mpg123 decoder to prevent console clutter
@@ -171,11 +201,15 @@ def compute_spectrogram(segment, samplerate, scale='log', fft_window_size=1024, 
             Sxx_log_interpolated[:, i] = np.interp(log_f_bins, f, Sxx[:, i])
 
         Sxx_db = 10 * np.log10(Sxx_log_interpolated + 1e-10)
+    
+        Sxx_db -= Sxx_db.max()
         f_out = log_f_bins
 
     # --- Linear Scale (no interpolation) ---
     else:  # scale == 'linear'
         Sxx_db = 10 * np.log10(Sxx + 1e-10)
+        
+        Sxx_db -= Sxx_db.max()
         f_out = f
 
     # Normalize to 0 dB max (matches librosa behavior for Mel)
@@ -187,7 +221,7 @@ def compute_spectrogram(segment, samplerate, scale='log', fft_window_size=1024, 
 
 
 # --- *** MANUAL LABELING HELPERS *** ---
-def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels_lock=None):
+def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels_lock=None, clip_duration_cache=None):
     """
     Apply manual labels to dff using a high-performance vectorized approach.
     Optimized to handle 1M+ rows without redundant string scans or console flooding.
@@ -248,14 +282,17 @@ def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels
     # Most dffs in the app only represent one location at a time.
     current_locations = dff['location'].unique() if 'location' in dff.columns else []
 
-    # 1. Import the duration cache (plain dict, no lock needed).
+    # 1. Import the duration cache.
     #    Keys are the same 5-tuples as MANUAL_LABELS_CACHE.
-    #    Values are float clip durations written at label-save time.
+    #    Values are (dur, model_name) written at label-save time.
     #    Falls back gracefully to an empty dict if not available.
-    try:
-        from callbacks.callbacks_constants import CLIP_DURATION_CACHE as _dur_cache
-    except Exception:
-        _dur_cache = {}
+    if clip_duration_cache is not None:
+        _dur_cache = clip_duration_cache
+    else:
+        try:
+            from callbacks.callbacks_constants import CLIP_DURATION_CACHE as _dur_cache
+        except Exception:
+            _dur_cache = {}
 
     # 2. Group labels by (loc, micro, f_base, chan).
     #    Key precision: round(clip_time * 10) → 0.1 s units (stored as int).
@@ -337,6 +374,26 @@ def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels
             if indices.empty:
                 continue
 
+            # Detect if legacy key (loc, micro, f_base, chan) matches multiple canonical recordings
+            if 'recording_id' in dff.columns:
+                rec_ids = dff.loc[indices, 'recording_id'].dropna().unique()
+            elif 'wav_file' in dff.columns:
+                rec_ids = dff.loc[indices, 'wav_file'].dropna().unique()
+            elif 'mp3_file' in dff.columns:
+                rec_ids = dff.loc[indices, 'mp3_file'].dropna().unique()
+            else:
+                rec_ids = []
+
+            if len(rec_ids) > 1:
+                # Ambiguous legacy key matches multiple canonical recordings!
+                # Never broadcast an ambiguous legacy label.
+                import logging
+                logging.getLogger(__name__).warning(
+                    "[labels] Ambiguous legacy key %s matches %d recordings (%s). Not broadcasting.",
+                    (loc, micro, f_base, chan), len(rec_ids), list(rec_ids)[:3]
+                )
+                continue
+
             # Vectorize candidate starts/ends for this group
             cand_cts = (dff.loc[indices, 'clip_time'].astype(float) * 10).round().astype(int).to_numpy()
             cand_cds = (dff.loc[indices, 'clip_duration'].astype(float) * 10).round().astype(int).to_numpy()
@@ -347,6 +404,22 @@ def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels
             labeled_items = []
             max_labeled_span = 0
             for labeled_start, (lbl, labeled_end, labeled_model) in clip_map.items():
+                # Derive missing duration/model metadata from authoritative loaded data if possible
+                if labeled_end is None and cand_starts.size > 0:
+                    exact_cand_matches = np.nonzero(cand_starts == labeled_start)[0]
+                    if exact_cand_matches.size > 0:
+                        first_idx = exact_cand_matches[0]
+                        derived_dur = float(cand_cds[first_idx]) / 10.0
+                        derived_model = current_model or (str(dff.loc[indices[first_idx], 'model_name']) if 'model_name' in dff.columns else None)
+                        labeled_end = labeled_start + round(derived_dur * 10)
+                        labeled_model = derived_model
+                        # Cache the derived metadata back into _dur_cache
+                        k_tuple = (loc, micro, f_base, chan, labeled_start)
+                        try:
+                            _dur_cache[k_tuple] = (derived_dur, derived_model)
+                        except Exception:
+                            pass
+
                 span = (labeled_end - labeled_start) if (labeled_end is not None) else 0
                 if span > max_labeled_span:
                     max_labeled_span = span

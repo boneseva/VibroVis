@@ -7,6 +7,21 @@ from dash import html, dcc
 import pandas as pd
 
 
+DATA_LOADING_VISIBLE = {'display': 'flex'}
+DATA_LOADING_HIDDEN = {'display': 'none'}
+
+
+def data_loading_overlay(overlay_id):
+    """"Loading data…" badge over a view pane, shown while load_data_into_server_cache runs."""
+    return html.Div(
+        html.Div([
+            html.Div(className='scatter-loading-spinner'),
+            html.Span("Loading data…", className='scatter-loading-text'),
+        ], className='scatter-loading-badge'),
+        id=overlay_id, className='data-loading-overlay', style=DATA_LOADING_HIDDEN,
+    )
+
+
 def _extract_logo_accent_color(svg_path: str = "assets/logo.svg", fallback: str = "#4b8af2") -> str:
     """Extract the primary fill color from the logo SVG (cls-1 rule)."""
     try:
@@ -25,127 +40,9 @@ CLUSTER_COLORS = ['#4E79A7', '#F28E2B', '#E15759', '#76B7B2', '#EDC948', '#B07AA
                   '#FFBE7D', '#9CD17D', '#D4B7A9', '#D9D9D9', '#FABFD2']
 
 
-def generate_date_selector(df, selected_dates=None):
-    """
-    Generates Date Selector.
-    If selected_dates is provided (list of strings 'YYYY-MM-DD'),
-    only checks those dates. Otherwise checks ALL.
-    """
-    if df is None or df.empty or 'day_dt' not in df.columns:
-        return html.Div("No date data found.")
-
-    dates = pd.to_datetime(df['day_dt']).dt.date.unique()
-    dates = sorted(dates)
-
-    selected_set = set(selected_dates) if selected_dates is not None else None
-
-    if len(dates) < 10:
-        all_values = [d.strftime('%Y-%m-%d') for d in dates]
-
-        if selected_set is not None:
-            current_value = [d for d in all_values if d in selected_set]
-        else:
-            current_value = all_values
-
-        options = [{'label': d.strftime('%Y-%m-%d'), 'value': d.strftime('%Y-%m-%d')} for d in dates]
-
-        return html.Div([
-            dcc.Dropdown(
-                id={'type': 'simple-date-dropdown', 'index': 0},
-                options=options,
-                value=current_value,
-                multi=True,
-                clearable=True,
-                placeholder="Select dates..."
-            )
-        ], style={'padding': '5px 0'})
-
-    year_dict = {}
-    for date in dates:
-        year = date.year
-        month = date.month
-        if year not in year_dict: year_dict[year] = {}
-        if month not in year_dict[year]: year_dict[year][month] = []
-        year_dict[year][month].append(date)
-
-    year_elements = []
-    for year in sorted(year_dict.keys()):
-        month_elements = []
-        for month in sorted(year_dict[year].keys()):
-            month_name = pd.Timestamp(year=year, month=month, day=1).strftime('%B')
-
-            day_options = []
-            day_values = []
-
-            current_month_dates = year_dict[year][month]
-            for d in current_month_dates:
-                d_str = d.strftime('%Y-%m-%d')
-                day_options.append({'label': f" {d.day:02d}", 'value': d_str})
-
-                if selected_set is None or d_str in selected_set:
-                    day_values.append(d_str)
-
-            month_select_all_val = []
-            if len(day_values) == len(current_month_dates) and len(day_values) > 0:
-                month_select_all_val = ['all']
-
-            month_elements.append(
-                html.Details([
-                    html.Summary(
-                        html.Div([
-                            dcc.Checklist(
-                                id={'type': 'month-select-all', 'year': year, 'month': month},
-                                options=[{'label': '', 'value': 'all'}],
-                                value=month_select_all_val,
-                                labelStyle={'display': 'inline-block', 'marginRight': '5px'},
-                                style={'display': 'inline-block', 'marginRight': '5px'},
-                                persistence=False
-                            ),
-                            html.Span(month_name, style={'cursor': 'pointer'})
-                        ], style={'display': 'flex', 'alignItems': 'center'}),
-                        style={'cursor': 'pointer', 'paddingLeft': '30px', 'listStyle': 'none'}
-                    ),
-                    html.Div([
-                        dcc.Checklist(
-                            id={'type': 'date-checklist', 'year': year, 'month': month},
-                            options=day_options,
-                            value=day_values,
-                            labelStyle={'display': 'block'},
-                            style={'paddingLeft': '40px'},
-                            persistence=False
-                        )
-                    ])
-                ], open=False, style={'marginBottom': '5px'})
-            )
-
-        year_elements.append(
-            html.Details([
-                html.Summary(
-                    html.Div([
-                        dcc.Checklist(
-                            id={'type': 'year-select-all', 'year': year},
-                            options=[{'label': '', 'value': 'all'}],
-                            value=['all'],
-                            labelStyle={'display': 'inline-block', 'marginRight': '5px'},
-                            style={'display': 'inline-block', 'marginRight': '5px'},
-                            persistence=False
-                        ),
-                        html.Span(str(year), style={'cursor': 'pointer', 'fontWeight': 'bold'})
-                    ], style={'display': 'flex', 'alignItems': 'center'}),
-                    style={'cursor': 'pointer', 'listStyle': 'none'}
-                ),
-                html.Div(month_elements, style={'paddingLeft': '15px'})
-            ], open=True, style={'marginBottom': '10px'})
-        )
-
-    return html.Div([
-        html.Div(
-            year_elements,
-            style={'maxHeight': '300px', 'overflow': 'auto', 'border': '1px solid #ddd', 'padding': '10px',
-                   'borderRadius': '4px'}
-        ),
-        dcc.Store(id='date-tree-structure', data=year_dict)
-    ])
+import hierarchy
+import read_data
+from callbacks.callbacks_date_selector import generate_date_selector
 
 def get_available_presets():
     """Helper to list JSON files in the presets folder"""
@@ -161,27 +58,49 @@ def create_layout(df):
     """
     preset_options = [{'label': p, 'value': p} for p in get_available_presets()]
 
-    all_locations = sorted(df['location'].dropna().unique())
+    # Discover projects dynamically from hierarchy
+    available_projects = hierarchy.get_available_projects()
+    project_options = [{'label': p.name, 'value': p.id} for p in available_projects]
+    default_project = available_projects[0].id if available_projects else None
+
+    # Load initial data for default project if df is empty or does not match default_project
+    if default_project:
+        is_df_matching_project = False
+        if df is not None and not df.empty and 'location' in df.columns:
+            first_loc = df['location'].dropna().iloc[0] if len(df['location'].dropna()) > 0 else None
+            if first_loc and read_data.is_valid_project_location(default_project, str(first_loc)):
+                is_df_matching_project = True
+        if not is_df_matching_project:
+            df = read_data.get_initial_data_for_project(default_project)
+
+    initial_project_metadata = None
+    if default_project:
+        initial_project_metadata = read_data.get_project_metadata_summary(default_project)
+
+    all_locations = sorted([str(loc) for loc in df['location'].dropna().unique()]) if df is not None and not df.empty else []
     default_location = all_locations[0] if all_locations else None
 
-    models_for_location = []
-    default_model = None
-    if default_location:
+    if default_location and df is not None and not df.empty:
         models_for_location = sorted(df[df['location'] == default_location]['model_name'].dropna().unique())
-        default_model = models_for_location[0] if models_for_location else None
+    else:
+        models_for_location = sorted(df['model_name'].dropna().unique()) if df is not None and not df.empty else []
+    default_model = models_for_location[0] if models_for_location else None
 
     k_values = []
     default_k = None
-    if default_location and default_model:
-        k_values = sorted(df[
-                              (df['location'] == default_location) &
-                              (df['model_name'] == default_model)
-                              ]['cluster_num'].dropna().unique())
+    if default_model and df is not None and not df.empty:
+        if default_location:
+            k_values = sorted(df[
+                                  (df['location'] == default_location) &
+                                  (df['model_name'] == default_model)
+                                  ]['cluster_num'].dropna().unique())
+        if not k_values:
+            k_values = sorted(df[df['model_name'] == default_model]['cluster_num'].dropna().unique())
         default_k = k_values[0] if k_values else None
 
     cluster_options = []
     default_clusters = []
-    if default_k:
+    if default_k and df is not None and not df.empty:
         clusters = sorted(df[df['cluster_num'] == default_k]['cluster_id'].dropna().unique())
         default_clusters = [int(c) for c in clusters]
 
@@ -238,8 +157,44 @@ def create_layout(df):
 
                 # --- Scatter pane (graph only) ---
                 html.Div([
-                    dcc.Graph(id='scatter'),
+                    dcc.Loading(
+                        id='scatter-loading',
+                        type='circle',
+                        show_initially=False,
+                        parent_className='scatter-loading-parent',
+                        className='scatter-loading-spinner-container',
+                        parent_style={
+                            'flex': '1',
+                            'minHeight': '0',
+                            'width': '100%',
+                            'height': '100%',
+                            'display': 'flex',
+                            'flexDirection': 'column',
+                            'position': 'relative'
+                        },
+                        overlay_style={
+                            'visibility': 'visible',
+                            'opacity': 0.65,
+                            'transition': 'opacity 0.15s ease',
+                            'flex': '1',
+                            'minHeight': '0',
+                            'width': '100%',
+                            'height': '100%',
+                            'display': 'flex',
+                            'flexDirection': 'column'
+                        },
+                        custom_spinner=html.Div([
+                            html.Div(className='scatter-loading-spinner'),
+                            html.Span("Updating…", className='scatter-loading-text')
+                        ], className='scatter-loading-badge'),
+                        children=[
+                            dcc.Graph(id='scatter'),
+                        ]
+                    ),
                     html.Div(id='fft-warning', style={'color': 'red', 'margin': '0.1em'}),
+                    # Shown while data for the selected project/locations/model is read (the slow step before
+                    # the scatter redraws); toggled by the `running` option of load_data_into_server_cache.
+                    data_loading_overlay('data-loading-overlay'),
                 ], id='scatter-pane', className='view-pane view-pane--active'),
 
                 # --- Table pane ---
@@ -263,7 +218,7 @@ def create_layout(df):
                                 {'label': 'Clip Count',    'value': 'clip_count'},
                             ],
                             value=['file_name', 'date', 'recording_time',
-                                   'cluster_start', 'cluster_end', 'duration', 'cluster_id',
+                                   'cluster_start', 'cluster_id',
                                    'manual_label'],
                             multi=True,
                             clearable=False,
@@ -286,6 +241,7 @@ def create_layout(df):
                         id='table-view-output',
                         style={'overflowY': 'auto', 'flex': '1', 'minHeight': '0'}
                     ),
+                    data_loading_overlay('data-loading-overlay-table'),
                 ], id='table-pane', className='view-pane'),
 
                 # --- Shared: info row + audio/spectrogram — always visible ---
@@ -312,7 +268,7 @@ def create_layout(df):
             html.Div([
                 
                 html.Div([
-                    html.Img(src="/assets/logo.svg", alt="VibroVis Logo",
+                    html.Img(src="/assets/logo.svg", alt="RanaVis Logo",
                              style={'height': '80px', 'marginRight': '10px'}),
                     html.A(
                         "ℹ️",
@@ -373,23 +329,53 @@ def create_layout(df):
                         html.Div(id='preset-message', style={'fontSize': '0.8em', 'color': '#666'}),
                     ], style={'marginBottom': '10px', 'borderBottom': '1px solid #eee', 'paddingBottom': '5px'}),
 
-            #    html.Div([
+                    # Filled by the clientside callback in callbacks_ui.py with the value of every dropdown
+                    # that has nothing to choose from (those dropdowns are hidden, class auto-hide-single).
+                    html.Div(id='single-option-summary', className='single-option-summary'),
+
+                    html.Details([
+                        html.Summary("Project", className='section-title'),
+                        html.Div(id='project-filter-content', children=[
+                            html.Div([
+                                html.Label("Project"),
+                                html.Div(className="tooltip-container", children=[
+                                    html.Span(" ⓘ", className="info-icon"),
+                                    html.Span("Select the project.", className="tooltip-text")
+                                ])
+                            ], className="label-with-info", style={'marginTop': '0.5em'}),
+                            dcc.Dropdown(
+                                id='project-dropdown',
+                                className='auto-hide-single',
+                                options=project_options,
+                                value=default_project,
+                                clearable=False
+                            ),
+                        ])
+                    ], open=True),
+
                     html.Details([
                         html.Summary("Recordings", className='section-title'),
                         html.Div(id='recordings-filter-content', children=[
                             html.Div([
-                                html.Label("Location"),
-                                html.Div(className="tooltip-container", children=[
-                                    html.Span(" ⓘ", className="info-icon"),
-                                    html.Span("Filter data by the primary recording location.",
-                                              className="tooltip-text")
-                                ])
-                            ], className="label-with-info", style={'marginTop': '1em'}),
-                            dcc.Dropdown(
-                                id='location-dropdown',
-                                options=[{'label': str(loc), 'value': loc} for loc in all_locations],
-                                value=default_location
-                            ),
+                                html.Div([
+                                    html.Div([
+                                        html.Label("Location"),
+                                        html.Div(className="tooltip-container", children=[
+                                            html.Span(" ⓘ", className="info-icon"),
+                                            html.Span("Filter data by recording location. Select several to show them together.",
+                                                      className="tooltip-text")
+                                        ])
+                                    ], className="label-with-info", style={'marginTop': '1em'}),
+                                    dcc.Dropdown(
+                                        id='location-dropdown',
+                                        className='auto-hide-single',
+                                        options=[{'label': str(loc), 'value': loc} for loc in all_locations],
+                                        value=[default_location] if default_location else [],
+                                        multi=True,
+                                        placeholder="Select one or more locations",
+                                    ),
+                                ], style={'flex': '1', 'minWidth': '0'}),
+                            ], style={'display': 'flex', 'alignItems': 'flex-end', 'width': '100%'}),
 
                             html.Div([
                                 html.Label("Microlocation"),
@@ -399,7 +385,7 @@ def create_layout(df):
                                               className="tooltip-text")
                                 ])
                             ], className="label-with-info", style={'marginTop': '1em'}),
-                            dcc.Dropdown(id='microlocation-dropdown', options=[], multi=True, value=[]),
+                            dcc.Dropdown(id='microlocation-dropdown', className='auto-hide-single', options=[], multi=True, value=[]),
 
                             html.Div([
                                 html.Label("Recorder type"),
@@ -408,7 +394,7 @@ def create_layout(df):
                                     html.Span("Filter by the type of recorder used.", className="tooltip-text")
                                 ])
                             ], className="label-with-info", style={'marginTop': '1em'}),
-                            dcc.Dropdown(id='recorder-type-dropdown', options=[], multi=True, value=[]),
+                            dcc.Dropdown(id='recorder-type-dropdown', className='auto-hide-single', options=[], multi=True, value=[]),
 
                             html.Div([
                                 html.Label("Channels"),
@@ -466,6 +452,7 @@ def create_layout(df):
                             ], className="label-with-info", style={'marginTop': '1em'}),
                             dcc.Dropdown(
                                 id='model-dropdown',
+                                className='auto-hide-single',
                                 options=[{'label': str(m), 'value': m} for m in models_for_location],
                                 value=default_model
                             ),
@@ -480,6 +467,7 @@ def create_layout(df):
                             ], className="label-with-info", style={'marginTop': '1em'}),
                             dcc.Dropdown(
                                 id='num-cluster-dropdown',
+                                className='auto-hide-single',
                                 options=[{'label': str(int(c)), 'value': int(c)} for c in k_values],
                                 value=default_k
                             ),
@@ -488,7 +476,7 @@ def create_layout(df):
                                 html.Label("Color by"),
                                 html.Div(className="tooltip-container", children=[
                                     html.Span(" ⓘ", className="info-icon"),
-                                    html.Span("Choose to color points by their cluster assignment or by manual labels.",
+                                    html.Span("Choose to color points by their cluster assignment, by manual labels.",
                                               className="tooltip-text")
                                 ])
                             ], className="label-with-info", style={'marginTop': '1em'}),
@@ -506,11 +494,11 @@ def create_layout(df):
                             ),
 
                             html.Div([
-                                html.Label("Clusters"),
+                                html.Label("Clusters", id='cluster-legend-header-label'),
                                 html.Div(className="tooltip-container", children=[
                                     html.Span(" ⓘ", className="info-icon"),
                                     html.Span("Select specific clusters to display from the chosen model. Click the color block to change the cluster color.",
-                                              className="tooltip-text")
+                                              className="tooltip-text", id='cluster-legend-tooltip-text')
                                 ])
                             ], className="label-with-info", style={'marginTop': '1em'}),
                             dcc.Checklist(id="all-or-none-cluster", options=[{"label": "Select All", "value": "All"}],
@@ -618,7 +606,7 @@ def create_layout(df):
                                 persistence=False
                             ),
 
-                            html.Div(id='merge-threshold-container', children=[
+                            html.Div(id='merge-threshold-container', style={'display': 'none'}, children=[
                                 html.Div([
                                     html.Label("Merge threshold"),
                                     html.Div(className="tooltip-container", children=[
@@ -633,7 +621,7 @@ def create_layout(df):
                                            marks={i: str(i) for i in range(0, 101, 20)})
                             ]),
 
-                            html.Div(id='clip-count-threshold-container', children=[
+                            html.Div(id='clip-count-threshold-container', style={'display': 'none'}, children=[
                                 html.Div([
                                     html.Label("Clip count threshold"),
                                     html.Div(className="tooltip-container", children=[
@@ -969,6 +957,8 @@ def create_layout(df):
             ], id='filter-container', className='filters-expanded'),
         ], id='main-content'),
 
+        dcc.Store(id='project-metadata-store', data=initial_project_metadata),
+        dcc.Store(id='dataset-metadata-store', data=initial_project_metadata),
         dcc.Store(id='histogram-time-scale-store', data='daily'),
         dcc.Store(id='filtered-data'),
         dcc.Store(id='spectrogram-raw-data-store'),
@@ -976,6 +966,7 @@ def create_layout(df):
         dcc.Store(id='merge-max-store'),
         dcc.Store(id='histogram-cache'),
         dcc.Store(id='model-data-ready-signal'),
+        dcc.Store(id='derived-model-metadata'),
         dcc.Store(id='sampled-indices-store'),
         dcc.Store(id='anim-ranges-store'),
         dcc.Store(id='is-anim-open-store', data=False),

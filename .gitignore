@@ -9,3 +9,13 @@
 /prepare_data/
 /.cursor/
 /data_multimon/
+
+# Live manual labels (diskcache SQLite) are runtime state: never commit or overwrite them via Git
+/cache/manual_labels/
+/cache/annotations/
+/cache/partitions/
+/cache/backups/
+/cache/clip_durations/
+/cache/*.parquet
+/labels/
+/presets/*.tmp
