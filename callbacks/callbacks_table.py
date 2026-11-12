@@ -29,10 +29,10 @@ ALL_COLUMNS = [
     ("date",           "Date",             True),
     ("recording_time", "Recording Time",   True),
     ("cluster_start",  "Start Time",       True),
-    ("cluster_end",    "End Time",         True),
-    ("duration",       "Duration",         True),
+    ("cluster_end",    "End Time",         False),  # Removed from default view
+    ("duration",       "Duration",         False),  # Removed from default view
     ("cluster_id",     "Cluster",          True),
-    ("manual_label",   "Label",            False),  # shown in manual mode
+    ("manual_label",   "Label",            True),   # Added back to default view
     ("channel",        "Channel",          False),
     ("microlocation",  "Microlocation",    False),
     ("recorder_type",  "Recorder",         False),
@@ -239,13 +239,13 @@ def _render_table(page_df: pd.DataFrame, visible_cols: list,
                         value=val,
                         id={"type": "table-inline-label", "index": actual_plot_id},
                         debounce=True,
-                        disabled=merge_on,
+                        disabled=False,
                         persistence=True,  # Persist value across re-renders
                         persistence_type="memory",  # Store in memory only
                         style={"width": "100%", "boxSizing": "border-box", "border": "none",
-                               "background": "transparent" if not merge_on else "#f0f0f0",
-                               "outline": "none", "cursor": "not-allowed" if merge_on else "text",
-                               "color": "#aaa" if merge_on else "inherit"}
+                               "background": "transparent",
+                               "outline": "none", "cursor": "text",
+                               "color": "inherit"}
                     )
                 ))
             else:
@@ -276,6 +276,16 @@ def _render_table(page_df: pd.DataFrame, visible_cols: list,
 # Register callbacks
 # ---------------------------------------------------------------------------
 def register_table_callbacks(app):
+
+    # Initialize table column selector with proper defaults to override browser cache
+    @app.callback(
+        Output('table-column-selector', 'value'),
+        Input('model-data-ready-signal', 'data'),
+        prevent_initial_call=False  # Allow this to run on startup
+    )
+    def initialize_table_columns(_):
+        """Ensure table columns start with the correct defaults, overriding browser cache."""
+        return DEFAULT_VISIBLE_COLS
 
     # -- Tab-focus → focused-row-store (clientside, no server round-trip) --
     app.clientside_callback(
@@ -476,7 +486,7 @@ def register_table_callbacks(app):
             Sxx_db[Sxx_db < floor_val] = floor_val
             Sxx_db = np.round(Sxx_db, 2)
             f = np.round(f, 1)
-            t = np.round(t, 3)
+            t = np.round(t + utils.segment_start_time(start_time, 0.5), 3)   # time in the recording file
 
             # Build Plotly figure (same as compute_spectrogram_data)
             fig = go.Figure(data=go.Heatmap(
@@ -490,7 +500,7 @@ def register_table_callbacks(app):
                 margin=dict(l=40, r=10, t=10, b=30),
                 paper_bgcolor='rgba(0,0,0,0)',
                 plot_bgcolor='rgba(0,0,0,0)',
-                xaxis=dict(title="Time (s)", showgrid=False),
+                xaxis=dict(title=utils.SPECTROGRAM_TIME_AXIS_TITLE, showgrid=False),
                 yaxis=dict(title="Freq (Hz)", showgrid=False,
                            type='log' if frequency_scale == 'log' else 'linear'),
                 dragmode='zoom',
@@ -513,7 +523,8 @@ def register_table_callbacks(app):
                 hist_key = str(row["manual_label"])
             else:
                 hist_key = str(int(row["cluster_id"]))
-            table_click_data = {"points": [{"customdata": [hist_key, None, None]}]}
+            # customdata[1] carries the plot_id like scatter clicks 
+            table_click_data = {"points": [{"customdata": [hist_key, int(row_global_idx), None]}]}
 
             store_data = {
                 "audio_path": audio_path, "info": info,
@@ -546,7 +557,7 @@ def register_table_callbacks(app):
         State('merge-switch', 'on'),
         prevent_initial_call=True,
     )
-    def update_table(active_tab, filtered_data_key, manual_labels_trigger, label_colors_data,
+    def update_table(active_tab, filtered_data_payload, manual_labels_trigger, label_colors_data,
                      visible_cols, page, sort_state, color_mode, merge_on):
 
         if active_tab != "table-tab":
@@ -562,14 +573,33 @@ def register_table_callbacks(app):
             return no_update, no_update, no_update
 
         try:
-            if not filtered_data_key:
+            if not filtered_data_payload:
                 return (html.Div("No data loaded. Select a location and model.",
                                  style={"padding": "2rem", "color": "#888"}),
                         "", 1)
 
+            # Extract cache key from lightweight payload (OPTIMIZATION #1)
+            if isinstance(filtered_data_payload, dict):
+                filtered_data_key = filtered_data_payload.get('cache_key')
+                total_rows_info = filtered_data_payload.get('total_rows', 0)
+                if not filtered_data_key:
+                    return (html.Div("No cache key in data payload.",
+                                     style={"padding": "2rem", "color": "#888"}),
+                            f"0 rows (no cache key)", 1)
+                print(f"[TABLE] Using cache key: {filtered_data_key} ({total_rows_info} total rows)")
+            else:
+                # Fallback for old cache key format (for backward compatibility)
+                filtered_data_key = filtered_data_payload
+                total_rows_info = "unknown"
+                print(f"[TABLE] Using legacy cache key format: {filtered_data_key}")
+
             # Read the exact same data the scatter plot is displaying
             dff = server_cache.get(filtered_data_key)
-            if dff is None or dff.empty:
+            if dff is None:
+                return (html.Div("Cache entry not found. Data may have expired.",
+                                 style={"padding": "2rem", "color": "#888"}),
+                        f"0 rows (cache miss)", 1)
+            if dff.empty:
                 return (html.Div("No data to display.",
                                  style={"padding": "2rem", "color": "#888"}),
                         "0 rows", 1)
