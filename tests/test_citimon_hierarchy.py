@@ -350,23 +350,23 @@ class TestMultiLocation(unittest.TestCase):
         from dash import Dash
         import read_data
         from callbacks.callbacks_data import register_data_callbacks
-        from callbacks.callbacks_constants import MODEL_DATA_CACHE
+        from callbacks import callbacks_constants, dataset_access
         app = Dash(__name__)
         register_data_callbacks(app)
         fn = next(v for k, v in app.callback_map.items() if 'model-data-ready-signal' in k)['callback'].__wrapped__
         frame = pd.DataFrame({"location": ["C08", "C47"], "microlocation": ["C08-P1", "C47-P2"], "channel": [1, 1]})
-        saved = dict(MODEL_DATA_CACHE)
+        callbacks_constants.DATASETS.clear()
         try:
-            with mock.patch.object(read_data, "is_valid_project_location", return_value=True) as valid, \
-                    mock.patch.object(read_data, "load_project_model_data", return_value=frame) as load:
+            with mock.patch.object(read_data, "is_valid_project_location", return_value=True) as valid,                     mock.patch.object(read_data, "load_project_model_data", return_value=frame) as load:
                 _, meta = fn("perchv2", ["C08", "C47"], "Citimon")
             self.assertEqual(valid.call_args[0][1], ["C08", "C47"])
             self.assertEqual(load.call_args.kwargs["selected_location"], ["C08", "C47"])
-            self.assertEqual(MODEL_DATA_CACHE["key"], ("Citimon", ("C08", "C47"), "perchv2"))
+            # the dataset is shared under its full identity (project, model, sorted locations)
+            self.assertEqual(dataset_access.key_from_metadata(meta), ("Citimon", "perchv2", ("C08", "C47")))
+            self.assertIsNotNone(callbacks_constants.DATASETS.peek(("Citimon", "perchv2", ("C08", "C47"))))
             self.assertEqual(meta["microlocations"], ["C08-P1", "C47-P2"])
         finally:
-            MODEL_DATA_CACHE.clear()
-            MODEL_DATA_CACHE.update(saved)
+            callbacks_constants.DATASETS.clear()
 
     def test_map_marks_positions_of_every_selected_recorder(self):
         uri_multi = citimon_map.get_map_data_uri(["C47", "C02"])

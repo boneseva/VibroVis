@@ -6,7 +6,6 @@ from dash import Input, Output, State
 from datetime import datetime, timedelta
 import numpy as np
 
-from .callbacks_constants import MODEL_DATA_CACHE
 
 
 def register_ui_callbacks(app):

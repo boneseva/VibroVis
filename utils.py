@@ -255,18 +255,11 @@ def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels
                 dff['manual_label'] = 'Unlabeled'
                 return dff
 
-            # Create a snapshot of the cache to work with outside the lock
-            # For diskcache, we need to safely iterate and handle missing keys
-            cache_snapshot = {}
+            # Consistent snapshot (lock + one store transaction) to work with outside the lock;
+            # keys deleted by another user mid-iteration are skipped.
             try:
-                # Use list() to create a snapshot of keys first to avoid concurrent modification
-                cache_keys = list(manual_labels_cache.iterkeys())
-                for key in cache_keys:
-                    try:
-                        cache_snapshot[key] = manual_labels_cache[key]
-                    except KeyError:
-                        # Key was deleted during iteration, skip it
-                        continue
+                import labels_store
+                cache_snapshot = labels_store.snapshot_store(manual_labels_cache)
             except Exception:
                 # If anything fails, return the dataframe with unlabeled entries
                 dff['manual_label'] = 'Unlabeled'

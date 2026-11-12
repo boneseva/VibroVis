@@ -11,6 +11,7 @@ from .callbacks_date_selector import register_date_selector_callbacks
 from .callbacks_table import register_table_callbacks
 from .callbacks_raven import register_raven_callbacks
 from .callbacks_raven_labels import register_raven_label_callbacks
+from .callbacks_url import register_url_callbacks
 
 
 def register_callbacks(dash_app):
@@ -25,4 +26,5 @@ def register_callbacks(dash_app):
     register_table_callbacks(dash_app)
     register_raven_callbacks(dash_app)
     register_raven_label_callbacks(dash_app)
+    register_url_callbacks(dash_app)
 

@@ -1,0 +1,166 @@
+vm_audit v3  cwd=/app  python=3.11.18
+env: {}
+
+== 1. Citimon source folders (data/recordings/Citimon)
+  2026-06-C35: mp3=3042 positions_tsv=5998 span=20260511_184000..20260601_212040
+  2026_02-C13: mp3=3059 positions_tsv=6114 span=20260217_135000..20260310_193000
+  2026_02-C42: mp3=3461 positions_tsv=6830 span=20260218_170000..20260314_174000
+  2026_02-C49: mp3=3898 positions_tsv=7634 span=20260209_123010..20260312_163000
+  2026_03-C02: mp3=3020 positions_tsv=956 span=20260301_102000..20260322_093000
+  2026_03-C03: mp3=3449 positions_tsv=1708 span=20260209_181000..20260321_103000
+  2026_03-C04: mp3=3028 positions_tsv=6032 span=20260226_130006..20260319_133000
+  2026_03-C06: mp3=3023 positions_tsv=1192 span=20260228_101000..20260321_095000
+  2026_03-C07: mp3=3625 positions_tsv=6808 span=20260304_100000..20260329_140000
+  2026_03-C08: mp3=3180 positions_tsv=1270 span=20260228_114000..20260322_133000
+  2026_03-C09: mp3=3035 positions_tsv=1206 span=20260228_143000..20260321_161000
+  2026_03-C11: mp3=3447 positions_tsv=2160 span=20260301_175000..20260325_161000
+  2026_03-C12: mp3=2441 positions_tsv=4842 span=20260303_161000..20260320_145000
+  2026_03-C13: mp3=3598 positions_tsv=2250 span=20260311_083016..20260405_165000
+  2026_03-C14: mp3=4640 positions_tsv=9182 span=20260306_115000..20260407_170000
+  2026_03-C16: mp3=5033 positions_tsv=9820 span=20260226_125000..20260402_113000
+  2026_03-C17: mp3=3028 positions_tsv=5892 span=20260222_175000..20260315_182000
+  2026_03-C18: mp3=3047 positions_tsv=1134 span=20260225_133000..20260318_171000
+  2026_03-C19: mp3=2872 positions_tsv=5732 span=20260301_131000..20260321_114000 [CURRENT NAME]
+  2026_03-C19-1: mp3=2872 positions_tsv=0 span=20260301_131000..20260321_114000 [HISTORICAL NAME]
+  2026_03-C19-2: mp3=3012 positions_tsv=0 span=20260322_132000..20260412_111000 [HISTORICAL NAME]
+  2026_03-C20: mp3=3449 positions_tsv=6312 span=20260209_181000..20260321_103000
+  2026_03-C22: mp3=3620 positions_tsv=0 span=20260307_142000..20260401_173000
+  2026_03-C23: mp3=3190 positions_tsv=0 span=20260209_181000..20260322_135028
+  2026_03-C24: mp3=3887 positions_tsv=0 span=20260209_183927..20260324_165000
+  2026_03-C25: mp3=3034 positions_tsv=0 span=20260225_160000..20260318_173000
+  2026_03-C26: mp3=1870 positions_tsv=0 span=20260226_141000..20260317_133837
+  2026_03-C27: mp3=3171 positions_tsv=0 span=20260228_161000..20260322_163000
+  2026_03-C28: mp3=3149 positions_tsv=0 span=20260303_141000..20260325_105000
+  2026_03-C29: mp3=3487 positions_tsv=0 span=20260227_110000..20260323_160000
+  2026_03-C30: mp3=6169 positions_tsv=0 span=20260221_165000..20260405_125000
+  2026_03-C31: mp3=3006 positions_tsv=0 span=20260225_161000..20260318_130000
+  2026_03-C32: mp3=3161 positions_tsv=0 span=20260313_092000..20260404_080000
+  2026_03-C33: mp3=5617 positions_tsv=0 span=20260209_105000..20260403_114227
+  2026_03-C34: mp3=1846 positions_tsv=0 span=20260226_165000..20260311_125000
+  2026_03-C35: mp3=3071 positions_tsv=0 span=20260209_181000..20260320_181514 [CURRENT NAME]
+  2026_03-C36: mp3=3294 positions_tsv=0 span=20260211_154950..20260405_180406
+  2026_03-C37: mp3=7056 positions_tsv=0 span=20260308_180000..20260426_175000
+  2026_03-C38: mp3=3018 positions_tsv=0 span=20260304_151000..20260325_140000
+  2026_03-C39: mp3=2873 positions_tsv=0 span=20260228_134000..20260320_122000
+  2026_03-C40: mp3=3300 positions_tsv=0 span=20260306_151019..20260329_130000
+  2026_03-C41: mp3=3016 positions_tsv=0 span=20260228_122000..20260321_105000
+  2026_03-C43: mp3=3026 positions_tsv=0 span=20260301_181000..20260322_182000
+  2026_03-C44: mp3=2866 positions_tsv=0 span=20260222_133000..20260314_110000
+  2026_03-C45: mp3=2276 positions_tsv=0 span=20260313_215000..20260329_174326
+  2026_03-C46: mp3=4076 positions_tsv=0 span=20260209_181000..20260327_143932
+  2026_03-C47: mp3=2910 positions_tsv=0 span=20260225_122000..20260317_171000
+  2026_03-C48: mp3=3322 positions_tsv=0 span=20260209_155424..20260319_090000
+  2026_03-C49: mp3=6058 positions_tsv=0 span=20260209_123010..20260401_154000
+  2026_03-C50: mp3=3019 positions_tsv=0 span=20260227_151000..20260320_141000
+  2026_03-R14: mp3=4731 positions_tsv=0 span=20260301_163000..20260403_125000
+  2026_03-R26: mp3=2369 positions_tsv=0 span=20260223_133349..20260318_030000
+  2026_03-R28: mp3=2372 positions_tsv=0 span=20260304_210000..20260321_081000
+  2026_03-R35: mp3=3071 positions_tsv=0 span=20260209_181000..20260320_181514 [HISTORICAL NAME]
+  2026_04-C01: mp3=4022 positions_tsv=0 span=20260315_230000..20260412_211000
+  2026_04-C04: mp3=3183 positions_tsv=0 span=20260331_113000..20260422_134319
+  2026_04-C06: mp3=3011 positions_tsv=0 span=20260327_211000..20260417_185000
+  2026_04-C07: mp3=3443 positions_tsv=0 span=20260401_203000..20260425_181000
+  2026_04-C12: mp3=4750 positions_tsv=0 span=20260322_150000..20260424_143000
+  2026_04-C18: mp3=3318 positions_tsv=0 span=20260413_151000..20260506_160000
+  2026_04-C19: mp3=3012 positions_tsv=0 span=20260322_132000..20260412_111000 [CURRENT NAME]
+  2026_04-C25: mp3=3722 positions_tsv=0 span=20260417_180000..20260513_170000
+  2026_04-C28: mp3=3915 positions_tsv=0 span=20260328_075000..20260424_121000
+  2026_04-C31: mp3=6011 positions_tsv=0 span=20260327_172800..20260331_213800
+  2026_04-C40: mp3=4999 positions_tsv=0 span=20260408_153000..20260513_083000
+  2026_04-C41: mp3=3869 positions_tsv=0 span=20260417_115000..20260514_083000
+  2026_04-C47: mp3=4412 positions_tsv=0 span=20260407_152000..20260508_063000
+  2026_04-C48: mp3=2551 positions_tsv=0 span=20260404_183019..20260422_112045
+  2026_04-r26: mp3=2457 positions_tsv=0 span=20260329_162000..20260415_174000
+  2026_05-C26: mp3=3908 positions_tsv=0 span=20260505_080000..20260601_111000
+  2026_05-C35: mp3=3042 positions_tsv=0 span=20260511_184000..20260601_212040
+  2026_05-C36: mp3=4908 positions_tsv=0 span=20260507_210000..20260611_211000
+  2026_05-C44: mp3=4079 positions_tsv=0 span=20260510_083000..20260607_161000
+  2026_05-r28: mp3=2453 positions_tsv=0 span=20260501_132011..20260518_140000
+
+== 2. Cache manifest and Citimon partition
+  partition: data/cache/partitions/Citimon/perchv2.parquet size: 157186286 sha256: 6c37428e9940cceed33ed6d6f7affab1e01fe2700b3b74a325a256b4c2bba501
+  rows: 4350406  recordings: 167170  location==microlocation for all rows: False
+    C01: rows=11218 recordings=2612
+    C02: rows=10056 recordings=478
+    C03: rows=23006 recordings=854
+    C04: rows=169340 recordings=6117
+    C06: rows=32486 recordings=1273
+    C07: rows=153538 recordings=6809
+    C08: rows=7664 recordings=635
+    C09: rows=16998 recordings=603
+    C11: rows=33558 recordings=1080
+    C12: rows=214850 recordings=7071
+    C13: rows=157036 recordings=4182
+    C14: rows=122690 recordings=4591
+    C16: rows=130522 recordings=4910
+    C17: rows=68080 recordings=2946
+    C18: rows=58974 recordings=2347
+    C19: rows=162710 recordings=5839
+    C20: rows=110822 recordings=3429
+    C22: rows=107080 recordings=3554
+    C23: rows=14228 recordings=550
+    C24: rows=28876 recordings=1537
+    C25: rows=144848 recordings=4714
+    C26: rows=157880 recordings=5699
+    C27: rows=25688 recordings=1017
+    C28: rows=86476 recordings=5172
+    C29: rows=34018 recordings=1413
+    C30: rows=117254 recordings=5768
+    C31: rows=117302 recordings=5304
+    C32: rows=73532 recordings=3095
+    C33: rows=76002 recordings=3214
+    C34: rows=65184 recordings=1846
+    C35: rows=132314 recordings=5915
+    C36: rows=143300 recordings=6282
+    C37: rows=164708 recordings=6787
+    C38: rows=36524 recordings=1087
+    C39: rows=32914 recordings=1045
+    C40: rows=236142 recordings=8214
+    C41: rows=153736 recordings=5176
+    C42: rows=88646 recordings=3415
+    C43: rows=105384 recordings=3017
+    C44: rows=203276 recordings=6902
+    C45: rows=52782 recordings=2238
+    C46: rows=58612 recordings=2290
+    C47: rows=91602 recordings=2819
+    C48: rows=33384 recordings=1803
+    C49: rows=130636 recordings=4082
+    C50: rows=36890 recordings=1240
+    R14: rows=82604 recordings=4570
+    R26: rows=20390 recordings=843
+    R28: rows=14646 recordings=786
+  cached recordings whose audio path is missing: 0 {}
+
+== 3. Raven annotation database
+  no DB at /app/cache/annotations/raven_annotations.sqlite3
+
+== 3b. Staged Citimon partition (--partition)
+  (not requested)
+
+== 4. Clip-duration metadata, manual labels (diskcache) and backups
+  [clip_durations] /app/cache/clip_durations: integrity=ok keys=0 citimon_keys=0 citimon_locations=0
+  [manual_labels] /app/cache/manual_labels: integrity=ok keys=0 citimon_keys=0 citimon_locations=0
+
+== 5. Presets
+
+== 6. Legacy saved-label stores
+
+== 7. Text files referencing historical names (exports, TSVs, configs)
+  ./VM_DEPLOYMENT_AND_DATA_STRUCTURE.md: 1 lines
+  ./assets/citimon_locations.json: 1 lines
+  ./config/citimon_registry.json: 8 lines
+  ./data/zabe+hyla+citimon.tsv: 2089 lines
+
+== 8. Deployment readiness (Citimon hierarchy, Multimon map)
+  registry: config/citimon_registry.json sha256: 089653dc1579366beba94d96f9f3247f0c907e958a5a1189724a542b8c813741 recorders: 49 microlocations: 53 source_folders: 73
+  Citimon folders on disk: 74  excluded (skipped by the builder): ['2026-06-C35', '2026_02-C49', '2026_03-R35']
+  UNREGISTERED folders (would block a Citimon rebuild until added to the registry): none
+  registry folders not on this host: ['2026_03-C01', '2026_04-C08']
+  master TSV (zabe+hyla+citimon.tsv): ['data/zabe+hyla+citimon.tsv']
+  Multimon map config: config/multimon_locations.json present
+  free disk in data/: 47.4 GiB
+  memory total/available: {'MemTotal': '31.3 GiB', 'MemAvailable': '28.7 GiB'} (a Citimon rebuild needs roughly 4-6 GiB)
+  dash version: 4.5.0 (>= 2.16 needed)
+
+Browser localStorage ('local-labels-store') is per-browser and cannot be audited from the server.
+END (no files were written)

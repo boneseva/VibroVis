@@ -37,7 +37,8 @@ from generate_fixtures import LOC_A  # noqa: E402
 from test_raven_citimon_delivery import frame_with_locations, row, table  # noqa: E402
 import callbacks.callbacks_raven_labels as rl  # noqa: E402
 from callbacks.callbacks_clusters import register_cluster_callbacks  # noqa: E402
-from callbacks.callbacks_constants import MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK, MODEL_DATA_CACHE, server_cache  # noqa: E402
+from callbacks.callbacks_constants import MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK, server_cache  # noqa: E402
+from tests.dataset_fixtures import install_dataset, clear_datasets  # noqa: E402
 from callbacks.callbacks_plots import register_plot_callbacks  # noqa: E402
 from callbacks.callbacks_table import register_table_callbacks  # noqa: E402
 from raven_import import aggregate as agg  # noqa: E402
@@ -325,11 +326,11 @@ class _IntegrationBase(unittest.TestCase):
         shutil.rmtree(cls.tmp, ignore_errors=True)
 
     def setUp(self):
-        self._old_df = MODEL_DATA_CACHE.get('df')
-        MODEL_DATA_CACHE['df'] = plotted_model_frame()
+        clear_datasets()
+        self.meta = install_dataset(plotted_model_frame(), project="Citimon", model="perchv2", locations=[LOC_A])
 
     def tearDown(self):
-        MODEL_DATA_CACHE['df'] = self._old_df
+        clear_datasets()
 
     def figure(self, mode, trigger='color-mode-radio.value', annotators=None, compare='all', raven_values=None,
                raven_ids=None, raven_colors=None, figure_state=None, label_colors=None):
@@ -339,7 +340,7 @@ class _IntegrationBase(unittest.TestCase):
             return self.update_figure(*args, selected_project="Citimon", selected_model="perchv2",
                                       raven_annotators=annotators, raven_compare=compare,
                                       raven_checkbox_values=raven_values, raven_colors_data=raven_colors,
-                                      raven_checkbox_ids=raven_ids)
+                                      raven_checkbox_ids=raven_ids, dataset_metadata=self.meta)
 
     @staticmethod
     def by_clip(fig):
@@ -414,7 +415,7 @@ class TestRavenColorMode(_IntegrationBase):
         out = self.figure('raven')
         render = callback(self.app, "render_cluster_controls")
         with triggered('color-mode-radio.value', 'raven'):
-            rows = render(10, None, None, out[7], 'raven', None, {}, {}, {}, {}, None, [], [], [], [], {}, [], [])
+            rows = render(10, None, None, out[7], 'raven', None, {}, {}, {}, {}, None, [], [], [], [], {}, [], [], dataset_metadata=self.meta)
         ids = [r.children[0].id for r in rows]
         names = [r.children[2].children for r in rows]
         self.assertEqual(names[-1], agg.NO_ANNOTATION)
@@ -466,6 +467,41 @@ class TestRavenColorMode(_IntegrationBase):
         finally:
             with MANUAL_LABELS_LOCK:
                 del MANUAL_LABELS_CACHE[key]
+
+
+class TestRavenTwoUsers(_IntegrationBase):
+    """Two browsers with different datasets and different annotator filters on one worker."""
+
+    def _other_dataset_meta(self):
+        other = plotted_model_frame()
+        other["location"] = "LocOther"
+        other["microlocation"] = "LocOther"
+        other["mp3_file"] = f"Citimon\LocOther\{REC}_ch1.mp3"      # a recording the Raven import knows nothing about
+        return install_dataset(other, project="Citimon", model="perchv2", locations=["LocOther"])
+
+    def _figure_for(self, meta, location, annotators, mode="raven", compare="all"):
+        args = (None, None, 10, [], {}, {}, None, None, 50000, 0, ['on'], False, 15, 1, None, None, mode, None,
+                {}, {}, [], None, None, location, None, [], [], None)
+        with triggered('color-mode-radio.value'):
+            return self.update_figure(*args, selected_project="Citimon", selected_model="perchv2",
+                                      raven_annotators=annotators, raven_compare=compare, raven_checkbox_values=None,
+                                      raven_colors_data=None, raven_checkbox_ids=None, dataset_metadata=meta)
+
+    def test_each_user_gets_annotations_joined_against_their_own_dataset_and_filters(self):
+        meta_a = self.meta                                              # user A: LOC_A, annotator JP
+        meta_b = self._other_dataset_meta()                             # user B: another location, annotator SS
+        a1 = self.by_clip(self._figure_for(meta_a, LOC_A, ["JP"]))
+        b1 = self.by_clip(self._figure_for(meta_b, "LocOther", ["SS"]))
+        a2 = self.by_clip(self._figure_for(meta_a, LOC_A, ["JP"]))      # interleaved: A again after B
+        self.assertEqual(a1, a2)
+        self.assertEqual(a1[20.0][0], "Bufo bufo")                      # JP's own label on A's recording
+        self.assertEqual(a1[40.0][0], agg.NO_ANNOTATION)                # SS-only clip stays unannotated for JP
+        self.assertEqual({name for name, _sym in b1.values()}, {agg.NO_ANNOTATION},
+                         "B's recordings have no Raven import; nothing may be joined from A's dataset")
+        ss_on_a = self.by_clip(self._figure_for(meta_a, LOC_A, ["SS"]))
+        self.assertEqual(ss_on_a[40.0][0], "Other: govor")              # a different filter on the SAME dataset
+        self.assertNotEqual(ss_on_a, a1)
+        self.assertEqual(self.by_clip(self._figure_for(meta_a, LOC_A, ["JP"])), a1)
 
 
 class TestRavenViews(_IntegrationBase):

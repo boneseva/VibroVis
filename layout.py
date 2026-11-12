@@ -67,6 +67,8 @@ import hierarchy
 import read_data
 import citimon_map
 from callbacks.callbacks_date_selector import generate_date_selector
+from limits import MAX_POINTS_LIMIT, DEFAULT_MAX_POINTS, HOUR_SLIDER_STEP
+import url_init
 
 def get_available_presets():
     """Helper to list JSON files in the presets folder"""
@@ -176,6 +178,8 @@ def create_layout(df):
                         className='view-tab-btn'
                     ),
                     dcc.Store(id='main-view-tabs', data='scatter-tab'),
+                    html.Button("Share view", id='share-view-btn', n_clicks=0, className='view-tab-btn',
+                                title="Copy a link that reproduces this view"),
                     html.Button(">", id="toggle-filters-btn", n_clicks=0, className="panel-toggle-button"),
                 ], id='view-tab-bar'),
 
@@ -467,7 +471,7 @@ def create_layout(df):
                                 ])
                             ], className="label-with-info", style={'marginTop': '1em'}),
                             dcc.RangeSlider(id='hour-slider', min=0, max=24,
-                                            value=[min_hour, max_hour], step=0.5,
+                                            value=[min_hour, max_hour], step=HOUR_SLIDER_STEP,
                                             marks={h: f"{h:02d}:00" for h in range(0, 25, 6)}
                                             ),
                         ])
@@ -595,7 +599,7 @@ def create_layout(df):
                                 ])
                             ], className="label-with-info"),
                             html.Div([
-                                dcc.Input(id='max-points', type='number', min=1, value=10000, debounce=False,
+                                dcc.Input(id='max-points', type='number', min=1, max=MAX_POINTS_LIMIT, value=DEFAULT_MAX_POINTS, debounce=False,
                                           style={'width': '80px', 'marginRight': '1em'},
                                           className='input-field'),
                                 html.Button('Resample', id='resample-btn', n_clicks=0, className='app-button'),
@@ -1030,4 +1034,33 @@ def create_layout(df):
         dcc.Store(id='focused-row-store'),
         dcc.Input(id='focused-row-trigger-input', type='text',
                   style={'display': 'none'}, value=''),
+
+        # --- URL initialisation skeleton (Phase 2.1). It PARSES the URL and records the outcome; it restores nothing.
+        # State machine: assets/url_restore.js. Server side: callbacks/callbacks_url.py. Every Store has ONE writer.
+        dcc.Location(id='url', refresh=False),
+        dcc.Store(id='url-init', data=dict(url_init.INITIAL_PUBLIC_STATE)),     # PUBLIC: pending/running/ready/failed
+        dcc.Store(id='url-init-request'),                                       # arbiter -> server: {epoch, search}
+        dcc.Store(id='url-init-response'),                                      # server -> arbiter: {epoch, payload}
+        dcc.Store(id='url-init-running', data=False),                           # set by Dash `running=` of url_init
+        dcc.Store(id='url-init-config', data=url_init.client_config()),        # validated deadlines + owned keys
+        dcc.Interval(id='url-init-tick', interval=url_init.client_config()['tickMs'], n_intervals=0),
+        # URL restoration (Phase 2.2). Writers: url-identity / url-plan-request / url-progress -> the browser-side
+        # reconciler only (dash_clientside.set_props); url-plan-filters -> the url_plan_filters server callback only.
+        dcc.Store(id='url-identity', data=None),                                # {token, done, reason}: releases the load hold
+        dcc.Store(id='url-plan-request', data=None),                            # reconciler -> server: {token, key, k, ...}
+        dcc.Store(id='url-plan-filters', data=None),                            # server -> reconciler: the filters plan
+        dcc.Store(id='url-progress', data=None),                                # reconciler: outcome of the restoration
+        dcc.Store(id='url-sync-request', data=None),                            # reconciler -> server: {id, kind, snapshot}
+        dcc.Store(id='url-sync-result', data=None),                             # server -> reconciler: {id, kind, search}
+        # Share feedback (shown/hidden by the browser-side code only): success message or the link to copy by hand.
+        html.Div([html.Span(id='url-share-toast-text'),
+                  dcc.Input(id='url-share-link', type='text', readOnly=True, value='',
+                            style={'display': 'none', 'width': '300px', 'marginLeft': '8px'})],
+                 id='url-share-toast', style={'display': 'none'}),
+        # Dismissible, non-blocking notice for what a link could not apply (shown/hidden by the reconciler only).
+        html.Div([html.Span(id='url-restore-notice-text'),
+                  html.Button('×', id='url-restore-notice-dismiss', n_clicks=0, title='Dismiss',
+                              style={'border': 'none', 'background': 'transparent', 'cursor': 'pointer',
+                                     'fontSize': '1.2em', 'lineHeight': '1'})],
+                 id='url-restore-notice', style={'display': 'none'}),
     ], id='main-container')

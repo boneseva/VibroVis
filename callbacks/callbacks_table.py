@@ -17,6 +17,7 @@ import pandas as pd
 from dash import Input, Output, State, html, dcc, no_update, ALL, ctx
 
 from callbacks.callbacks_constants import CLUSTER_COLORS, server_cache
+from dataset_cache import cache_key_of
 
 import utils  # for load_audio_segment + compute_spectrogram
 import numpy as np
@@ -124,8 +125,9 @@ def _apply_sort(df: pd.DataFrame, sort_col: str | None, sort_asc: bool) -> pd.Da
 
 RAVEN_STATUS_TEXT = {"none": "", "single": "single annotator", "agree": "agree", "disagree": "disagree"}
 
-# Module-level caches
-_TABLE_CACHE: dict = {}
+# Per-browser table frames live in ``server_cache`` under "<filtered-data key>::table" (see TABLE_ENTRY_SUFFIX):
+# there is deliberately NO module-level table state, so two users' tables can never be mixed up.
+TABLE_ENTRY_SUFFIX = "::table"
 
 
 # ---------------------------------------------------------------------------
@@ -424,12 +426,13 @@ def register_table_callbacks(app):
         State('colormap', 'value'),
         State('db-floor', 'value'),
         State('color-mode-radio', 'value'),
+        State('filtered-data', 'data'),
         prevent_initial_call=True,
     )
     def table_row_click(n_clicks_list, focused_row_data, ids,
                         frequency_scale, fft_window_size, window_overlap,
                         window_type, min_freq, max_freq, num_bins, colormap, db_floor,
-                        color_mode):
+                        color_mode, filtered_data_payload=None):
         import plotly.graph_objects as go
 
         # Determine which input triggered and resolve row_global_idx
@@ -450,17 +453,18 @@ def register_table_callbacks(app):
             if row_global_idx is None:
                 return no_update, no_update, no_update, no_update
 
-        cached = _TABLE_CACHE.get("entry")
-        if cached is None:
+        # Resolve the row in THIS browser's own frame: the key comes from this browser's `filtered-data` Store.
+        # The row is addressed by its plot_id (the table's row index), so the active sort does not matter.
+        filtered_key = cache_key_of(filtered_data_payload)
+        if not filtered_key:
             return no_update, no_update, no_update, "Click a point on the scatter first to load data."
-
-        filtered = cached.get("df")
-        if filtered is None or filtered.empty or row_global_idx not in filtered.index:
+        filtered = server_cache.get(f"{filtered_key}{TABLE_ENTRY_SUFFIX}")
+        if filtered is None:
+            filtered = server_cache.get(filtered_key)      # table frame evicted: fall back to the scatter frame
+        if filtered is None:
+            return no_update, no_update, no_update, "Table data expired. Change any filter to reload it."
+        if filtered.empty or row_global_idx not in filtered.index:
             return no_update, no_update, no_update, no_update
-
-        # Apply the same sort that's currently active
-        sort_info = _TABLE_CACHE.get("sort") or {}
-        filtered = _apply_sort(filtered, sort_info.get("col"), sort_info.get("asc", True))
 
         row = filtered.loc[row_global_idx]
 
@@ -618,7 +622,7 @@ def register_table_callbacks(app):
             # Read the exact same data the scatter plot is displaying
             dff = server_cache.get(filtered_data_key)
             if dff is None:
-                return (html.Div("Cache entry not found. Data may have expired.",
+                return (html.Div("Cache entry not found. Data may have expired. Change any filter to reload it.",
                                  style={"padding": "2rem", "color": "#888"}),
                         f"0 rows (cache miss)", 1)
             if dff.empty:
@@ -640,13 +644,12 @@ def register_table_callbacks(app):
             # is reflected immediately in the table.
             dff = utils.apply_manual_labels_efficiently(dff)
 
-            # Store for row-click callback
-            _TABLE_CACHE["entry"] = {"df": dff}
+            # Keep the labelled frame for THIS browser's row-click callback (never shared between browsers)
+            server_cache[f"{filtered_data_key}{TABLE_ENTRY_SUFFIX}"] = dff
 
             # Apply sorting with secondary keys
             sort_col = (sort_state or {}).get("col")
             sort_asc = (sort_state or {}).get("asc", True)
-            _TABLE_CACHE["sort"] = sort_state or {}
 
             dff = _apply_sort(dff, sort_col, sort_asc)
 

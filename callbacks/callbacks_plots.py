@@ -15,9 +15,12 @@ import pandas as pd
 import uuid
 
 import utils
+import labels_store
+from callbacks import dataset_access
+from dataset_cache import cache_key_of
 from callbacks.callbacks_constants import (
-    MODEL_DATA_CACHE, MERGED_DATA_CACHE, server_cache, initial_df, CLUSTER_COLORS,
-    MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK, CLIP_DURATION_CACHE,
+    server_cache, initial_df, CLUSTER_COLORS, effective_max_points,
+    MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK, CLIP_DURATION_CACHE, LABEL_WRITE_LOG,
     CUSTOMDATA_COLS, CUSTOMDATA_COLOR_IDX, CUSTOMDATA_PLOT_ID_IDX,
     CUSTOMDATA_START_HOUR_IDX, CUSTOMDATA_DAY_INT_IDX, CUSTOMDATA_CLIP_COUNT_IDX,
     CUSTOMDATA_FILE_NAME_IDX, CUSTOMDATA_CLIP_TIME_IDX, CUSTOMDATA_CHANNEL_IDX,
@@ -113,7 +116,9 @@ def register_plot_callbacks(app):
          Input('raven-compare-mode', 'value'),
          Input({'type': 'raven-checkbox', 'index': ALL}, 'value'),
          Input('raven-color-store', 'data'),
-         State({'type': 'raven-checkbox', 'index': ALL}, 'id')],
+         State({'type': 'raven-checkbox', 'index': ALL}, 'id'),
+         # The dataset THIS browser loaded (key from its own Store); see callbacks/dataset_access.py
+         State('derived-model-metadata', 'data')],
         prevent_initial_call='initial_duplicate'
     )
     def update_figure(model_ready_signal, selected_channels, selected_num_clusters,
@@ -128,7 +133,7 @@ def register_plot_callbacks(app):
                       label_checkbox_ids, current_filtered_key=None,
                       selected_project=None, selected_model=None,
                       raven_annotators=None, raven_compare=None, raven_checkbox_values=None,
-                      raven_colors_data=None, raven_checkbox_ids=None, *args, **kwargs):
+                      raven_colors_data=None, raven_checkbox_ids=None, dataset_metadata=None, *args, **kwargs):
         try:
             return _update_figure_impl(model_ready_signal, selected_channels, selected_num_clusters,
                       cluster_checkbox_values, cluster_colors_data, cluster_names_data,
@@ -142,7 +147,7 @@ def register_plot_callbacks(app):
                       label_checkbox_ids, current_filtered_key,
                       selected_project, selected_model,
                       raven_annotators, raven_compare, raven_checkbox_values,
-                      raven_colors_data, raven_checkbox_ids, *args, **kwargs)
+                      raven_colors_data, raven_checkbox_ids, dataset_metadata, *args, **kwargs)
         except Exception:
             import traceback
             traceback.print_exc()
@@ -160,7 +165,7 @@ def register_plot_callbacks(app):
                       label_checkbox_ids, current_filtered_key=None,
                       selected_project=None, selected_model=None,
                       raven_annotators=None, raven_compare=None, raven_checkbox_values=None,
-                      raven_colors_data=None, raven_checkbox_ids=None, *args, **kwargs):
+                      raven_colors_data=None, raven_checkbox_ids=None, dataset_metadata=None, *args, **kwargs):
 
         timer = PipelineTimer("update_figure").start()
         t_start = time.time() if ENABLE_PROFILING else None
@@ -177,6 +182,9 @@ def register_plot_callbacks(app):
         ctx = callback_context
         all_triggered_ids = [t['prop_id'] for t in ctx.triggered] if ctx.triggered else []
         t_last = checkpoint('init') or t_last
+
+        # Resource protection: the point limit is enforced here as well as in the UI (empty -> default 10,000)
+        max_points = effective_max_points(max_points)
 
         # ---------------------------------------------------------------
         # FAST PATH: color-only update (Patch)
@@ -374,7 +382,10 @@ def register_plot_callbacks(app):
         is_preset_active = last_preset_time and (time.time() - last_preset_time < 6.0)
         should_force_defaults = is_fresh_load and not is_preset_active
 
-        dff_raw = MODEL_DATA_CACHE.get('df')
+        # This browser's own dataset (shared, READ-ONLY): looked up by the key in its metadata Store, and 'stale'
+        # while the browser's current project/model/locations differ from what it has finished loading.
+        dff_raw, dataset_state = dataset_access.resolve_dataset(dataset_metadata, selected_project, selected_model,
+                                                                selected_location)
         t_last = checkpoint('cache_get') or t_last
         timer.step("data/filter")
 
@@ -385,39 +396,37 @@ def register_plot_callbacks(app):
         # dict, bypassing the lock + iterkeys + per-key disk reads that would
         # otherwise fire 6-7 times on every Resample/filter click.
         # ------------------------------------------------------------------
-        _label_snapshot: dict = {}
-        with MANUAL_LABELS_LOCK:
-            try:
-                for _k in MANUAL_LABELS_CACHE.iterkeys():
-                    try:
-                        _label_snapshot[_k] = MANUAL_LABELS_CACHE[_k]
-                    except KeyError:
-                        pass
-            except Exception:
-                pass
+        try:
+            _label_snapshot: dict = labels_store.snapshot_labels()
+        except Exception:
+            _label_snapshot = {}
         
         # Ensure clip_duration exists (critical for merging)
         if dff_raw is not None and 'clip_duration' not in dff_raw.columns:
-            dff_raw['clip_duration'] = 5.0
+            # The loader fills it before sharing a frame; this copy only serves frames that lack it (tests).
+            dff_raw = dff_raw.assign(clip_duration=5.0)
 
         selected_locations = read_data.location_list(selected_location)
-        if dff_raw is not None and not dff_raw.empty and selected_locations and 'location' in dff_raw.columns:
-            # Multi-select: the cached frame is stale if it holds a location that is no longer selected
-            if not _loaded_locations(dff_raw) <= set(selected_locations):
-                msg = "Loading data..."
-                timer.stop(extra_info="location_loading")
-                if current_figure_state and current_figure_state.get('data'):
-                    # Non-destructive: preserve existing figure while new location data loads
-                    return dash.no_update, no_update, no_update, no_update, no_update, no_update, msg, no_update, None, False if should_force_defaults else no_update
-                fig = go.Figure()
-                fig.update_layout(
-                    annotations=[{"text": "Loading data...", "xref": "paper", "yref": "paper",
-                                  "showarrow": False, "font": {"size": 16}}],
-                    paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
-                )
-                fig.update_xaxes(visible=False);
-                fig.update_yaxes(visible=False)
-                return fig, None, 1, 100, [], None, msg, {'total': 0}, None, False if should_force_defaults else no_update
+        _frame_has_unselected_locations = (
+            dff_raw is not None and not dff_raw.empty and bool(selected_locations) and 'location' in dff_raw.columns
+            and not _loaded_locations(dff_raw) <= set(selected_locations))
+        if dataset_state == 'stale' or _frame_has_unselected_locations:
+            # This browser selected something else and its data is still loading (or the frame holds a location
+            # that is no longer selected): keep the figure, wait for the matching `model-data-ready-signal`.
+            msg = "Loading data..."
+            timer.stop(extra_info="location_loading")
+            if current_figure_state and current_figure_state.get('data'):
+                # Non-destructive: preserve existing figure while new location data loads
+                return dash.no_update, no_update, no_update, no_update, no_update, no_update, msg, no_update, None, False if should_force_defaults else no_update
+            fig = go.Figure()
+            fig.update_layout(
+                annotations=[{"text": "Loading data...", "xref": "paper", "yref": "paper",
+                              "showarrow": False, "font": {"size": 16}}],
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
+            )
+            fig.update_xaxes(visible=False);
+            fig.update_yaxes(visible=False)
+            return fig, None, 1, 100, [], None, msg, {'total': 0}, None, False if should_force_defaults else no_update
 
         if dff_raw is None or dff_raw.empty:
             if selected_locations and selected_model:
@@ -1094,7 +1103,8 @@ def register_plot_callbacks(app):
         
         # Store full DataFrame in server cache for table/audio operations
         cache_key = dff['cache_key'].iloc[0]
-        server_cache[cache_key] = dff
+        # Replaces this browser's previous frame (kept for a short grace period for callbacks still using it)
+        server_cache.replace(cache_key, dff, replaces=cache_key_of(current_filtered_key))
 
         # Create lightweight payload for filtered-data store (OPTIMIZATION #1)
         # Only send essential columns to browser instead of full DataFrame
@@ -1198,7 +1208,7 @@ def register_plot_callbacks(app):
 
         dff = server_cache.get(filtered_data_cache_key)
         if dff is None:
-             return no_update, no_update, "Error: Filtered data not found in cache."
+             return no_update, no_update, "Error: Filtered data not found in cache. Change any filter to reload it."
 
         try:
             point = clickData["points"][0]
@@ -1218,7 +1228,7 @@ def register_plot_callbacks(app):
         try:
              row = dff.loc[plot_id]
         except KeyError:
-             return no_update, no_update, "Error: Clicked point not found. Please re-filter."
+             return no_update, no_update, "Error: Clicked point not found. Change any filter to reload it."
 
         # 2. Compute (Standard)
         segment, samplerate = utils.load_audio_segment(
@@ -1363,7 +1373,7 @@ def register_plot_callbacks(app):
                 filtered_data_cache_key = filtered_data_store
 
             dff = server_cache.get(filtered_data_cache_key)
-            if dff is None: return go.Figure().update_layout(title_text="Error: Data not found in cache.")
+            if dff is None: return go.Figure().update_layout(title_text="Error: Data not found in cache. Change any filter to reload it.")
 
             # Determine the key to filter by
             is_manual = (color_mode == 'manual')
@@ -1407,7 +1417,7 @@ def register_plot_callbacks(app):
             if bar_color == '#CCCCCC':
                 try:
                     if is_manual:
-                         all_known_labels = sorted(set(MANUAL_LABELS_CACHE[key] for key in MANUAL_LABELS_CACHE))
+                         all_known_labels = labels_store.unique_label_values()
                          if 'Unlabeled' not in all_known_labels: all_known_labels.append('Unlabeled')
                          if 'Unlabeled' in all_known_labels:
                              all_known_labels.remove('Unlabeled')
@@ -1531,7 +1541,7 @@ def register_plot_callbacks(app):
 
         dff = server_cache.get(filtered_data_cache_key)
         if dff is None:
-             return dash.no_update, "Error: Data expired.", dash.no_update
+             return dash.no_update, "Error: Data expired. Change any filter to reload it.", dash.no_update
 
         try:
             # Inline Table Edit
@@ -1583,34 +1593,12 @@ def register_plot_callbacks(app):
                     else:
                         clips_to_update = [(float(row['clip_time']), float(row.get('clip_duration', 5.0)))]
 
-                    with MANUAL_LABELS_LOCK:
-                        for ct, dur in clips_to_update:
-                            clip_time_key = round(ct * 10)
-                            instance_key = (sys.intern(str(loc)), sys.intern(str(micro)), sys.intern(str(file_basename)), int(channel), clip_time_key)
-                            if label_val == 'Unlabeled':
-                                if instance_key in MANUAL_LABELS_CACHE:
-                                    try:
-                                        del MANUAL_LABELS_CACHE[instance_key]
-                                    except Exception:
-                                        pass
-                                if instance_key in CLIP_DURATION_CACHE:
-                                    try:
-                                        del CLIP_DURATION_CACHE[instance_key]
-                                    except Exception:
-                                        pass
-                                try:
-                                    with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
-                                        _log.write(f"{time.time()}\tplots_inline_delete\t{instance_key}\tDELETED\n")
-                                except Exception:
-                                    pass
-                            else:
-                                MANUAL_LABELS_CACHE[instance_key] = label_val
-                                CLIP_DURATION_CACHE[instance_key] = (float(dur), model_name)
-                                try:
-                                    with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
-                                        _log.write(f"{time.time()}\tplots_inline_save\t{instance_key}\t{label_val}\n")
-                                except Exception:
-                                    pass
+                    clips_for_store = [
+                        ((sys.intern(str(loc)), sys.intern(str(micro)), sys.intern(str(file_basename)), int(channel), round(ct * 10)), dur)
+                        for ct, dur in clips_to_update
+                    ]
+                    # One atomic, locked group write on the shared persistent stores (see labels_store.py)
+                    labels_store.set_clip_labels(clips_for_store, label_val, model_name, 'plots_inline')
 
                     unique_trigger = f"{time.time()}_{hash(label_val)}_{len(MANUAL_LABELS_CACHE)}"
                     msg = "Deleted label" if label_val == 'Unlabeled' else f"Saved: {label_val}"
@@ -1666,34 +1654,12 @@ def register_plot_callbacks(app):
                 else:
                     clips_to_update = [(float(row['clip_time']), float(row.get('clip_duration', 5.0)))]
 
-                with MANUAL_LABELS_LOCK:
-                    for ct, dur in clips_to_update:
-                        clip_time_key = round(ct * 10)
-                        instance_key = (sys.intern(str(loc)), sys.intern(str(micro)), sys.intern(str(file_basename)), int(channel), clip_time_key)
-                        if label_val == 'Unlabeled':
-                            if instance_key in MANUAL_LABELS_CACHE:
-                                try:
-                                    del MANUAL_LABELS_CACHE[instance_key]
-                                except Exception:
-                                    pass
-                            if instance_key in CLIP_DURATION_CACHE:
-                                try:
-                                    del CLIP_DURATION_CACHE[instance_key]
-                                except Exception:
-                                    pass
-                            try:
-                                with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
-                                    _log.write(f"{time.time()}\tplots_sidebar_delete\t{instance_key}\tDELETED\n")
-                            except Exception:
-                                pass
-                        else:
-                            MANUAL_LABELS_CACHE[instance_key] = label_val
-                            CLIP_DURATION_CACHE[instance_key] = (float(dur), model_name)
-                            try:
-                                with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
-                                    _log.write(f"{time.time()}\tplots_sidebar_save\t{instance_key}\t{label_val}\n")
-                            except Exception:
-                                pass
+                clips_for_store = [
+                    ((sys.intern(str(loc)), sys.intern(str(micro)), sys.intern(str(file_basename)), int(channel), round(ct * 10)), dur)
+                    for ct, dur in clips_to_update
+                ]
+                # One atomic, locked group write on the shared persistent stores (see labels_store.py)
+                labels_store.set_clip_labels(clips_for_store, label_val, model_name, 'plots_sidebar')
 
                 unique_trigger = f"{time.time()}_{hash(label_val)}_1"
                 msg = "Deleted label" if label_val == 'Unlabeled' else f"Saved: {label_val}"
@@ -1710,7 +1676,7 @@ def register_plot_callbacks(app):
     )
     def update_manual_label_datalist(store_trigger):
         try:
-            unique_labels = sorted(set(MANUAL_LABELS_CACHE[key] for key in MANUAL_LABELS_CACHE))
+            unique_labels = labels_store.unique_label_values()
             return [html.Option(value=label) for label in unique_labels]
         except Exception:
              return []

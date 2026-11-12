@@ -8,7 +8,7 @@ import pandas as pd
 import numpy as np
 
 from . import callbacks_constants
-from .callbacks_constants import MODEL_DATA_CACHE
+from callbacks import dataset_access
 import citimon_map
 import read_data
 
@@ -66,7 +66,7 @@ def register_filter_callbacks(app):
         if isinstance(metadata, dict) and 'microlocations' in metadata:
             micros = [m for m in metadata['microlocations'] if str(m).strip() and str(m).strip().lower() != 'default']
         else:
-            dff = MODEL_DATA_CACHE.get('df')
+            dff = dataset_access.dataset_for(metadata)
             if dff is None or dff.empty: return [], []
             micros = [m for m in sorted(dff['microlocation'].dropna().unique()) if str(m).strip() and str(m).strip().lower() != 'default']
 
@@ -89,7 +89,7 @@ def register_filter_callbacks(app):
         prevent_initial_call=True
     )
     def update_recorder_options(metadata, selected_microlocation, current_recorders, last_preset_time):
-        dff = MODEL_DATA_CACHE.get('df')
+        dff = dataset_access.dataset_for(metadata)      # this browser's own dataset (key in its metadata Store)
         if dff is None or dff.empty: return [], []
 
         # If no specific microlocation filter is applied, fast-path using metadata
@@ -126,7 +126,7 @@ def register_filter_callbacks(app):
         if isinstance(metadata, dict) and 'channels' in metadata:
             channels = metadata['channels']
         else:
-            dff = MODEL_DATA_CACHE.get('df')
+            dff = dataset_access.dataset_for(metadata)
             if dff is None or dff.empty:
                 dff = callbacks_constants.initial_df
 
@@ -179,7 +179,7 @@ def register_filter_callbacks(app):
             min_h = metadata['hour_min']
             max_h = metadata['hour_max']
         else:
-            dff = MODEL_DATA_CACHE.get('df')
+            dff = dataset_access.dataset_for(metadata)
             if dff is None or dff.empty:
                 return 0, 24, [0, 24], {h: f"{h:02d}:00" for h in range(0, 25, 6)}
 
