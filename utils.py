@@ -355,32 +355,49 @@ def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels
     # when labels are widely spread but candidates are concentrated.
     BIN_SIZE_X10 = 10  # 10 units = 1.0 second at the x10 scale (0.1s resolution)
 
+    # Index the frame ONCE by (file, channel). Each label group then only looks at its own rows,
+    # instead of scanning four full columns of the whole frame per group (hundreds of full scans
+    # for a few hundred labelled files took tens of seconds on a 200k-row model).
+    _group_pos = pd.DataFrame({
+        'f': dff['f_basename_cache'].to_numpy(),
+        'c': dff['channel'].astype(int).to_numpy(),
+    }).groupby(['f', 'c']).indices
+    # Plain NumPy copies of every column the loop reads, taken once: per-group slicing of the
+    # (Arrow-backed) frame itself is what made this slow.
+    _index_arr = dff.index.to_numpy()
+    _loc_arr = dff['location'].fillna('Unknown').to_numpy(dtype=object) if 'location' in dff.columns else None
+    _micro_arr = dff['microlocation'].fillna('Unknown').to_numpy(dtype=object) if 'microlocation' in dff.columns else None
+    if 'recording_id' in dff.columns:
+        _rec_arr = dff['recording_id'].to_numpy(dtype=object)
+    elif 'wav_file' in dff.columns:
+        _rec_arr = dff['wav_file'].to_numpy(dtype=object)
+    elif 'mp3_file' in dff.columns:
+        _rec_arr = dff['mp3_file'].to_numpy(dtype=object)
+    else:
+        _rec_arr = None
+    _ct_all = (dff['clip_time'].astype(float) * 10).round().astype(int).to_numpy()
+    _cd_all = (dff['clip_duration'].astype(float) * 10).round().astype(int).to_numpy()
+
     for (loc, micro, f_base, chan), clip_map in label_map.items():
         try:
             chan_val = int(chan)
-            if dff['channel'].dtype.name == 'category':
-                mask = (dff['channel'].astype(int) == chan_val)
-            else:
-                mask = (dff['channel'] == chan_val)
+            pos = _group_pos.get((f_base, chan_val))
+            if pos is None:
+                continue
+            mask = np.ones(len(pos), dtype=bool)
+            if _loc_arr is not None:
+                mask &= (_loc_arr[pos] == loc)
+            if _micro_arr is not None:
+                mask &= (_micro_arr[pos] == micro)
 
-            if 'location' in dff.columns:
-                mask &= (dff['location'].fillna('Unknown') == loc)
-            if 'microlocation' in dff.columns:
-                mask &= (dff['microlocation'].fillna('Unknown') == micro)
-
-            mask &= (dff['f_basename_cache'] == f_base)
-
-            indices = dff.index[mask]
+            sel = pos[mask]                      # positions of this group's rows in dff
+            indices = dff.index[sel]
             if indices.empty:
                 continue
 
             # Detect if legacy key (loc, micro, f_base, chan) matches multiple canonical recordings
-            if 'recording_id' in dff.columns:
-                rec_ids = dff.loc[indices, 'recording_id'].dropna().unique()
-            elif 'wav_file' in dff.columns:
-                rec_ids = dff.loc[indices, 'wav_file'].dropna().unique()
-            elif 'mp3_file' in dff.columns:
-                rec_ids = dff.loc[indices, 'mp3_file'].dropna().unique()
+            if _rec_arr is not None:
+                rec_ids = pd.Series(_rec_arr[sel]).dropna().unique()
             else:
                 rec_ids = []
 
@@ -395,8 +412,8 @@ def apply_manual_labels_efficiently(dff, manual_labels_cache=None, manual_labels
                 continue
 
             # Vectorize candidate starts/ends for this group
-            cand_cts = (dff.loc[indices, 'clip_time'].astype(float) * 10).round().astype(int).to_numpy()
-            cand_cds = (dff.loc[indices, 'clip_duration'].astype(float) * 10).round().astype(int).to_numpy()
+            cand_cts = _ct_all[sel]
+            cand_cds = _cd_all[sel]
             cand_starts = cand_cts
             cand_ends = cand_cts + cand_cds
 
