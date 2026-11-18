@@ -37,6 +37,10 @@ def _extract_logo_accent_color(svg_path: str, fallback: str = '#4b8af2') -> str:
 _logo_path = os.path.join(os.path.dirname(__file__), 'assets', 'logo.svg')
 _accent_color = _extract_logo_accent_color(_logo_path)
 
+import url_init
+# Keeps the app usable if the URL-initialisation arbiter never runs (assets/url_restore.js blocked or broken).
+_url_init_fallback = url_init.fallback_script()
+
 app.index_string = f'''
 <!DOCTYPE html>
 <html>
@@ -50,6 +54,7 @@ app.index_string = f'''
             :root {{ --color-accent: {_accent_color}; }}
         </style>
         {{%css%}}
+        {_url_init_fallback}
     </head>
     <body>
         {{%app_entry%}}

@@ -7,7 +7,10 @@ import dash
 from dash import Input, Output, State, html, dcc, ALL
 import pandas as pd
 
-from callbacks.callbacks_constants import MODEL_DATA_CACHE, initial_df, CLUSTER_COLORS, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK
+import labels_store
+from callbacks import dataset_access
+
+from callbacks.callbacks_constants import initial_df, CLUSTER_COLORS, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK, LABEL_WRITE_LOG
 from utils import apply_manual_labels_efficiently
 
 
@@ -31,15 +34,18 @@ def register_cluster_callbacks(app):
          State({'type': 'cluster-checkbox', 'index': ALL}, 'value'),
          State({'type': 'cluster-checkbox', 'index': ALL}, 'id'),
          State({'type': 'label-checkbox', 'index': ALL}, 'value'),
-         State({'type': 'label-checkbox', 'index': ALL}, 'id')]
+         State({'type': 'label-checkbox', 'index': ALL}, 'id'),
+         # the dataset THIS browser loaded (key from its own Store)
+         State('derived-model-metadata', 'data')]
     )
     def render_cluster_controls(num_clusters, model_ready, preset_selected_ids, cluster_stats,
                                 color_mode, manual_labels_trigger, label_names_data, label_colors_data,
                                 current_colors, current_names, last_preset_time,
                                 current_checkbox_values, current_checkbox_ids,
-                                current_label_checkbox_values=None, current_label_checkbox_ids=None):
+                                current_label_checkbox_values=None, current_label_checkbox_ids=None,
+                                dataset_metadata=None):
         try:
-            dff = MODEL_DATA_CACHE.get('df')
+            dff = dataset_access.dataset_for(dataset_metadata)      # this browser's own (shared, read-only) frame
             if dff is None or dff.empty: dff = initial_df
             if dff.empty: return []
 
@@ -60,15 +66,7 @@ def register_cluster_callbacks(app):
                 # -----------------------------------------------------------------
                 # MANUAL LABELS MODE: Display human-readable manual labels in legend
                 # -----------------------------------------------------------------
-                with MANUAL_LABELS_LOCK:
-                    cache_keys = list(MANUAL_LABELS_CACHE.iterkeys())
-                    unique_labels = []
-                    for key in cache_keys:
-                        try:
-                            unique_labels.append(MANUAL_LABELS_CACHE[key])
-                        except KeyError:
-                            continue
-                    unique_labels = sorted(set(unique_labels))
+                unique_labels = labels_store.unique_label_values()
 
                 if 'manual_label' in dff.columns:
                     for l in dff['manual_label'].dropna().unique():
@@ -449,46 +447,10 @@ def register_cluster_callbacks(app):
         if not new_label_name or new_label_name == old_label_name:
             return updated_store, dash.no_update
 
-        changed = False
-        cache_updates = []  # Collect updates for batch operation
-        cache_deletions = []  # Collect deletions for batch operation
-        
-        for cache_key in list(MANUAL_LABELS_CACHE):
-            cache_label = MANUAL_LABELS_CACHE[cache_key]
-            if cache_label != old_label_name:
-                continue
-
-            changed = True
-            if new_label_name == 'Unlabeled':
-                # Delete label assignment by removing per-second keys.
-                cache_deletions.append(cache_key)
-            else:
-                # Rename/merge (case-sensitive by design).
-                cache_updates.append((cache_key, new_label_name))
-
-        if not changed:
+        # Scan + apply as ONE atomic section on the shared store: a label another user saves meanwhile is never
+        # overwritten with a stale value, and nobody sees a half-renamed set (see labels_store.rename_label).
+        if not labels_store.rename_label(old_label_name, new_label_name):
             return updated_store, dash.no_update
-
-        # Apply cache changes with thread-safe operations
-        with MANUAL_LABELS_LOCK:
-            # Apply updates
-            for cache_key, new_label in cache_updates:
-                MANUAL_LABELS_CACHE[cache_key] = new_label
-                try:
-                    with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
-                        _log.write(f"{time.time()}\tclusters_rename_update\t{cache_key}\t{new_label}\n")
-                except Exception:
-                    pass
-            
-            # Apply deletions
-            for key in cache_deletions:
-                if key in MANUAL_LABELS_CACHE:
-                    try:
-                        del MANUAL_LABELS_CACHE[key]
-                        with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
-                            _log.write(f"{time.time()}\tclusters_rename_delete\t{key}\tDELETED\n")
-                    except Exception:
-                        pass
 
         # Timestamp token is enough to trigger dependent callbacks.
         return updated_store, str(time.time())
@@ -516,16 +478,7 @@ def register_cluster_callbacks(app):
         color_map['Unlabeled'] = '#D9D9D9'
 
         # Get all current labels from cache
-        with MANUAL_LABELS_LOCK:
-            cache_keys = list(MANUAL_LABELS_CACHE.iterkeys())
-            all_labels = []
-            for key in cache_keys:
-                try:
-                    label = MANUAL_LABELS_CACHE[key]
-                    all_labels.append(label)
-                except KeyError:
-                    continue
-            all_labels = sorted(set(l for l in all_labels if l and l != 'Unlabeled'))
+        all_labels = sorted(set(l for l in labels_store.snapshot_labels().values() if l and l != 'Unlabeled'))
 
         # Track which palette colors are already claimed so new labels get
         # the next UNUSED color (no duplicates, same sequential walk as clusters).

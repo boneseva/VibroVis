@@ -21,7 +21,11 @@ from dash import dcc
 
 import read_data
 import utils
-from callbacks.callbacks_constants import MODEL_DATA_CACHE, MERGED_DATA_CACHE, initial_df, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK
+import labels_store
+import url_state
+from dataset_cache import dataset_key
+from callbacks import dataset_access
+from callbacks.callbacks_constants import initial_df, MANUAL_LABELS_CACHE, MANUAL_LABELS_LOCK, LABEL_WRITE_LOG
 from diagnostics import time_block
 
 # Suppress mpg123 decoder warnings (these are non-critical)
@@ -56,8 +60,7 @@ def _entry_to_key_tuple(entry):
 
 def _build_local_labels_payload():
     entries = []
-    for key_tuple in MANUAL_LABELS_CACHE:
-        label = MANUAL_LABELS_CACHE[key_tuple]
+    for key_tuple, label in labels_store.snapshot_labels().items():
         loc, micro, f_base, chan, sec = key_tuple
         entries.append([str(loc), str(micro), str(f_base), int(chan), int(sec), str(label)])
     entries.sort(key=lambda x: (x[0], x[1], x[2], x[3], x[4]))
@@ -161,12 +164,13 @@ def _apply_import_session(session):
     applied_count = 0
     kept_conflicts = 0
     used_conflicts = 0
+    writes = []
 
     for entry in session.get('non_conflicts', []):
         key_tuple = _entry_to_key_tuple(entry)
         if key_tuple is None:
             continue
-        MANUAL_LABELS_CACHE[key_tuple] = str(entry[5])
+        writes.append((key_tuple, str(entry[5])))
         applied_count += 1
 
     conflicts = session.get('conflicts', [])
@@ -178,27 +182,24 @@ def _apply_import_session(session):
             continue
 
         key_tuple = (str(conflict[0]), str(conflict[1]), str(conflict[2]), int(conflict[3]), int(conflict[4]))
-        MANUAL_LABELS_CACHE[key_tuple] = str(conflict[6])
+        writes.append((key_tuple, str(conflict[6])))
         applied_count += 1
         used_conflicts += 1
 
+    # Applied as one locked, atomic group so other users never see a half-imported set.
+    labels_store.bulk_set_labels(writes)
     return applied_count, used_conflicts, kept_conflicts
 
 
 def _build_portable_export_payload():
     labels = {}
-    # Sort the cache keys for consistent ordering with thread safety
-    with MANUAL_LABELS_LOCK:
-        sorted_keys = sorted(MANUAL_LABELS_CACHE.iterkeys())
-        for key_tuple in sorted_keys:
-            try:
-                label = MANUAL_LABELS_CACHE[key_tuple]
-                if str(label) == 'Unlabeled':
-                    continue  # skip unlabeled entries from export
-                labels[_key_tuple_to_string(key_tuple)] = str(label)
-            except KeyError:
-                # Key was deleted during iteration, skip it
-                continue
+    # Consistent snapshot, sorted for stable ordering
+    snapshot = labels_store.snapshot_labels()
+    for key_tuple in sorted(snapshot):
+        label = snapshot[key_tuple]
+        if str(label) == 'Unlabeled':
+            continue  # skip unlabeled entries from export
+        labels[_key_tuple_to_string(key_tuple)] = str(label)
 
     return {
         'format': 'vibrovis-manual-labels',
@@ -622,6 +623,15 @@ def extract_model_metadata(model_df):
     }
 
 
+def _triggered_only_by(*prop_ids):
+    """True when the running callback was triggered by *prop_ids* alone (False outside a callback or on the initial call)."""
+    try:
+        triggered = [t.get('prop_id') for t in (callback_context.triggered or [])]
+    except Exception:
+        return False
+    return bool(triggered) and all(t in prop_ids for t in triggered)
+
+
 def register_data_callbacks(app):
 
     @app.server.route("/audio_segment_normalized/<path:filename>/<int:channel>/<float:start>/<float:end>")
@@ -659,90 +669,75 @@ def register_data_callbacks(app):
          Output('derived-model-metadata', 'data')],
         [Input('model-dropdown', 'value'),
          Input('location-dropdown', 'value'),
-         Input('project-dropdown', 'value')],
+         Input('project-dropdown', 'value'),
+         # URL initialisation (Phase 2.1): hold while it is pending/running. Appended LAST so the first three arguments keep
+         # their positions; the legacy, unused `selected_dataset` stays a keyword-only courtesy for old callers.
+         Input('url-init', 'data'),
+         # Identity settled for the restorable view of this browser (see url_state.restore_should_hold). Written by the
+         # browser-side reconciler only; it releases the hold below.
+         Input('url-identity', 'data'),
+         # THIS browser's own record of what it has loaded (the callback's own output, read as State): makes
+         # url-init-driven re-runs idempotent per (initialisation attempt, dataset key).
+         State('derived-model-metadata', 'data')],
         # On-screen "Loading data…" badge over the scatter while the data is read (can take a while)
         running=[(Output('data-loading-overlay', 'style'), {'display': 'flex'}, {'display': 'none'}),
                  (Output('data-loading-overlay-table', 'style'), {'display': 'flex'}, {'display': 'none'})],
     )
-    def load_data_into_server_cache(selected_model, selected_location, selected_project=None, selected_dataset=None):
+    def load_data_into_server_cache(selected_model, selected_location, selected_project=None, url_init=None,
+                                    url_identity=None, current_metadata=None, selected_dataset=None):
+        # Hold until the URL has been examined (pending/running). `ready`, `failed` and a missing state do not hold, so a
+        # broken initialisation can never keep the app from loading data. With no URL the outcome is exactly today's.
+        if url_state.init_should_hold(url_init):
+            return dash.no_update, dash.no_update
+        # A restorable view (valid URL) also holds until the browser has settled project/location/model/k, so the
+        # intermediate selections never load a dataset and the default dataset is never loaded in vain.
+        if url_state.restore_should_hold(url_init, url_identity):
+            return dash.no_update, dash.no_update
+
+        # The dataset goes into the SHARED read-only cache under its full identity (project, model, locations);
+        # the requesting browser gets that key back in its own `derived-model-metadata` Store and every other
+        # callback resolves its frame from that key (callbacks/dataset_access.py). Nothing here is global state
+        # that another user's selection could overwrite, and a slow/stale load only ever fills its own key.
         metadata = extract_model_metadata(None)
         selected_locations = read_data.location_list(selected_location)
         if not selected_model or not selected_locations:
-            MODEL_DATA_CACHE['df'] = None
-            MODEL_DATA_CACHE['metadata'] = metadata
-            MODEL_DATA_CACHE['key'] = None
             return time.time(), metadata
 
         if selected_project:
             # Validate that selected_location belongs to selected_project
             if not read_data.is_valid_project_location(selected_project, selected_locations):
                 # Reject stale/mismatched location during transition (e.g. Citimon + Banjšice)
-                # Avoid clearing cache or loading empty data while location-dropdown updates
+                # Avoid clearing anything or loading empty data while location-dropdown updates
                 return dash.no_update, dash.no_update
 
-            expected_key = (selected_project, tuple(selected_locations), selected_model)
-            with time_block("data_load_project", extra_info=f"proj='{selected_project}', loc={selected_locations}, model='{selected_model}'"):
-                try:
-                    model_df = read_data.load_project_model_data(
-                        project_id=selected_project,
-                        selected_model=selected_model,
-                        selected_location=selected_locations
-                    )
-                    if model_df is None or model_df.empty:
-                        MODEL_DATA_CACHE['df'] = None
-                        MODEL_DATA_CACHE['metadata'] = metadata
-                        MODEL_DATA_CACHE['key'] = None
-                    else:
-                        MODEL_DATA_CACHE['df'] = model_df
-                        metadata = extract_model_metadata(model_df)
-                        MODEL_DATA_CACHE['metadata'] = metadata
-                        MODEL_DATA_CACHE['key'] = expected_key
-                except Exception as e:
-                    print(f"Error loading project model data: {e}")
-                    MODEL_DATA_CACHE['df'] = None
-                    MODEL_DATA_CACHE['metadata'] = metadata
-                    MODEL_DATA_CACHE['key'] = None
-        else:
-            # Legacy compatibility path using flat SAVE_PATH
-            data_path = read_data.SAVE_PATH
-            if not os.path.exists(data_path):
-                # Fallback to vibro project cache if flat data/cache/final_data.parquet was moved/migrated
-                vibro_path = os.path.join("data", "vibro", "cache", "final_data.parquet")
-                if os.path.exists(vibro_path):
-                    data_path = vibro_path
-            expected_key = (None, tuple(selected_locations), selected_model)
-            if not os.path.exists(data_path):
-                MODEL_DATA_CACHE['df'] = None
-                MODEL_DATA_CACHE['metadata'] = metadata
-                MODEL_DATA_CACHE['key'] = None
-            else:
-                cols_to_load = ['x', 'y', 'location', 'microlocation', 'model_name', 'channel',
-                                'cluster_num', 'cluster_id', 'day_dt', 'start_hour_float',
-                                'file_name', 'clip_time', 'clip_duration', 'mp3_file', 'row_idx',
-                                'start_dt', 'time_of_day', 'recorder_type', 'wav_file']
-                with time_block("data_load_legacy", extra_info=f"model='{selected_model}', location={selected_locations}"):
-                    try:
-                        model_df = pd.read_parquet(
-                            data_path,
-                            filters=[
-                                [('model_name', '==', selected_model),
-                                 ('location', 'in', selected_locations)]
-                            ],
-                            columns=cols_to_load
-                        )
-                        model_df = read_data.process_loaded_model_dataframe(model_df)
-                        
-                        MODEL_DATA_CACHE['df'] = model_df
-                        metadata = extract_model_metadata(model_df)
-                        MODEL_DATA_CACHE['metadata'] = metadata
-                        MODEL_DATA_CACHE['key'] = expected_key
-                    except Exception as e:
-                        print(f"Error loading legacy data: {e}")
-                        MODEL_DATA_CACHE['df'] = None
-                        MODEL_DATA_CACHE['metadata'] = metadata
-                        MODEL_DATA_CACHE['key'] = None
+        key = dataset_key(selected_project, selected_model, selected_locations)
 
-        return time.time(), metadata
+        # Idempotency per browser (Phase 2.1b). `marker` identifies the initialisation this run is for.
+        marker = dataset_access.init_marker(url_init)
+        if marker is not None:
+            # A response of an OLDER attempt than the one this browser last loaded under is stale: never act on it.
+            if marker['attempt'] < dataset_access.recorded_attempt(current_metadata):
+                return dash.no_update, dash.no_update
+            # Re-run caused ONLY by the initialisation Store (duplicate ready, restart, new epoch) for the dataset this
+            # browser already holds and the shared cache still has: nothing to load and nothing to announce. A run
+            # caused by a dropdown behaves exactly as before.
+            if (_triggered_only_by('url-init.data', 'url-identity.data')
+                    and dataset_access.key_from_metadata(current_metadata) == key
+                    and dataset_access.is_resident(key)):
+                return dash.no_update, dash.no_update
+
+        with time_block("data_load_project", extra_info=f"proj='{selected_project}', loc={selected_locations}, model='{selected_model}'"):
+            try:
+                dataset = dataset_access.load_dataset(key)
+            except Exception as e:
+                print(f"Error loading model data: {e}")
+                dataset = None
+        if dataset is None:
+            return time.time(), metadata
+        out = {**dataset.metadata, 'key': dataset_access.key_to_payload(key)}
+        if marker is not None:
+            out['init'] = marker             # which initialisation this load was made under (stale-response guard)
+        return time.time(), out
 
     @app.callback(
         Output("download-csv", "data"),
@@ -759,7 +754,9 @@ def register_data_callbacks(app):
          State('merge-threshold', 'value'),
          State('clip-count-threshold', 'value'),
          State('microlocation-dropdown', 'value'),
-         State('recorder-type-dropdown', 'value')],
+         State('recorder-type-dropdown', 'value'),
+         State('derived-model-metadata', 'data'),
+         State('project-dropdown', 'value')],
         prevent_initial_call=True
     )
     def export_filtered_data_to_csv(n_clicks, selected_model, selected_location,
@@ -767,13 +764,14 @@ def register_data_callbacks(app):
                                      cluster_checkbox_values, cluster_checkbox_ids, selected_dates,
                                      hour_range, merge_on, merge_threshold,
                                      clip_count_threshold, selected_microlocations,
-                                     selected_recorders):
+                                     selected_recorders, dataset_metadata=None, selected_project=None):
         """Export filtered data (not sampled) to CSV."""
         if n_clicks == 0:
             return dash.no_update
 
-        # Get the raw data
-        dff_raw = MODEL_DATA_CACHE.get('df')
+        # The dataset THIS browser has loaded (never another user's), only if it matches the current selection.
+        dff_raw, _state = dataset_access.resolve_dataset(dataset_metadata, selected_project, selected_model,
+                                                         selected_location)
         if dff_raw is None or dff_raw.empty:
             return dash.no_update
 
@@ -834,14 +832,14 @@ def register_data_callbacks(app):
         if not name:
              return "Please enter a name.", dash.no_update, dash.no_update
         
-        if not MANUAL_LABELS_CACHE:
+        label_snapshot = labels_store.snapshot_labels()
+        if not label_snapshot:
              return "No labels to save.", dash.no_update, dash.no_update
             
         # Convert tuple keys to string keys for JSON serialization
         # Key format: (loc, micro, f_base, chan, sec)
         json_data = {}
-        for k in MANUAL_LABELS_CACHE:
-            v = MANUAL_LABELS_CACHE[k]
+        for k, v in label_snapshot.items():
             # k is tuple
             key_str = "||".join(str(x) for x in k)
             json_data[key_str] = v
@@ -882,24 +880,14 @@ def register_data_callbacks(app):
             # Let's check previous implementation: 
             # "MANUAL_LABELS_CACHE[(loc...)] = label" -> UpSert.
             
+            writes = []
             for k_str, label in data.items():
                 # Parse key
                 parts = k_str.split('||')
                 if len(parts) == 5:
-                    loc = parts[0]
-                    micro = parts[1]
-                    f_base = parts[2]
-                    chan = int(parts[3])
-                    sec = int(parts[4])
-                    
-                    # Store in cache
-                    MANUAL_LABELS_CACHE[(loc, micro, f_base, chan, sec)] = label
-                    count += 1
-                    try:
-                        with open('debug_label_writes.log', 'a', encoding='utf-8') as _log:
-                            _log.write(f"{time.time()}\tdata_load_file\t{(loc, micro, f_base, chan, sec)}\t{label}\n")
-                    except Exception:
-                        pass
+                    writes.append(((parts[0], parts[1], parts[2], int(parts[3]), int(parts[4])), label))
+            # Upsert the whole file as one locked, atomic group write on the shared store
+            count = labels_store.bulk_set_labels(writes, op='data_load_file')
 
             msg = f"Loaded '{name}' ({count} labels)."
             return msg
@@ -1094,6 +1082,6 @@ def register_data_callbacks(app):
         if not submit_n_clicks:
              return dash.no_update
         
-        MANUAL_LABELS_CACHE.clear()
+        labels_store.clear_labels()
 
         return "Labels Reset!"

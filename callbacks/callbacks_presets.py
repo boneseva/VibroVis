@@ -8,7 +8,8 @@ import dash
 from dash import Input, Output, State, ALL
 import pandas as pd
 
-from .callbacks_constants import MODEL_DATA_CACHE
+from callbacks import dataset_access
+from limits import DEFAULT_MAX_POINTS
 
 
 def register_preset_callbacks(app):
@@ -154,7 +155,7 @@ def register_preset_callbacks(app):
                 g('channels', []),
                 g('model'),
                 g('num_clusters'),
-                g('max_points', 10000),
+                g('max_points', DEFAULT_MAX_POINTS),
                 g('merge_switch', False),
                 g('merge_threshold', 20),
                 g('clip_count_threshold', 1),
@@ -188,7 +189,7 @@ def register_preset_callbacks(app):
         if isinstance(metadata, dict) and 'dates' in metadata:
             available_dates = metadata['dates']
         else:
-            dff = MODEL_DATA_CACHE.get('df')
+            dff = dataset_access.dataset_for(metadata)
             if dff is None or dff.empty: return []
 
             if 'day_dt_str' in dff.columns:

@@ -3,22 +3,48 @@ Shared constants used across callback modules.
 """
 import pandas as pd
 import diskcache as dc
+from dataset_cache import SessionFrameCache, DatasetCache
 import os
 import threading
 
-# Global data stores
+# Global data stores (the per-selection model frames live in DATASETS below, never in a singleton)
 initial_df = pd.DataFrame()
-MODEL_DATA_CACHE = {'df': None, 'metadata': None, 'key': None}
 MERGED_DATA_CACHE = {'df': None, 'key': None}
 
-# Server-side cache for filtered data (used by scatter plot and table)
-server_cache = {}
+# Shared, READ-ONLY model datasets keyed by (project, model, sorted locations): bounded LRU by bytes
+# (VIBROVIS_DATASET_CACHE_BYTES, default 4 GB), single-flight loading, load semaphore
+# (VIBROVIS_MAX_CONCURRENT_LOADS, default 1). Callbacks must never mutate a cached frame. See dataset_cache.py.
+DATASETS = DatasetCache()
+
+# Per-browser cache of the sampled/filtered frames (scatter, table, audio, histogram, labels). Each entry is addressed
+# by a random key held only by the owning browser; the cache is bounded (VIBROVIS_SERVER_CACHE_MAX_ENTRIES /
+# VIBROVIS_SERVER_CACHE_MAX_BYTES, default 256 entries / 1 GB). See dataset_cache.py.
+server_cache = SessionFrameCache()
+
+# Upper bound for the "Max points" control (the UI input and the server both enforce it); default stays 10,000.
+# (Both values come from limits.py, the single authoritative source; this module only re-exports them.)
+from limits import MAX_POINTS_LIMIT, DEFAULT_MAX_POINTS  # noqa: E402,F401
+
+
+def effective_max_points(value):
+    """Server-side "Max points": clamp to [1, MAX_POINTS_LIMIT]; empty/invalid falls back to the default."""
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_POINTS
+    if value <= 0:
+        return DEFAULT_MAX_POINTS
+    return min(value, MAX_POINTS_LIMIT)
 
 # Thread-safe manual labels cache using diskcache for Gunicorn production
 # This ensures all threads see the same state immediately
 cache_dir = os.environ.get('VIBROVIS_MANUAL_LABELS_DIR') or os.path.join(os.path.dirname(os.path.dirname(__file__)), 'cache', 'manual_labels')
 MANUAL_LABELS_CACHE = dc.Cache(cache_dir)
 MANUAL_LABELS_LOCK = threading.RLock()  # Reentrant lock for thread safety
+
+# Append-only audit log of manual-label writes. Relative to the working directory unless overridden
+# (tests point it at a temporary directory so the checkout's log is never touched).
+LABEL_WRITE_LOG = os.environ.get('VIBROVIS_LABEL_WRITE_LOG') or 'debug_label_writes.log'
 
 # Cluster color palette
 CLUSTER_COLORS = ['#4E79A7', '#F28E2B', '#E15759', '#76B7B2', '#EDC948', '#B07AA1', '#FF9DA7', '#A6A377', '#F2C894',

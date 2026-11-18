@@ -6,7 +6,7 @@ import dash
 from dash import Input, Output, State, html, dcc, ALL, MATCH
 import pandas as pd
 
-from .callbacks_constants import MODEL_DATA_CACHE
+from callbacks import dataset_access
 
 
 def generate_date_selector(df, selected_dates=None):
@@ -285,13 +285,14 @@ def register_date_selector_callbacks(app):
         Output('date-tree-container', 'children'),
         [Input('model-data-ready-signal', 'data')],
         [State('date-dropdown', 'data'),
-         State('last-preset-load-time', 'data')]
+         State('last-preset-load-time', 'data'),
+         State('derived-model-metadata', 'data')]
     )
-    def update_date_tree_dynamically(model_ready_signal, stored_dates, last_preset_time=None):
+    def update_date_tree_dynamically(model_ready_signal, stored_dates, last_preset_time=None, dataset_metadata=None):
         if not model_ready_signal:
             return html.Div("Select a location...")
 
-        dff = MODEL_DATA_CACHE.get('df')
+        dff = dataset_access.dataset_for(dataset_metadata)      # this browser's own dataset
         if dff is None or dff.empty:
             return html.Div("No data found.")
 
