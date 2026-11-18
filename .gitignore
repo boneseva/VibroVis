@@ -19,3 +19,6 @@
 /cache/*.parquet
 /labels/
 /presets/*.tmp
+
+# Runtime logs
+*.log
