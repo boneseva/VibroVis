@@ -485,6 +485,25 @@ body {
     z-index: 10;
 }
 
+/* Spectrogram loading wrapper: keep the plot filling the 300px audio/spectrogram area */
+.spectrogram-loading-parent {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+
+.spectrogram-loading-parent > #spectrogram-plot-container {
+    flex: 1;
+}
+
+#spectrogram-loading {
+    pointer-events: none;
+    z-index: 10;
+}
+
 .scatter-loading-badge {
     display: inline-flex;
     align-items: center;
