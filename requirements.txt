@@ -1,0 +1,17 @@
+dash_daq
+plotly
+
+pandas
+numpy
+scipy
+pyarrow
+
+librosa
+numba
+soundfile
+
+tqdm
+diskcache
+
+gunicorn
+flask-compress
