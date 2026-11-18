@@ -257,9 +257,23 @@ def create_layout(df):
 
                 html.Div([
                     html.Audio(id='audio-player', controls=True, autoPlay=False),
-                    html.Div(
-                        dcc.Graph(id='spectrogram-plot', config={'displayModeBar': False}, style={'height': '100%'}),
-                        id='spectrogram-plot-container'
+                    # Spinner while a clicked point's audio/spectrogram is being computed (slow on first click).
+                    dcc.Loading(
+                        id='spectrogram-loading',
+                        type='circle',
+                        show_initially=False,
+                        delay_show=500,  # ms; skip the spinner for fast loads
+                        parent_className='spectrogram-loading-parent',
+                        className='spectrogram-loading-spinner-container',
+                        overlay_style={'visibility': 'visible', 'opacity': 0.6},
+                        custom_spinner=html.Div([
+                            html.Div(className='scatter-loading-spinner'),
+                            html.Span("Loading spectrogram…", className='scatter-loading-text')
+                        ], className='scatter-loading-badge'),
+                        children=html.Div(
+                            dcc.Graph(id='spectrogram-plot', config={'displayModeBar': False}, style={'height': '100%'}),
+                            id='spectrogram-plot-container'
+                        ),
                     ),
                 ], id='audio-spectrogram-container')
 
