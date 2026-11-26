@@ -55,13 +55,10 @@
     return cover.length ? cover[0] : null;
   }
 
-  // `shown`: the thresholds the Explorer offers by default (what a person looking at the list expects); otherwise 0,
-  // so that the lookup sees every label.
-  function sourcesOf(meta, role, shown) {
-    return ((meta && meta.sources) || []).map(function (s) {
-      var thr = shown && s.kind === 'model' ? (s.default_threshold == null ? 0.1 : s.default_threshold) : 0;
-      return { id: s.id, role: role, threshold: thr };
-    });
+  // Threshold 0 on purpose: the lookup must see every label, and the list shown to the person uses the SAME filter, so
+  // it can never be empty when the lookup found something (the Explorer's own default thresholds can leave a day empty).
+  function sourcesOf(meta, role) {
+    return ((meta && meta.sources) || []).map(function (s) { return { id: s.id, role: role, threshold: 0 }; });
   }
 
   // The Explorer's own filter object (version 2), restricted to one deployment and day.
@@ -74,9 +71,10 @@
     return f;
   }
 
-  // What the Explorer shows around the recording / as the fallback list: this deployment and day, default thresholds.
+  // What the Explorer shows around the recording / as the fallback list: this deployment and day (same sources as the
+  // lookup, see sourcesOf), optionally one minute.
   function viewFilters(meta, dep, link, hours) {
-    return filters(meta, dep, link, { sources: sourcesOf(meta, 'include', true), hours: hours || { mode: 'all' } });
+    return filters(meta, dep, link, { hours: hours || { mode: 'all' } });
   }
 
   function minuteOf(x) { return x && x.local_minute; }
