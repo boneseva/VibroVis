@@ -137,6 +137,12 @@ body {
     flex-shrink: 0;
 }
 
+.explorer-link {
+    margin: 0 1rem;
+    white-space: nowrap;
+    font-size: 0.9rem;
+}
+
 #audio-spectrogram-container {
     flex-shrink: 0;
     height: 300px;

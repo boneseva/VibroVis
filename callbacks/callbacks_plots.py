@@ -15,6 +15,7 @@ import pandas as pd
 import uuid
 
 import utils
+import explorer_link
 import labels_store
 from callbacks import dataset_access
 from dataset_cache import cache_key_of
@@ -1292,6 +1293,7 @@ def register_plot_callbacks(app):
         store_data = {
             'audio_path': audio_path,
             'info': info,
+            'explorer_url': explorer_link.explorer_url(row['mp3_file'], start_time),
             '_rev': time.time_ns()
         }
 
@@ -1306,7 +1308,7 @@ def register_plot_callbacks(app):
             // No heavy network upload happens!
             
             if (!data) {
-                return ["", "", ""];
+                return ["", "", "", "", {display: "none"}];
             }
             
             // Extract just the light-weight strings
@@ -1314,12 +1316,16 @@ def register_plot_callbacks(app):
             var key = data._rev || "";
             var info = data.info || "";
             
-            return [audio_src, key, info];
+            var link = data.explorer_url || "";
+
+            return [audio_src, key, info, link, {display: link ? "inline" : "none"}];
         }
         """,
         [Output("audio-player", "src", allow_duplicate=True),
          Output('spectrogram-plot-container', 'key'),
-         Output('info', 'children', allow_duplicate=True)],
+         Output('info', 'children', allow_duplicate=True),
+         Output('explorer-link', 'href'),
+         Output('explorer-link', 'style')],
         Input('spectrogram-raw-data-store', 'data'),
         prevent_initial_call=True
     )

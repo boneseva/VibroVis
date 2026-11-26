@@ -20,6 +20,7 @@ from callbacks.callbacks_constants import CLUSTER_COLORS, server_cache
 from dataset_cache import cache_key_of
 
 import utils  # for load_audio_segment + compute_spectrogram
+import explorer_link  # deep link to the Citimon Explorer
 import numpy as np
 
 # ---------------------------------------------------------------------------
@@ -554,6 +555,7 @@ def register_table_callbacks(app):
 
             store_data = {
                 "audio_path": audio_path, "info": info,
+                "explorer_url": explorer_link.explorer_url(mp3_file, start_time),
                 "_rev": time.time_ns(),
             }
             return store_data, fig, table_click_data, ""
