@@ -137,17 +137,10 @@ body {
     flex-shrink: 0;
 }
 
-/* "Open in Explorer": an .app-button (same look as Autoplay) that sits next to it, pushed to the right. */
-a.explorer-link,
-a.explorer-link:visited {
+/* "Open in Explorer": a link wrapping an .app-button (identical to Autoplay), pushed right next to it. */
+a.explorer-link {
     margin: 0 0.5rem 0 auto;
-    white-space: nowrap;
     text-decoration: none;
-    color: buttontext;
-    /* a link inherits the page font; a <button> uses the browser's control font: match the Autoplay button */
-    font-family: Arial, Helvetica, sans-serif;
-    font-size: 13.3333px;
-    line-height: normal;
 }
 
 #audio-spectrogram-container {

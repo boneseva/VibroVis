@@ -277,8 +277,10 @@ def create_layout(df):
                     html.Div(id="info"),
                     # Deep link to this clip's recording in the Citimon Explorer; shown by the clientside callback
                     # only when the clicked clip has one (see explorer_link.py).
-                    html.A("Open in Explorer ↗", id='explorer-link', href='', target='_blank',
-                           rel='noopener', className='app-button explorer-link', style={'display': 'none'},
+                    # The face is a real <button> with the same class as Autoplay, so both are exactly the same size.
+                    html.A(html.Button("Open in Explorer ↗", className='app-button', n_clicks=0),
+                           id='explorer-link', href='', target='_blank', rel='noopener', className='explorer-link',
+                           style={'display': 'none'},
                            title="Open this recording at this time in the Citimon Explorer (new tab)"),
                     html.Button(
                         "Autoplay: OFF",
