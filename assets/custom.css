@@ -143,7 +143,11 @@ a.explorer-link:visited {
     margin: 0 0.5rem 0 auto;
     white-space: nowrap;
     text-decoration: none;
-    color: inherit;
+    color: buttontext;
+    /* a link inherits the page font; a <button> uses the browser's control font: match the Autoplay button */
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 13.3333px;
+    line-height: normal;
 }
 
 #audio-spectrogram-container {
