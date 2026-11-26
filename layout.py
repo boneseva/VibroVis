@@ -6,6 +6,7 @@ import dash_daq as daq
 from dash import html, dcc
 import pandas as pd
 
+import explorer_link
 from layout_raven import raven_color_controls, raven_import_launcher, raven_import_modal, raven_point_info
 
 
@@ -180,6 +181,16 @@ def create_layout(df):
                     dcc.Store(id='main-view-tabs', data='scatter-tab'),
                     html.Button("Share view", id='share-view-btn', n_clicks=0, className='view-tab-btn',
                                 title="Copy a link that reproduces this view"),
+                    html.A(
+                        "Explorer ↗",
+                        id='title-explorer-link',
+                        href=explorer_link.explorer_home_url(),
+                        target='_blank',
+                        rel='noopener',
+                        className='view-tab-btn view-tab-link',
+                        title="Open Citimon Explorer (ranavis.musiclab.si/explorer)",
+                        style={'display': 'none'} if not explorer_link.explorer_home_url() else None
+                    ),
                     html.Button(">", id="toggle-filters-btn", n_clicks=0, className="panel-toggle-button"),
                 ], id='view-tab-bar'),
 

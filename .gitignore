@@ -12,6 +12,8 @@
 !/tests/test_raven_citimon_delivery.py
 !/tests/test_raven_labels.py
 !/tests/test_citimon_hierarchy.py
+!/tests/test_explorer_link.py
+!/tests/js/
 !/tests/fixtures/
 /tests/fixtures/*
 !/tests/fixtures/raven_synthetic/

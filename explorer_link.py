@@ -22,6 +22,7 @@ from urllib.parse import quote
 
 EXPLORER_URL_ENV = "VIBROVIS_EXPLORER_URL"
 DEFAULT_BASE = "/explorer"
+EXPLORER_HOME_DEFAULT = "https://ranavis.musiclab.si/explorer"
 DATASET = "citimon"
 # Same rule as explorer/datasets/citimon.py FOLDER (year_month-recorder, optional -N suffix of renamed folders).
 _FOLDER = re.compile(r"^\d{4}[-_]\d{2}-[A-Za-z]\d+(?:-\d)?$")
@@ -32,6 +33,16 @@ def explorer_base(environ=None):
     """Explorer base URL without a trailing slash (default ``/explorer``), or ``""`` when switched off (set empty)."""
     value = (environ if environ is not None else os.environ).get(EXPLORER_URL_ENV, DEFAULT_BASE)
     return str(value).strip().rstrip("/")
+
+
+def explorer_home_url(environ=None):
+    """Citimon Explorer home URL for the title bar link (default ``https://ranavis.musiclab.si/explorer``), or ``""`` when switched off."""
+    base = explorer_base(environ)
+    if not base:
+        return ""
+    if base.startswith("http://") or base.startswith("https://"):
+        return base
+    return EXPLORER_HOME_DEFAULT
 
 
 def recording_path(mp3_file):

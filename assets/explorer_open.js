@@ -10,8 +10,8 @@
  *   3. GET  api/recording/<any id>    -> its "day" list holds EVERY recording of the day with its id, so unlabelled
  *                                        recordings resolve too (when anything is labelled that day);
  *   4. otherwise the Explorer's passage list filtered to that deployment, day and minute.
- * The recording page also gets the filter "this deployment, this day" (`f`), so going back to the passage list shows
- * the same recorder and day instead of the last search.
+ * The recording page is opened clean as <base>/#/recording/<id>?t=<seconds> without filter overrides (preserving the
+ * user's Explorer selection); the fallback passage list receives the deployment/day filter (`f`).
  * Not logged in to the Explorer (401): its login page opens; log in there and click the link again.
  * Browser: the script is a classic file (Dash loads assets/*.js); Node tests use module.exports.
  */
@@ -103,8 +103,8 @@
   }
 
   function targetUrl(link, result) {
+    if (result && result.id != null) return link.base + '/#/recording/' + result.id + '?t=' + link.t.toFixed(2);
     var f = result && result.filters ? encodeURIComponent(JSON.stringify(result.filters)) : '';
-    if (result && result.id != null) return link.base + '/#/recording/' + result.id + '?t=' + link.t.toFixed(2) + (f ? '&f=' + f : '');
     if (f) return link.base + '/#/passages?f=' + f;
     return link.base + '/';
   }

@@ -82,6 +82,22 @@ body {
     font-weight: 600;
 }
 
+/* "Explorer ↗" link in the tab/title bar, matching view-tab-btn styling */
+a.view-tab-link,
+a.view-tab-link:visited {
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    color: #666;
+    line-height: normal;
+}
+
+a.view-tab-link:hover {
+    color: #2a3f5f;
+    border-bottom-color: #2a3f5f;
+    text-decoration: none;
+}
+
 /* === HORIZONTAL LAYOUT (Main Panels) === */
 #scatter-audio-container {
     flex: 1;
