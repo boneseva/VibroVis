@@ -1318,7 +1318,7 @@ def register_plot_callbacks(app):
             
             var link = data.explorer_url || "";
 
-            return [audio_src, key, info, link, {display: link ? "inline" : "none"}];
+            return [audio_src, key, info, link, {display: link ? "inline-block" : "none"}];
         }
         """,
         [Output("audio-player", "src", allow_duplicate=True),

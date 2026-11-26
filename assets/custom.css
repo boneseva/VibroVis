@@ -137,10 +137,13 @@ body {
     flex-shrink: 0;
 }
 
-.explorer-link {
-    margin: 0 1rem;
+/* "Open in Explorer": an .app-button (same look as Autoplay) that sits next to it, pushed to the right. */
+a.explorer-link,
+a.explorer-link:visited {
+    margin: 0 0.5rem 0 auto;
     white-space: nowrap;
-    font-size: 0.9rem;
+    text-decoration: none;
+    color: inherit;
 }
 
 #audio-spectrogram-container {
