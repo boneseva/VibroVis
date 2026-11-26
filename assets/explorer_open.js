@@ -10,6 +10,8 @@
  *   3. GET  api/recording/<any id>    -> its "day" list holds EVERY recording of the day with its id, so unlabelled
  *                                        recordings resolve too (when anything is labelled that day);
  *   4. otherwise the Explorer's passage list filtered to that deployment, day and minute.
+ * The recording page also gets the filter "this deployment, this day" (`f`), so going back to the passage list shows
+ * the same recorder and day instead of the last search.
  * Not logged in to the Explorer (401): its login page opens; log in there and click the link again.
  * Browser: the script is a classic file (Dash loads assets/*.js); Node tests use module.exports.
  */
@@ -53,8 +55,13 @@
     return cover.length ? cover[0] : null;
   }
 
-  function sourcesOf(meta, role) {
-    return ((meta && meta.sources) || []).map(function (s) { return { id: s.id, role: role, threshold: 0 }; });
+  // `shown`: the thresholds the Explorer offers by default (what a person looking at the list expects); otherwise 0,
+  // so that the lookup sees every label.
+  function sourcesOf(meta, role, shown) {
+    return ((meta && meta.sources) || []).map(function (s) {
+      var thr = shown && s.kind === 'model' ? (s.default_threshold == null ? 0.1 : s.default_threshold) : 0;
+      return { id: s.id, role: role, threshold: thr };
+    });
   }
 
   // The Explorer's own filter object (version 2), restricted to one deployment and day.
@@ -65,6 +72,11 @@
     };
     for (var k in extra || {}) f[k] = extra[k];
     return f;
+  }
+
+  // What the Explorer shows around the recording / as the fallback list: this deployment and day, default thresholds.
+  function viewFilters(meta, dep, link, hours) {
+    return filters(meta, dep, link, { sources: sourcesOf(meta, 'include', true), hours: hours || { mode: 'all' } });
   }
 
   function minuteOf(x) { return x && x.local_minute; }
@@ -80,20 +92,22 @@
       return api.post(base + '/api/passages', body).then(function (res) {
         var list = (res && res.passages) || [];
         var hit = list.filter(function (p) { return minuteOf(p) === link.minute; })[0];
-        if (hit) return { id: hit.recording_id };
-        if (!list.length) return { filters: filters(meta, dep, link, { hours: { mode: 'range', from: link.minute, to: link.minute + 1 } }) };
+        var minuteOnly = { mode: 'range', from: link.minute, to: link.minute + 1 };
+        if (hit) return { id: hit.recording_id, filters: viewFilters(meta, dep, link) };
+        if (!list.length) return { filters: viewFilters(meta, dep, link, minuteOnly) };
         return api.get(base + '/api/recording/' + list[0].recording_id + '?sources=&thresholds=&merge=0').then(function (r) {
           var day = ((r && r.day) || []).filter(function (x) { return minuteOf(x) === link.minute; })[0];
-          if (day) return { id: day.id };
-          return { filters: filters(meta, dep, link, { hours: { mode: 'range', from: link.minute, to: link.minute + 1 } }) };
+          if (day) return { id: day.id, filters: viewFilters(meta, dep, link) };
+          return { filters: viewFilters(meta, dep, link, minuteOnly) };
         });
       });
     });
   }
 
   function targetUrl(link, result) {
-    if (result && result.id != null) return link.base + '/#/recording/' + result.id + '?t=' + link.t.toFixed(2);
-    if (result && result.filters) return link.base + '/#/passages?f=' + encodeURIComponent(JSON.stringify(result.filters));
+    var f = result && result.filters ? encodeURIComponent(JSON.stringify(result.filters)) : '';
+    if (result && result.id != null) return link.base + '/#/recording/' + result.id + '?t=' + link.t.toFixed(2) + (f ? '&f=' + f : '');
+    if (f) return link.base + '/#/passages?f=' + f;
     return link.base + '/';
   }
 
