@@ -179,8 +179,6 @@ def create_layout(df):
                         className='view-tab-btn'
                     ),
                     dcc.Store(id='main-view-tabs', data='scatter-tab'),
-                    html.Button("Share view", id='share-view-btn', n_clicks=0, className='view-tab-btn',
-                                title="Copy a link that reproduces this view"),
                     html.A(
                         "Explorer ↗",
                         id='title-explorer-link',
