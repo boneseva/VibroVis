@@ -143,6 +143,12 @@ a.explorer-link {
     text-decoration: none;
 }
 
+/* The ↗ is not in Arial; its fallback font would make this button 2px taller than Autoplay. Pin the line height. */
+a.explorer-link .app-button {
+    line-height: 15px;
+    display: block;
+}
+
 #audio-spectrogram-container {
     flex-shrink: 0;
     height: 300px;
